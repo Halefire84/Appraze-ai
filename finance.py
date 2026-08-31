@@ -82,3 +82,14 @@ def max_bid_after_premium(ceiling_80, premium_pct):
     premium is added at purchase. Premium can never make this divide by zero
     since (1 + premium_pct/100) is always >= 1 for premium_pct >= 0."""
     return ceiling_80 / (1 + premium_pct / 100)
+
+
+def sales_tax(subtotal, tax_rate_pct):
+    """POS checkout math: tax amount and grand total on a cart subtotal.
+    South Carolina's base state rate is 6% (verified 2026); local county
+    add-ons can push the combined rate up to 9% depending on delivery
+    address, so this is deliberately a plain input, not a hardcoded constant.
+    Returns (tax_amount, total)."""
+    tax_amount = subtotal * (tax_rate_pct / 100)
+    total = subtotal + tax_amount
+    return tax_amount, total
