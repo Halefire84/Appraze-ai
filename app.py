@@ -9,6 +9,7 @@ Run locally (optional, no terminal needed for deployment - see DEPLOY.md):
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime
 import io
@@ -22,6 +23,7 @@ from finance import (
     compute_verdict, deal_roi, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, sales_tax, GOLD_PURITY, SILVER_PURITY,
 )
+import sheets
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -30,7 +32,79 @@ st.set_page_config(
     page_title="Appraze",
     page_icon="🪙",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto" (not "expanded") so phones/narrow tablets - this gets used live
+    # at auctions and at a POS station - land on the dashboard instead of a
+    # sidebar that covers almost the whole screen on first load.
+    initial_sidebar_state="auto",
+)
+
+# --------------------------------------------------------------------------
+# PWA MANIFEST + ICONS ("Install as app" - Chrome/Edge on desktop incl.
+# Windows 11, and "Add to Home Screen" from Safari on iOS)
+# --------------------------------------------------------------------------
+# Streamlit doesn't expose an API to add tags to the page <head>, so this
+# runs a tiny script inside a components.v1.html iframe. That iframe is
+# same-origin with the parent page (it's rendered via srcdoc, which inherits
+# the parent's origin), so it can reach window.parent.document.head - a
+# well-known pattern for injecting things Streamlit has no API for (a PWA
+# manifest and touch icons, here). Guarded so a rerun doesn't add duplicates.
+# Requires enableStaticServing=true in .streamlit/config.toml, which serves
+# ./static/* at <app-url>/app/static/* - see static/manifest.json.
+#
+# The apple-mobile-web-app-* tags exist because iOS Safari's manifest.json
+# support is old and only partial - those tags are what actually control
+# standalone (no browser chrome) mode and the home-screen title there, not
+# the manifest fields that work everywhere else. Every iOS browser (Chrome
+# on iOS included, since Apple requires all iOS browsers to run on WebKit)
+# reads the same tags, but only Safari's Share -> Add to Home Screen sheet
+# produces an actual standalone-launching icon - Chrome on iOS doesn't.
+components.html(
+    """
+    <script>
+    (function() {
+        const doc = window.parent.document;
+        if (doc.querySelector('link[rel="manifest"]')) return;
+
+        const manifest = doc.createElement('link');
+        manifest.rel = 'manifest';
+        manifest.href = 'app/static/manifest.json';
+        doc.head.appendChild(manifest);
+
+        const icon = doc.createElement('link');
+        icon.rel = 'icon';
+        icon.type = 'image/png';
+        icon.sizes = '192x192';
+        icon.href = 'app/static/icon-192.png';
+        doc.head.appendChild(icon);
+
+        const appleIcon = doc.createElement('link');
+        appleIcon.rel = 'apple-touch-icon';
+        appleIcon.href = 'app/static/icon-192.png';
+        doc.head.appendChild(appleIcon);
+
+        const themeColor = doc.createElement('meta');
+        themeColor.name = 'theme-color';
+        themeColor.content = '#0b0f14';
+        doc.head.appendChild(themeColor);
+
+        const appleCapable = doc.createElement('meta');
+        appleCapable.name = 'apple-mobile-web-app-capable';
+        appleCapable.content = 'yes';
+        doc.head.appendChild(appleCapable);
+
+        const appleTitle = doc.createElement('meta');
+        appleTitle.name = 'apple-mobile-web-app-title';
+        appleTitle.content = 'Appraze';
+        doc.head.appendChild(appleTitle);
+
+        const appleStatusBar = doc.createElement('meta');
+        appleStatusBar.name = 'apple-mobile-web-app-status-bar-style';
+        appleStatusBar.content = 'black-translucent';
+        doc.head.appendChild(appleStatusBar);
+    })();
+    </script>
+    """,
+    height=0,
 )
 
 DARK_CSS = """
@@ -83,9 +157,6 @@ DARK_CSS = """
     .badge-ceiling { background: #142a37; color: #38bdf8; border: 1px solid #38bdf840;}
     .badge-borderline { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
     .badge-passverdict { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-    .badge-hot { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-good { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-pass { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
 
     /* buttons */
     .stButton>button {
@@ -111,22 +182,42 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 # --------------------------------------------------------------------------
 # LOGIN GATE
 # --------------------------------------------------------------------------
-# Single-user login. This template gets customized per customer, so there's
-# just one password gate here rather than multiple named accounts.
+# Two modes, both password-only (no usernames):
 #
-# The password lives in Streamlit's Secrets manager (Settings -> Secrets on
-# Streamlit Community Cloud), never hardcoded here. Set this secret:
+# Single-user (default): one shared password gates one shared workspace.
+# Set this secret:
 #   APP_PASSWORD = "whatever you pick"
-# If it isn't set yet, the app falls back to a placeholder so it still runs
-# on first deploy - set the real one in Secrets before sharing the link.
+#
+# Multi-tester (for handing this out to a few people to test in isolation):
+# set APP_PASSWORDS instead - each entry is its own password mapped to its
+# own workspace name, so each person gets their own separate deals /
+# inventory / suppliers / customers / sales log, invisible to the others.
+# When set, this takes priority over APP_PASSWORD.
+#   [APP_PASSWORDS]
+#   a = "password1"
+#   b = "password2"
+#   c = "password3"
+#   d = "password4"
+#
+# Passwords live in Streamlit's Secrets manager (Settings -> Secrets on
+# Streamlit Community Cloud), never hardcoded here. If neither secret is
+# set yet, the app falls back to a placeholder so it still runs on first
+# deploy - set the real one(s) in Secrets before sharing the link.
 
-WORKSPACE = "business"
-
-def _get_password() -> str:
+def _get_password_workspace_map() -> dict:
+    """Returns {password: workspace_name}. Prefers APP_PASSWORDS (multiple
+    isolated testers) over the single-workspace APP_PASSWORD fallback."""
     try:
-        return st.secrets.get("APP_PASSWORD", "changeme")
+        multi = st.secrets.get("APP_PASSWORDS", None)
     except Exception:
-        return "changeme"
+        multi = None
+    if multi:
+        return {password: workspace for workspace, password in dict(multi).items()}
+    try:
+        single = st.secrets.get("APP_PASSWORD", "changeme")
+    except Exception:
+        single = "changeme"
+    return {single: "business"}
 
 def login_screen():
     st.markdown(
@@ -142,14 +233,19 @@ def login_screen():
     with col2:
         st.write("")
         pwd = st.text_input("Password", type="password", key="login_pwd")
-        expected = _get_password()
+        password_workspace_map = _get_password_workspace_map()
 
-        if st.button("Sign in", use_container_width=True):
-            if secrets.compare_digest(pwd, expected):
+        if st.button("Sign in", width="stretch"):
+            matched_workspace = next(
+                (ws for valid_pwd, ws in password_workspace_map.items() if secrets.compare_digest(pwd, valid_pwd)),
+                None,
+            )
+            if matched_workspace:
                 st.session_state.authed = True
+                st.session_state.workspace = matched_workspace
                 st.rerun()
             else:
-                st.error("Wrong password. Set or find the current one under Settings \u2192 Secrets \u2192 APP_PASSWORD.")
+                st.error("Wrong password. Set or find the current one(s) under Settings \u2192 Secrets \u2192 APP_PASSWORD or APP_PASSWORDS.")
 
 if "authed" not in st.session_state:
     st.session_state.authed = False
@@ -157,6 +253,8 @@ if "authed" not in st.session_state:
 if not st.session_state.authed:
     login_screen()
     st.stop()
+
+WORKSPACE = st.session_state.workspace
 
 DISPLAY_NAME = "Owner"
 
@@ -171,7 +269,13 @@ if "deals_by_ws" not in st.session_state:
     st.session_state.deals_by_ws = {}
 
 if WORKSPACE not in st.session_state.deals_by_ws:
-    if WORKSPACE == "business":
+    _sheet_deals = sheets.load_df("deals", WORKSPACE)
+    if _sheet_deals is not None:
+        # Sheets is configured - it's the source of truth, so never seed the
+        # dev sample row into someone's real persisted business data.
+        st.session_state.deals_by_ws[WORKSPACE] = _sheet_deals
+        sheets.mark_synced("deals", _sheet_deals, WORKSPACE)
+    elif WORKSPACE == "business":
         st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame([
             {
                 "Date Added": date.today().isoformat(),
@@ -216,7 +320,11 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 with st.sidebar:
     st.markdown("### 🪙 Appraze")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
-    if st.button("Sign out", use_container_width=True):
+    if sheets.is_configured():
+        st.caption("\u2705 Synced to Google Sheets \u2014 data persists across sessions.")
+    else:
+        st.caption("\u26a0\ufe0f Not persisted \u2014 data lives only in this browser session and resets on reload. Add GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Secrets to enable saving.")
+    if st.button("Sign out", width="stretch"):
         st.session_state.authed = False
         st.rerun()
 
@@ -233,7 +341,7 @@ with st.sidebar:
             resale = st.number_input("Est. resale value ($)", min_value=0.0, step=1.0, format="%.2f")
         status = st.selectbox("Status", STATUSES, index=0)
         notes = st.text_area("Notes", height=68, placeholder="Karat, weight, condition, auction end time...")
-        submitted = st.form_submit_button("Add to dashboard", use_container_width=True)
+        submitted = st.form_submit_button("Add to dashboard", width="stretch")
 
         if submitted:
             if not item.strip():
@@ -253,6 +361,7 @@ with st.sidebar:
                     [st.session_state.deals, new_row], ignore_index=True
                 )
                 st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+                sheets.sync_table("deals", st.session_state.deals, WORKSPACE)
                 st.session_state.editor_key += 1
                 st.success(f"Added: {item.strip()}")
 
@@ -273,6 +382,7 @@ with st.sidebar:
                     [st.session_state.deals, imported], ignore_index=True
                 )
                 st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+                sheets.sync_table("deals", st.session_state.deals, WORKSPACE)
                 st.success(f"Imported {len(imported)} rows.")
             else:
                 st.error(f"CSV must include columns: {', '.join(required)}")
@@ -286,11 +396,57 @@ with st.sidebar:
         data=csv_buffer.getvalue(),
         file_name=f"cooper_river_deals_{date.today().isoformat()}.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
     )
 
     st.markdown("---")
-    st.caption("Note: this app resets its data if the free hosting instance restarts. Download a CSV backup regularly, then re-import it next session.")
+    if sheets.is_configured():
+        st.caption("Data is saved to Google Sheets on every change, so it survives a free hosting instance restarting. The CSV export above is still a good manual backup.")
+    else:
+        st.caption("Note: this app resets its data if the free hosting instance restarts. Download a CSV backup regularly, then re-import it next session.")
+
+    st.markdown("---")
+    st.markdown("#### 🆘 Support")
+    try:
+        support_email = st.secrets.get("SUPPORT_EMAIL", None)
+    except Exception:
+        support_email = None
+    if support_email:
+        st.caption(f"Found a bug or have feedback? Email {support_email}.")
+    else:
+        st.caption("Found a bug or have feedback? Add a `SUPPORT_EMAIL` secret in Settings → Secrets so this shows a real contact address.")
+
+    with st.expander("Terms of Service & Privacy Policy"):
+        st.caption(
+            "This is a starting-point template, not legal advice — have a lawyer review it "
+            "before relying on it for a live business."
+        )
+        st.markdown(
+            """
+**Terms of Service (template)**
+
+- This app is provided as-is for Cooper River Trading Co.'s internal use in tracking deals,
+  inventory, suppliers, customers, and sales.
+- Card payments are processed entirely by Stripe via Payment Links — this app never receives,
+  stores, or transmits raw card numbers.
+- The AI Analyzer sends the photo and/or description you submit to Anthropic's API to generate
+  an identification and value estimate — only what you explicitly submit on that tab is sent,
+  and only when you click Analyze.
+- Estimated values, verdicts, and suggested prices are informational only. You are responsible
+  for your own purchase, pricing, and sale decisions.
+
+**Privacy Policy (template)**
+
+- Data entered in this app (deals, inventory, suppliers, customers, sales log) is stored either
+  in this browser session only, or — when Google Sheets persistence is configured — in a Google
+  Sheet you control, accessed via a service account you set up.
+- This app does not sell or share your data with third parties, other than the services you've
+  explicitly configured (Stripe for payments, Anthropic for the AI Analyzer, Google for
+  persistence) — each only receives the specific data needed for that feature to work.
+- Supplier and customer contact info (name, phone, email) is stored only for your own
+  recordkeeping and is never used for anything beyond that.
+            """
+        )
 
 
 # --------------------------------------------------------------------------
@@ -328,10 +484,90 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
-    "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
+tab_inv_home, tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
+    "🧾  Invoices", "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "👤  Customers", "💳  Point of Sale", "🔍  AI Analyzer",
 ])
+
+# ==========================================================================
+# INVOICES TAB (home / landing tab - opens first)
+# ==========================================================================
+with tab_inv_home:
+    st.markdown("#### Invoices")
+    st.caption("Every completed sale from the Point of Sale tab lands here automatically \u2014 this is your home view for what's been invoiced, paid, and still awaiting payment.")
+
+    # Same idempotent init guards used on the Point of Sale tab below - safe
+    # to repeat since Invoices can render before a POS sale has ever run.
+    if "sales_log_by_ws" not in st.session_state:
+        st.session_state.sales_log_by_ws = {}
+    if WORKSPACE not in st.session_state.sales_log_by_ws:
+        _sheet_sales = sheets.load_df("sales_log", WORKSPACE)
+        if _sheet_sales is not None:
+            st.session_state.sales_log_by_ws[WORKSPACE] = _sheet_sales.to_dict("records")
+            sheets.mark_synced("sales_log", _sheet_sales, WORKSPACE)
+        else:
+            st.session_state.sales_log_by_ws[WORKSPACE] = []
+
+    inv_log = st.session_state.sales_log_by_ws[WORKSPACE]
+
+    if not inv_log:
+        st.info("No invoices yet. Ring up a sale on the Point of Sale tab and it'll show up here.")
+    else:
+        inv_log_df = pd.DataFrame(inv_log)
+        total_invoiced = float(inv_log_df["Total"].sum())
+        paid_count = int((inv_log_df["Status"] == "Paid (Cash)").sum())
+        awaiting_count = int((inv_log_df["Status"] == "Awaiting Payment").sum())
+        today_str = date.today().isoformat()
+        today_total = float(inv_log_df.loc[inv_log_df["Date"].str.startswith(today_str), "Total"].sum())
+
+        h1, h2, h3, h4 = st.columns(4)
+        with h1:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Total Invoiced</div>
+                <div class="kpi-value">${total_invoiced:,.2f}</div></div>""", unsafe_allow_html=True)
+        with h2:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Today's Invoiced</div>
+                <div class="kpi-value">${today_total:,.2f}</div></div>""", unsafe_allow_html=True)
+        with h3:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Paid (Cash)</div>
+                <div class="kpi-value">{paid_count}</div></div>""", unsafe_allow_html=True)
+        with h4:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Awaiting Payment</div>
+                <div class="kpi-value">{awaiting_count}</div></div>""", unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("#### All Invoices")
+        fcol1, fcol2 = st.columns(2)
+        with fcol1:
+            home_method_filter = st.selectbox("Filter by payment method", ["All", "Card", "Cash"], key="home_log_method_filter")
+        with fcol2:
+            home_date_filter = st.text_input("Filter by date (YYYY-MM-DD, optional)", key="home_log_date_filter")
+
+        home_filtered_log = inv_log_df.copy()
+        if home_method_filter != "All":
+            home_filtered_log = home_filtered_log[home_filtered_log["Payment Method"] == home_method_filter]
+        if home_date_filter.strip():
+            home_filtered_log = home_filtered_log[home_filtered_log["Date"].str.startswith(home_date_filter.strip())]
+
+        st.dataframe(
+            home_filtered_log,
+            width="stretch",
+            column_config={
+                "Subtotal": st.column_config.NumberColumn(format="$%.2f"),
+                "Tax": st.column_config.NumberColumn(format="$%.2f"),
+                "Total": st.column_config.NumberColumn(format="$%.2f"),
+                "Link": st.column_config.LinkColumn(),
+            },
+        )
+        st.markdown(f"**Running total ({len(home_filtered_log)} invoice{'s' if len(home_filtered_log) != 1 else ''}): ${home_filtered_log['Total'].sum():,.2f}**")
+
+        home_log_csv_buffer = io.StringIO()
+        inv_log_df.to_csv(home_log_csv_buffer, index=False)
+        st.download_button(
+            "Download all Invoices as CSV",
+            data=home_log_csv_buffer.getvalue(),
+            file_name=f"appraze_invoices_{date.today().isoformat()}.csv",
+            mime="text/csv",
+        )
 
 with tab_dash:
     st.markdown("#### Filters")
@@ -365,7 +601,7 @@ with tab_dash:
     edited = st.data_editor(
         filtered.drop(columns=["Gross Profit", "ROI %"]),
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         height=420,
         column_config={
             "Cost": st.column_config.NumberColumn(format="$%.2f"),
@@ -385,6 +621,7 @@ with tab_dash:
             extra_rows = edited.iloc[len(filtered):]
             st.session_state.deals = pd.concat([st.session_state.deals, extra_rows], ignore_index=True)
         st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+        sheets.sync_table("deals", st.session_state.deals, WORKSPACE)
 
     st.markdown("---")
     st.markdown("#### Quick profit view per deal (30/70 · 50/50)")
@@ -396,7 +633,7 @@ with tab_dash:
         st.dataframe(
             quick[["Item", "Platform", "Cost", "Est. Resale Value", "Gross Profit",
                    "ROI %", "Verdict", "30/70 (Cooper River share @70%)", "50/50 (each share)"]],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Cost": st.column_config.NumberColumn(format="$%.2f"),
                 "Est. Resale Value": st.column_config.NumberColumn(format="$%.2f"),
@@ -510,17 +747,80 @@ with tab_inv:
     if "inventory_by_ws" not in st.session_state:
         st.session_state.inventory_by_ws = {}
     if WORKSPACE not in st.session_state.inventory_by_ws:
-        st.session_state.inventory_by_ws[WORKSPACE] = pd.DataFrame([
-            {"Item Name": "Sample: Vintage Camera", "Category": "Collectibles", "Cost Basis": 40.0, "List Price": 120.0,
-             "Status": "Available", "Description": "Edit or delete me", "Notes": "Edit or delete me"},
-        ] if WORKSPACE == "business" else [], columns=["Item Name", "Category", "Cost Basis", "List Price", "Status", "Description", "Notes"])
+        _sheet_inv = sheets.load_df("inventory", WORKSPACE)
+        if _sheet_inv is not None:
+            st.session_state.inventory_by_ws[WORKSPACE] = _sheet_inv
+            sheets.mark_synced("inventory", _sheet_inv, WORKSPACE)
+        else:
+            st.session_state.inventory_by_ws[WORKSPACE] = pd.DataFrame([
+                {"Item Name": "Sample: Vintage Camera", "Category": "Collectibles", "Cost Basis": 40.0, "List Price": 120.0,
+                 "Status": "Available", "Description": "Edit or delete me", "Notes": "Edit or delete me"},
+            ] if WORKSPACE == "business" else [], columns=["Item Name", "Category", "Cost Basis", "List Price", "Status", "Description", "Notes"])
 
     # Backward-compat: older sessions/rows created before these columns existed
-    for _col, _default in [("Status", "Available"), ("Category", "Other"), ("Description", "")]:
+    for _col, _default in [("Status", "Available"), ("Category", "Other"), ("Description", ""), ("Barcode", "")]:
         if _col not in st.session_state.inventory_by_ws[WORKSPACE].columns:
             st.session_state.inventory_by_ws[WORKSPACE][_col] = _default
         st.session_state.inventory_by_ws[WORKSPACE][_col] = st.session_state.inventory_by_ws[WORKSPACE][_col].fillna(_default)
 
+    st.markdown("#### Scan Barcode")
+    st.caption(
+        "Works with any USB or Bluetooth barcode scanner \u2014 they act like a keyboard, so just click into "
+        "the box below and scan. Matches an existing item instantly, or offers to add it as new."
+    )
+    with st.form("barcode_scan_form", clear_on_submit=True):
+        bcol1, bcol2 = st.columns([3, 1])
+        with bcol1:
+            scanned_code = st.text_input("Scan or type barcode", key="barcode_scan_input", label_visibility="collapsed", placeholder="Scan or type barcode\u2026")
+        with bcol2:
+            scan_submitted = st.form_submit_button("Look up", width="stretch")
+
+    if scan_submitted:
+        if not scanned_code.strip():
+            st.warning("Scan or type a barcode first.")
+        else:
+            st.session_state.last_scanned_barcode = scanned_code.strip()
+
+    if st.session_state.get("last_scanned_barcode"):
+        code = st.session_state.last_scanned_barcode
+        live_inv = st.session_state.inventory_by_ws[WORKSPACE]
+        match = live_inv[live_inv["Barcode"].astype(str) == code]
+        if len(match):
+            row = match.iloc[0]
+            st.success(f"Found: **{row['Item Name']}** \u2014 {row['Category']} \u00b7 Cost ${float(row['Cost Basis']):,.2f} \u00b7 List ${float(row['List Price']):,.2f} \u00b7 {row['Status']}")
+            if st.button("Clear scan", key="clear_scan_found"):
+                st.session_state.last_scanned_barcode = None
+                st.rerun()
+        else:
+            st.info(f"No item found with barcode `{code}`. Add it as a new item:")
+            with st.form("barcode_new_item_form"):
+                nb1, nb2 = st.columns(2)
+                with nb1:
+                    new_barcode_name = st.text_input("Item Name", key="new_barcode_item_name")
+                    new_barcode_cost = st.number_input("Cost Basis ($)", min_value=0.0, step=1.0, format="%.2f", key="new_barcode_cost")
+                with nb2:
+                    new_barcode_category = st.selectbox("Category", CATEGORIES, key="new_barcode_category")
+                    new_barcode_price = st.number_input("List Price ($)", min_value=0.0, step=1.0, format="%.2f", key="new_barcode_price")
+                new_item_submitted = st.form_submit_button("Add to Inventory")
+
+            if new_item_submitted:
+                if not new_barcode_name.strip():
+                    st.warning("Give the item a name first.")
+                else:
+                    new_row = pd.DataFrame([{
+                        "Item Name": new_barcode_name.strip(), "Category": new_barcode_category,
+                        "Cost Basis": new_barcode_cost, "List Price": new_barcode_price,
+                        "Status": "Available", "Description": "", "Notes": "", "Barcode": code,
+                    }])
+                    st.session_state.inventory_by_ws[WORKSPACE] = pd.concat(
+                        [st.session_state.inventory_by_ws[WORKSPACE], new_row], ignore_index=True
+                    )
+                    sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE], WORKSPACE)
+                    st.success(f"Added {new_barcode_name.strip()} with barcode {code}.")
+                    st.session_state.last_scanned_barcode = None
+                    st.rerun()
+
+    st.markdown("---")
     st.markdown("#### Settings")
     ic1, ic2 = st.columns(2)
     with ic1:
@@ -559,7 +859,7 @@ with tab_inv:
     edited_inv = st.data_editor(
         st.session_state.inventory_by_ws[WORKSPACE],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=f"inv_editor_{WORKSPACE}",
         column_config={
             "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
@@ -569,6 +869,7 @@ with tab_inv:
         },
     )
     st.session_state.inventory_by_ws[WORKSPACE] = edited_inv
+    sheets.sync_table("inventory", edited_inv, WORKSPACE)
 
     if len(edited_inv):
         disp = edited_inv.copy()
@@ -583,7 +884,7 @@ with tab_inv:
         )
         st.dataframe(
             disp[["Item Name", "Cost Basis", "List Price", "Gross Profit", "Net Profit", "Net Margin %", "Status"]],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
                 "List Price": st.column_config.NumberColumn(format="$%.2f"),
@@ -609,19 +910,24 @@ with tab_sup:
     if "suppliers_by_ws" not in st.session_state:
         st.session_state.suppliers_by_ws = {}
     if WORKSPACE not in st.session_state.suppliers_by_ws:
-        st.session_state.suppliers_by_ws[WORKSPACE] = pd.DataFrame([
-            {
-                "Supplier Name": "Sample: Caring Transitions Charleston", "Contact Person": "Ann",
-                "Phone": "", "Email": "", "Tier": 2, "Category": "Estate sale",
-                "First Contact Date": date.today().isoformat(), "Last Contact Date": date.today().isoformat(),
-                "Relationship Status": "Warm", "Compliance Doc Status": "N/A", "Value Potential": "Medium",
-                "Notes": "Edit or delete me",
-            }
-        ] if WORKSPACE == "business" else [], columns=[
-            "Supplier Name", "Contact Person", "Phone", "Email", "Tier", "Category",
-            "First Contact Date", "Last Contact Date", "Relationship Status",
-            "Compliance Doc Status", "Value Potential", "Notes",
-        ])
+        _sheet_sup = sheets.load_df("suppliers", WORKSPACE)
+        if _sheet_sup is not None:
+            st.session_state.suppliers_by_ws[WORKSPACE] = _sheet_sup
+            sheets.mark_synced("suppliers", _sheet_sup, WORKSPACE)
+        else:
+            st.session_state.suppliers_by_ws[WORKSPACE] = pd.DataFrame([
+                {
+                    "Supplier Name": "Sample: Caring Transitions Charleston", "Contact Person": "Ann",
+                    "Phone": "", "Email": "", "Tier": 2, "Category": "Estate sale",
+                    "First Contact Date": date.today().isoformat(), "Last Contact Date": date.today().isoformat(),
+                    "Relationship Status": "Warm", "Compliance Doc Status": "N/A", "Value Potential": "Medium",
+                    "Notes": "Edit or delete me",
+                }
+            ] if WORKSPACE == "business" else [], columns=[
+                "Supplier Name", "Contact Person", "Phone", "Email", "Tier", "Category",
+                "First Contact Date", "Last Contact Date", "Relationship Status",
+                "Compliance Doc Status", "Value Potential", "Notes",
+            ])
 
     sup_df = st.session_state.suppliers_by_ws[WORKSPACE].copy()
 
@@ -658,7 +964,7 @@ with tab_sup:
     edited_sup = st.data_editor(
         st.session_state.suppliers_by_ws[WORKSPACE],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=f"sup_editor_{WORKSPACE}",
         column_config={
             "Tier": st.column_config.SelectboxColumn(options=[1, 2, 3]),
@@ -668,11 +974,12 @@ with tab_sup:
         },
     )
     st.session_state.suppliers_by_ws[WORKSPACE] = edited_sup
+    sheets.sync_table("suppliers", edited_sup, WORKSPACE)
 
     if view != "All" and len(view_df):
         st.markdown("---")
         st.caption(f"Filtered view: {view}")
-        st.dataframe(view_df, use_container_width=True)
+        st.dataframe(view_df, width="stretch")
 
     sup_csv_buffer = io.StringIO()
     st.session_state.suppliers_by_ws[WORKSPACE].to_csv(sup_csv_buffer, index=False)
@@ -691,12 +998,17 @@ with tab_cust:
     if "customers_by_ws" not in st.session_state:
         st.session_state.customers_by_ws = {}
     if WORKSPACE not in st.session_state.customers_by_ws:
-        st.session_state.customers_by_ws[WORKSPACE] = pd.DataFrame([
-            {"Customer Name": "Sample: Ann Whitfield", "Phone": "", "Email": "", "Segment": "Regular",
-             "First Visit Date": date.today().isoformat(), "Notes": "Edit or delete me"},
-        ] if WORKSPACE == "business" else [], columns=[
-            "Customer Name", "Phone", "Email", "Segment", "First Visit Date", "Notes",
-        ])
+        _sheet_cust = sheets.load_df("customers", WORKSPACE)
+        if _sheet_cust is not None:
+            st.session_state.customers_by_ws[WORKSPACE] = _sheet_cust
+            sheets.mark_synced("customers", _sheet_cust, WORKSPACE)
+        else:
+            st.session_state.customers_by_ws[WORKSPACE] = pd.DataFrame([
+                {"Customer Name": "Sample: Ann Whitfield", "Phone": "", "Email": "", "Segment": "Regular",
+                 "First Visit Date": date.today().isoformat(), "Notes": "Edit or delete me"},
+            ] if WORKSPACE == "business" else [], columns=[
+                "Customer Name", "Phone", "Email", "Segment", "First Visit Date", "Notes",
+            ])
 
     st.markdown("#### Customers")
     st.caption("Total Spent, Last Purchase, and # of Purchases are computed automatically from the Sales Log on the Point of Sale tab - never entered by hand, so they can't drift out of sync.")
@@ -704,13 +1016,14 @@ with tab_cust:
     edited_cust = st.data_editor(
         st.session_state.customers_by_ws[WORKSPACE],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=f"cust_editor_{WORKSPACE}",
         column_config={
             "Segment": st.column_config.SelectboxColumn(options=["Regular", "VIP", "One-time", "Wholesale"]),
         },
     )
     st.session_state.customers_by_ws[WORKSPACE] = edited_cust
+    sheets.sync_table("customers", edited_cust, WORKSPACE)
 
     sales_log_for_cust = st.session_state.get("sales_log_by_ws", {}).get(WORKSPACE, [])
     if len(edited_cust):
@@ -736,7 +1049,7 @@ with tab_cust:
         st.markdown("#### Purchase History (computed)")
         st.dataframe(
             display_cust[["Customer Name", "Segment", "Total Spent", "# Purchases", "Last Purchase"]],
-            use_container_width=True,
+            width="stretch",
             column_config={"Total Spent": st.column_config.NumberColumn(format="$%.2f")},
         )
 
@@ -767,6 +1080,23 @@ with tab_charge:
         stripe_key = st.secrets.get("STRIPE_SECRET_KEY", None)
     except Exception:
         stripe_key = None
+
+    # Rendered once, right after a completed sale forces a rerun (see the
+    # Complete Sale handler below) - by then sales_log_by_ws already carries
+    # the new invoice, so the Invoices tab picks it up on this same rerun too,
+    # instead of staying stale until the next unrelated widget interaction.
+    if st.session_state.get("pos_last_sale"):
+        sale = st.session_state.pos_last_sale
+        st.success(f"Sale complete — Invoice {sale['invoice_num']}")
+        st.markdown(f"""<div class="kpi-card" style="margin-top:10px;">
+            <div class="kpi-label">Invoice {sale['invoice_num']}</div>
+            <div style="margin:8px 0;color:#e6e9ef;">{sale['item_summary']}</div>
+            <div style="color:#8b96a5;">Subtotal ${sale['subtotal']:,.2f} + Tax ${sale['tax_amt']:,.2f} = <b style="color:#f7f9fc;">Total ${sale['total']:,.2f}</b></div>
+            <div style="margin-top:6px;color:#8b96a5;">Payment: {sale['payment_method']} · Status: {sale['status']}</div>
+            </div>""", unsafe_allow_html=True)
+        if sale.get("link_url"):
+            st.code(sale["link_url"], language=None)
+        st.session_state.pos_last_sale = None
 
     if "cart_by_ws" not in st.session_state:
         st.session_state.cart_by_ws = {}
@@ -833,7 +1163,7 @@ with tab_charge:
         cart_df["Line Total"] = cart_df["Price"] * cart_df["Qty"]
         st.dataframe(
             cart_df[["Item", "Price", "Qty", "Line Total"]],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Price": st.column_config.NumberColumn(format="$%.2f"),
                 "Line Total": st.column_config.NumberColumn(format="$%.2f"),
@@ -917,6 +1247,7 @@ with tab_charge:
                         if len(match):
                             inv_df_live.loc[match.index[0], "Status"] = "Sold"
                 st.session_state.inventory_by_ws[WORKSPACE] = inv_df_live
+                sheets.sync_table("inventory", inv_df_live, WORKSPACE)
 
             st.session_state.sales_log_by_ws[WORKSPACE].append({
                 "Invoice #": invoice_num,
@@ -930,57 +1261,18 @@ with tab_charge:
                 "Status": status,
                 "Link": link_url,
             })
+            sheets.sync_table("sales_log", pd.DataFrame(st.session_state.sales_log_by_ws[WORKSPACE]), WORKSPACE)
             st.session_state.cart_by_ws[WORKSPACE] = []
 
-            st.success(f"Sale complete \u2014 Invoice {invoice_num}")
-            st.markdown(f"""<div class="kpi-card" style="margin-top:10px;">
-                <div class="kpi-label">Invoice {invoice_num}</div>
-                <div style="margin:8px 0;color:#e6e9ef;">{item_summary}</div>
-                <div style="color:#8b96a5;">Subtotal ${subtotal:,.2f} + Tax ${tax_amt:,.2f} = <b style="color:#f7f9fc;">Total ${total:,.2f}</b></div>
-                <div style="margin-top:6px;color:#8b96a5;">Payment: {payment_method} \u00b7 Status: {status}</div>
-                </div>""", unsafe_allow_html=True)
-            if link_url:
-                st.code(link_url, language=None)
+            st.session_state.pos_last_sale = {
+                "invoice_num": invoice_num, "item_summary": item_summary,
+                "subtotal": subtotal, "tax_amt": tax_amt, "total": total,
+                "payment_method": payment_method, "status": status, "link_url": link_url,
+            }
+            st.rerun()
 
     st.markdown("---")
-    st.markdown("#### Sales Log")
-    log = st.session_state.sales_log_by_ws[WORKSPACE]
-    if log:
-        log_df = pd.DataFrame(log)
-        fcol1, fcol2 = st.columns(2)
-        with fcol1:
-            method_filter = st.selectbox("Filter by payment method", ["All", "Card", "Cash"], key="pos_log_method_filter")
-        with fcol2:
-            date_filter = st.text_input("Filter by date (YYYY-MM-DD, optional)", key="pos_log_date_filter")
-
-        filtered_log = log_df.copy()
-        if method_filter != "All":
-            filtered_log = filtered_log[filtered_log["Payment Method"] == method_filter]
-        if date_filter.strip():
-            filtered_log = filtered_log[filtered_log["Date"].str.startswith(date_filter.strip())]
-
-        st.dataframe(
-            filtered_log,
-            use_container_width=True,
-            column_config={
-                "Subtotal": st.column_config.NumberColumn(format="$%.2f"),
-                "Tax": st.column_config.NumberColumn(format="$%.2f"),
-                "Total": st.column_config.NumberColumn(format="$%.2f"),
-                "Link": st.column_config.LinkColumn(),
-            },
-        )
-        st.markdown(f"**Running total ({len(filtered_log)} sale{'s' if len(filtered_log) != 1 else ''}): ${filtered_log['Total'].sum():,.2f}**")
-
-        log_csv_buffer = io.StringIO()
-        log_df.to_csv(log_csv_buffer, index=False)
-        st.download_button(
-            "Download Sales Log as CSV",
-            data=log_csv_buffer.getvalue(),
-            file_name=f"appraze_sales_log_{date.today().isoformat()}.csv",
-            mime="text/csv",
-        )
-    else:
-        st.info("No sales recorded yet this session.")
+    st.caption("Full invoice history, filters, and CSV export are on the **Invoices** tab \u2014 every sale completed here appears there automatically.")
 
 # ==========================================================================
 # AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
@@ -1043,7 +1335,7 @@ with tab_ai:
                 try:
                     body = json.dumps({
                         "model": "claude-sonnet-5",
-                        "max_tokens": 2000,
+                        "max_tokens": 900,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": content}],
                     }).encode()
@@ -1054,26 +1346,7 @@ with tab_ai:
                     with urllib.request.urlopen(req, timeout=30) as resp:
                         result = json.loads(resp.read().decode())
                     raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
-
-                    # Claude is instructed to return raw JSON, but models don't always
-                    # follow that perfectly - defensively strip markdown code fences if
-                    # present, then fall back to pulling out the first {...} block if
-                    # there's any surrounding text. This is what actually fixes the
-                    # "response wasn't valid JSON" error, not just the system prompt wording.
-                    cleaned = raw_text.strip()
-                    if cleaned.startswith("```"):
-                        cleaned = cleaned.split("```")[1] if cleaned.count("```") >= 2 else cleaned.lstrip("`")
-                        cleaned = cleaned.removeprefix("json").strip()
-                    try:
-                        parsed = json.loads(cleaned)
-                    except json.JSONDecodeError:
-                        start = cleaned.find("{")
-                        end = cleaned.rfind("}")
-                        if start != -1 and end != -1 and end > start:
-                            parsed = json.loads(cleaned[start:end + 1])
-                        else:
-                            raise
-
+                    parsed = json.loads(raw_text)
                     if not isinstance(parsed, dict):
                         raise ValueError("Response wasn't a JSON object")
                     # Store in session state so the result (and its "Add to Inventory"
@@ -1148,6 +1421,7 @@ with tab_ai:
                 st.session_state.inventory_by_ws[WORKSPACE] = pd.concat(
                     [st.session_state.inventory_by_ws[WORKSPACE], new_item], ignore_index=True
                 )
+                sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE], WORKSPACE)
                 st.success("Added to Inventory \u2014 go set the real Cost Basis on the Inventory tab.")
                 st.session_state.ai_last_result = None
 

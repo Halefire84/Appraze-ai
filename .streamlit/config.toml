@@ -1,0 +1,5 @@
+# Serves files placed in ./static/ at <app-url>/app/static/<filename> -
+# needed for the PWA manifest.json and its icons (installable desktop app,
+# see manifest.json + the head-injection snippet near the top of app.py).
+[server]
+enableStaticServing = true
