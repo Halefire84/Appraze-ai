@@ -192,12 +192,16 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 # set APP_PASSWORDS instead - each entry is its own password mapped to its
 # own workspace name, so each person gets their own separate deals /
 # inventory / suppliers / customers / sales log, invisible to the others.
-# When set, this takes priority over APP_PASSWORD.
+# When set, this takes priority over APP_PASSWORD. A workspace's value can
+# be one password (string) or several (a list) if more than one person
+# should share that same workspace's data - note that shared data only
+# actually stays in sync across separate devices/sessions once Google
+# Sheets persistence (see sheets.py) is configured; without it, two people
+# using the same workspace still each get their own private in-memory copy.
 #   [APP_PASSWORDS]
+#   owner = ["my-password", "ashleys-password"]
 #   a = "password1"
 #   b = "password2"
-#   c = "password3"
-#   d = "password4"
 #
 # Passwords live in Streamlit's Secrets manager (Settings -> Secrets on
 # Streamlit Community Cloud), never hardcoded here. If neither secret is
@@ -206,13 +210,19 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 
 def _get_password_workspace_map() -> dict:
     """Returns {password: workspace_name}. Prefers APP_PASSWORDS (multiple
-    isolated testers) over the single-workspace APP_PASSWORD fallback."""
+    isolated testers) over the single-workspace APP_PASSWORD fallback. Each
+    APP_PASSWORDS entry's value may be one password or a list of several
+    passwords that all share that workspace."""
     try:
         multi = st.secrets.get("APP_PASSWORDS", None)
     except Exception:
         multi = None
     if multi:
-        return {password: workspace for workspace, password in dict(multi).items()}
+        password_map = {}
+        for workspace, passwords in dict(multi).items():
+            for password in (passwords if isinstance(passwords, list) else [passwords]):
+                password_map[password] = workspace
+        return password_map
     try:
         single = st.secrets.get("APP_PASSWORD", "changeme")
     except Exception:
