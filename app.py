@@ -83,9 +83,6 @@ DARK_CSS = """
     .badge-ceiling { background: #142a37; color: #38bdf8; border: 1px solid #38bdf840;}
     .badge-borderline { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
     .badge-passverdict { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-    .badge-hot { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-good { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-pass { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
 
     /* buttons */
     .stButton>button {
@@ -144,7 +141,7 @@ def login_screen():
         pwd = st.text_input("Password", type="password", key="login_pwd")
         expected = _get_password()
 
-        if st.button("Sign in", use_container_width=True):
+        if st.button("Sign in", width="stretch"):
             if secrets.compare_digest(pwd, expected):
                 st.session_state.authed = True
                 st.rerun()
@@ -216,7 +213,7 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 with st.sidebar:
     st.markdown("### 🪙 Appraze")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
-    if st.button("Sign out", use_container_width=True):
+    if st.button("Sign out", width="stretch"):
         st.session_state.authed = False
         st.rerun()
 
@@ -233,7 +230,7 @@ with st.sidebar:
             resale = st.number_input("Est. resale value ($)", min_value=0.0, step=1.0, format="%.2f")
         status = st.selectbox("Status", STATUSES, index=0)
         notes = st.text_area("Notes", height=68, placeholder="Karat, weight, condition, auction end time...")
-        submitted = st.form_submit_button("Add to dashboard", use_container_width=True)
+        submitted = st.form_submit_button("Add to dashboard", width="stretch")
 
         if submitted:
             if not item.strip():
@@ -286,7 +283,7 @@ with st.sidebar:
         data=csv_buffer.getvalue(),
         file_name=f"cooper_river_deals_{date.today().isoformat()}.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
     )
 
     st.markdown("---")
@@ -328,10 +325,85 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
-    "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
+tab_inv_home, tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
+    "🧾  Invoices", "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "👤  Customers", "💳  Point of Sale", "🔍  AI Analyzer",
 ])
+
+# ==========================================================================
+# INVOICES TAB (home / landing tab - opens first)
+# ==========================================================================
+with tab_inv_home:
+    st.markdown("#### Invoices")
+    st.caption("Every completed sale from the Point of Sale tab lands here automatically \u2014 this is your home view for what's been invoiced, paid, and still awaiting payment.")
+
+    # Same idempotent init guards used on the Point of Sale tab below - safe
+    # to repeat since Invoices can render before a POS sale has ever run.
+    if "sales_log_by_ws" not in st.session_state:
+        st.session_state.sales_log_by_ws = {}
+    if WORKSPACE not in st.session_state.sales_log_by_ws:
+        st.session_state.sales_log_by_ws[WORKSPACE] = []
+
+    inv_log = st.session_state.sales_log_by_ws[WORKSPACE]
+
+    if not inv_log:
+        st.info("No invoices yet. Ring up a sale on the Point of Sale tab and it'll show up here.")
+    else:
+        inv_log_df = pd.DataFrame(inv_log)
+        total_invoiced = float(inv_log_df["Total"].sum())
+        paid_count = int((inv_log_df["Status"] == "Paid (Cash)").sum())
+        awaiting_count = int((inv_log_df["Status"] == "Awaiting Payment").sum())
+        today_str = date.today().isoformat()
+        today_total = float(inv_log_df.loc[inv_log_df["Date"].str.startswith(today_str), "Total"].sum())
+
+        h1, h2, h3, h4 = st.columns(4)
+        with h1:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Total Invoiced</div>
+                <div class="kpi-value">${total_invoiced:,.2f}</div></div>""", unsafe_allow_html=True)
+        with h2:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Today's Invoiced</div>
+                <div class="kpi-value">${today_total:,.2f}</div></div>""", unsafe_allow_html=True)
+        with h3:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Paid (Cash)</div>
+                <div class="kpi-value">{paid_count}</div></div>""", unsafe_allow_html=True)
+        with h4:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Awaiting Payment</div>
+                <div class="kpi-value">{awaiting_count}</div></div>""", unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("#### All Invoices")
+        fcol1, fcol2 = st.columns(2)
+        with fcol1:
+            home_method_filter = st.selectbox("Filter by payment method", ["All", "Card", "Cash"], key="home_log_method_filter")
+        with fcol2:
+            home_date_filter = st.text_input("Filter by date (YYYY-MM-DD, optional)", key="home_log_date_filter")
+
+        home_filtered_log = inv_log_df.copy()
+        if home_method_filter != "All":
+            home_filtered_log = home_filtered_log[home_filtered_log["Payment Method"] == home_method_filter]
+        if home_date_filter.strip():
+            home_filtered_log = home_filtered_log[home_filtered_log["Date"].str.startswith(home_date_filter.strip())]
+
+        st.dataframe(
+            home_filtered_log,
+            width="stretch",
+            column_config={
+                "Subtotal": st.column_config.NumberColumn(format="$%.2f"),
+                "Tax": st.column_config.NumberColumn(format="$%.2f"),
+                "Total": st.column_config.NumberColumn(format="$%.2f"),
+                "Link": st.column_config.LinkColumn(),
+            },
+        )
+        st.markdown(f"**Running total ({len(home_filtered_log)} invoice{'s' if len(home_filtered_log) != 1 else ''}): ${home_filtered_log['Total'].sum():,.2f}**")
+
+        home_log_csv_buffer = io.StringIO()
+        inv_log_df.to_csv(home_log_csv_buffer, index=False)
+        st.download_button(
+            "Download all Invoices as CSV",
+            data=home_log_csv_buffer.getvalue(),
+            file_name=f"appraze_invoices_{date.today().isoformat()}.csv",
+            mime="text/csv",
+        )
 
 with tab_dash:
     st.markdown("#### Filters")
@@ -365,7 +437,7 @@ with tab_dash:
     edited = st.data_editor(
         filtered.drop(columns=["Gross Profit", "ROI %"]),
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         height=420,
         column_config={
             "Cost": st.column_config.NumberColumn(format="$%.2f"),
@@ -396,7 +468,7 @@ with tab_dash:
         st.dataframe(
             quick[["Item", "Platform", "Cost", "Est. Resale Value", "Gross Profit",
                    "ROI %", "Verdict", "30/70 (Cooper River share @70%)", "50/50 (each share)"]],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Cost": st.column_config.NumberColumn(format="$%.2f"),
                 "Est. Resale Value": st.column_config.NumberColumn(format="$%.2f"),
@@ -516,11 +588,68 @@ with tab_inv:
         ] if WORKSPACE == "business" else [], columns=["Item Name", "Category", "Cost Basis", "List Price", "Status", "Description", "Notes"])
 
     # Backward-compat: older sessions/rows created before these columns existed
-    for _col, _default in [("Status", "Available"), ("Category", "Other"), ("Description", "")]:
+    for _col, _default in [("Status", "Available"), ("Category", "Other"), ("Description", ""), ("Barcode", "")]:
         if _col not in st.session_state.inventory_by_ws[WORKSPACE].columns:
             st.session_state.inventory_by_ws[WORKSPACE][_col] = _default
         st.session_state.inventory_by_ws[WORKSPACE][_col] = st.session_state.inventory_by_ws[WORKSPACE][_col].fillna(_default)
 
+    st.markdown("#### Scan Barcode")
+    st.caption(
+        "Works with any USB or Bluetooth barcode scanner \u2014 they act like a keyboard, so just click into "
+        "the box below and scan. Matches an existing item instantly, or offers to add it as new."
+    )
+    with st.form("barcode_scan_form", clear_on_submit=True):
+        bcol1, bcol2 = st.columns([3, 1])
+        with bcol1:
+            scanned_code = st.text_input("Scan or type barcode", key="barcode_scan_input", label_visibility="collapsed", placeholder="Scan or type barcode\u2026")
+        with bcol2:
+            scan_submitted = st.form_submit_button("Look up", width="stretch")
+
+    if scan_submitted:
+        if not scanned_code.strip():
+            st.warning("Scan or type a barcode first.")
+        else:
+            st.session_state.last_scanned_barcode = scanned_code.strip()
+
+    if st.session_state.get("last_scanned_barcode"):
+        code = st.session_state.last_scanned_barcode
+        live_inv = st.session_state.inventory_by_ws[WORKSPACE]
+        match = live_inv[live_inv["Barcode"].astype(str) == code]
+        if len(match):
+            row = match.iloc[0]
+            st.success(f"Found: **{row['Item Name']}** \u2014 {row['Category']} \u00b7 Cost ${float(row['Cost Basis']):,.2f} \u00b7 List ${float(row['List Price']):,.2f} \u00b7 {row['Status']}")
+            if st.button("Clear scan", key="clear_scan_found"):
+                st.session_state.last_scanned_barcode = None
+                st.rerun()
+        else:
+            st.info(f"No item found with barcode `{code}`. Add it as a new item:")
+            with st.form("barcode_new_item_form"):
+                nb1, nb2 = st.columns(2)
+                with nb1:
+                    new_barcode_name = st.text_input("Item Name", key="new_barcode_item_name")
+                    new_barcode_cost = st.number_input("Cost Basis ($)", min_value=0.0, step=1.0, format="%.2f", key="new_barcode_cost")
+                with nb2:
+                    new_barcode_category = st.selectbox("Category", CATEGORIES, key="new_barcode_category")
+                    new_barcode_price = st.number_input("List Price ($)", min_value=0.0, step=1.0, format="%.2f", key="new_barcode_price")
+                new_item_submitted = st.form_submit_button("Add to Inventory")
+
+            if new_item_submitted:
+                if not new_barcode_name.strip():
+                    st.warning("Give the item a name first.")
+                else:
+                    new_row = pd.DataFrame([{
+                        "Item Name": new_barcode_name.strip(), "Category": new_barcode_category,
+                        "Cost Basis": new_barcode_cost, "List Price": new_barcode_price,
+                        "Status": "Available", "Description": "", "Notes": "", "Barcode": code,
+                    }])
+                    st.session_state.inventory_by_ws[WORKSPACE] = pd.concat(
+                        [st.session_state.inventory_by_ws[WORKSPACE], new_row], ignore_index=True
+                    )
+                    st.success(f"Added {new_barcode_name.strip()} with barcode {code}.")
+                    st.session_state.last_scanned_barcode = None
+                    st.rerun()
+
+    st.markdown("---")
     st.markdown("#### Settings")
     ic1, ic2 = st.columns(2)
     with ic1:
@@ -559,7 +688,7 @@ with tab_inv:
     edited_inv = st.data_editor(
         st.session_state.inventory_by_ws[WORKSPACE],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=f"inv_editor_{WORKSPACE}",
         column_config={
             "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
@@ -583,7 +712,7 @@ with tab_inv:
         )
         st.dataframe(
             disp[["Item Name", "Cost Basis", "List Price", "Gross Profit", "Net Profit", "Net Margin %", "Status"]],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
                 "List Price": st.column_config.NumberColumn(format="$%.2f"),
@@ -658,7 +787,7 @@ with tab_sup:
     edited_sup = st.data_editor(
         st.session_state.suppliers_by_ws[WORKSPACE],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=f"sup_editor_{WORKSPACE}",
         column_config={
             "Tier": st.column_config.SelectboxColumn(options=[1, 2, 3]),
@@ -672,7 +801,7 @@ with tab_sup:
     if view != "All" and len(view_df):
         st.markdown("---")
         st.caption(f"Filtered view: {view}")
-        st.dataframe(view_df, use_container_width=True)
+        st.dataframe(view_df, width="stretch")
 
     sup_csv_buffer = io.StringIO()
     st.session_state.suppliers_by_ws[WORKSPACE].to_csv(sup_csv_buffer, index=False)
@@ -704,7 +833,7 @@ with tab_cust:
     edited_cust = st.data_editor(
         st.session_state.customers_by_ws[WORKSPACE],
         num_rows="dynamic",
-        use_container_width=True,
+        width="stretch",
         key=f"cust_editor_{WORKSPACE}",
         column_config={
             "Segment": st.column_config.SelectboxColumn(options=["Regular", "VIP", "One-time", "Wholesale"]),
@@ -736,7 +865,7 @@ with tab_cust:
         st.markdown("#### Purchase History (computed)")
         st.dataframe(
             display_cust[["Customer Name", "Segment", "Total Spent", "# Purchases", "Last Purchase"]],
-            use_container_width=True,
+            width="stretch",
             column_config={"Total Spent": st.column_config.NumberColumn(format="$%.2f")},
         )
 
@@ -767,6 +896,23 @@ with tab_charge:
         stripe_key = st.secrets.get("STRIPE_SECRET_KEY", None)
     except Exception:
         stripe_key = None
+
+    # Rendered once, right after a completed sale forces a rerun (see the
+    # Complete Sale handler below) - by then sales_log_by_ws already carries
+    # the new invoice, so the Invoices tab picks it up on this same rerun too,
+    # instead of staying stale until the next unrelated widget interaction.
+    if st.session_state.get("pos_last_sale"):
+        sale = st.session_state.pos_last_sale
+        st.success(f"Sale complete — Invoice {sale['invoice_num']}")
+        st.markdown(f"""<div class="kpi-card" style="margin-top:10px;">
+            <div class="kpi-label">Invoice {sale['invoice_num']}</div>
+            <div style="margin:8px 0;color:#e6e9ef;">{sale['item_summary']}</div>
+            <div style="color:#8b96a5;">Subtotal ${sale['subtotal']:,.2f} + Tax ${sale['tax_amt']:,.2f} = <b style="color:#f7f9fc;">Total ${sale['total']:,.2f}</b></div>
+            <div style="margin-top:6px;color:#8b96a5;">Payment: {sale['payment_method']} · Status: {sale['status']}</div>
+            </div>""", unsafe_allow_html=True)
+        if sale.get("link_url"):
+            st.code(sale["link_url"], language=None)
+        st.session_state.pos_last_sale = None
 
     if "cart_by_ws" not in st.session_state:
         st.session_state.cart_by_ws = {}
@@ -833,7 +979,7 @@ with tab_charge:
         cart_df["Line Total"] = cart_df["Price"] * cart_df["Qty"]
         st.dataframe(
             cart_df[["Item", "Price", "Qty", "Line Total"]],
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "Price": st.column_config.NumberColumn(format="$%.2f"),
                 "Line Total": st.column_config.NumberColumn(format="$%.2f"),
@@ -932,55 +1078,15 @@ with tab_charge:
             })
             st.session_state.cart_by_ws[WORKSPACE] = []
 
-            st.success(f"Sale complete \u2014 Invoice {invoice_num}")
-            st.markdown(f"""<div class="kpi-card" style="margin-top:10px;">
-                <div class="kpi-label">Invoice {invoice_num}</div>
-                <div style="margin:8px 0;color:#e6e9ef;">{item_summary}</div>
-                <div style="color:#8b96a5;">Subtotal ${subtotal:,.2f} + Tax ${tax_amt:,.2f} = <b style="color:#f7f9fc;">Total ${total:,.2f}</b></div>
-                <div style="margin-top:6px;color:#8b96a5;">Payment: {payment_method} \u00b7 Status: {status}</div>
-                </div>""", unsafe_allow_html=True)
-            if link_url:
-                st.code(link_url, language=None)
+            st.session_state.pos_last_sale = {
+                "invoice_num": invoice_num, "item_summary": item_summary,
+                "subtotal": subtotal, "tax_amt": tax_amt, "total": total,
+                "payment_method": payment_method, "status": status, "link_url": link_url,
+            }
+            st.rerun()
 
     st.markdown("---")
-    st.markdown("#### Sales Log")
-    log = st.session_state.sales_log_by_ws[WORKSPACE]
-    if log:
-        log_df = pd.DataFrame(log)
-        fcol1, fcol2 = st.columns(2)
-        with fcol1:
-            method_filter = st.selectbox("Filter by payment method", ["All", "Card", "Cash"], key="pos_log_method_filter")
-        with fcol2:
-            date_filter = st.text_input("Filter by date (YYYY-MM-DD, optional)", key="pos_log_date_filter")
-
-        filtered_log = log_df.copy()
-        if method_filter != "All":
-            filtered_log = filtered_log[filtered_log["Payment Method"] == method_filter]
-        if date_filter.strip():
-            filtered_log = filtered_log[filtered_log["Date"].str.startswith(date_filter.strip())]
-
-        st.dataframe(
-            filtered_log,
-            use_container_width=True,
-            column_config={
-                "Subtotal": st.column_config.NumberColumn(format="$%.2f"),
-                "Tax": st.column_config.NumberColumn(format="$%.2f"),
-                "Total": st.column_config.NumberColumn(format="$%.2f"),
-                "Link": st.column_config.LinkColumn(),
-            },
-        )
-        st.markdown(f"**Running total ({len(filtered_log)} sale{'s' if len(filtered_log) != 1 else ''}): ${filtered_log['Total'].sum():,.2f}**")
-
-        log_csv_buffer = io.StringIO()
-        log_df.to_csv(log_csv_buffer, index=False)
-        st.download_button(
-            "Download Sales Log as CSV",
-            data=log_csv_buffer.getvalue(),
-            file_name=f"appraze_sales_log_{date.today().isoformat()}.csv",
-            mime="text/csv",
-        )
-    else:
-        st.info("No sales recorded yet this session.")
+    st.caption("Full invoice history, filters, and CSV export are on the **Invoices** tab \u2014 every sale completed here appears there automatically.")
 
 # ==========================================================================
 # AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
@@ -1043,7 +1149,7 @@ with tab_ai:
                 try:
                     body = json.dumps({
                         "model": "claude-sonnet-5",
-                        "max_tokens": 2000,
+                        "max_tokens": 900,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": content}],
                     }).encode()
@@ -1054,26 +1160,7 @@ with tab_ai:
                     with urllib.request.urlopen(req, timeout=30) as resp:
                         result = json.loads(resp.read().decode())
                     raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
-
-                    # Claude is instructed to return raw JSON, but models don't always
-                    # follow that perfectly - defensively strip markdown code fences if
-                    # present, then fall back to pulling out the first {...} block if
-                    # there's any surrounding text. This is what actually fixes the
-                    # "response wasn't valid JSON" error, not just the system prompt wording.
-                    cleaned = raw_text.strip()
-                    if cleaned.startswith("```"):
-                        cleaned = cleaned.split("```")[1] if cleaned.count("```") >= 2 else cleaned.lstrip("`")
-                        cleaned = cleaned.removeprefix("json").strip()
-                    try:
-                        parsed = json.loads(cleaned)
-                    except json.JSONDecodeError:
-                        start = cleaned.find("{")
-                        end = cleaned.rfind("}")
-                        if start != -1 and end != -1 and end > start:
-                            parsed = json.loads(cleaned[start:end + 1])
-                        else:
-                            raise
-
+                    parsed = json.loads(raw_text)
                     if not isinstance(parsed, dict):
                         raise ValueError("Response wasn't a JSON object")
                     # Store in session state so the result (and its "Add to Inventory"
