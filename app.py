@@ -39,7 +39,8 @@ st.set_page_config(
 )
 
 # --------------------------------------------------------------------------
-# PWA MANIFEST + ICONS ("Install as app" from Chrome, incl. on Windows 11)
+# PWA MANIFEST + ICONS ("Install as app" - Chrome/Edge on desktop incl.
+# Windows 11, and "Add to Home Screen" from Safari on iOS)
 # --------------------------------------------------------------------------
 # Streamlit doesn't expose an API to add tags to the page <head>, so this
 # runs a tiny script inside a components.v1.html iframe. That iframe is
@@ -49,6 +50,14 @@ st.set_page_config(
 # manifest and touch icons, here). Guarded so a rerun doesn't add duplicates.
 # Requires enableStaticServing=true in .streamlit/config.toml, which serves
 # ./static/* at <app-url>/app/static/* - see static/manifest.json.
+#
+# The apple-mobile-web-app-* tags exist because iOS Safari's manifest.json
+# support is old and only partial - those tags are what actually control
+# standalone (no browser chrome) mode and the home-screen title there, not
+# the manifest fields that work everywhere else. Every iOS browser (Chrome
+# on iOS included, since Apple requires all iOS browsers to run on WebKit)
+# reads the same tags, but only Safari's Share -> Add to Home Screen sheet
+# produces an actual standalone-launching icon - Chrome on iOS doesn't.
 components.html(
     """
     <script>
@@ -77,6 +86,21 @@ components.html(
         themeColor.name = 'theme-color';
         themeColor.content = '#0b0f14';
         doc.head.appendChild(themeColor);
+
+        const appleCapable = doc.createElement('meta');
+        appleCapable.name = 'apple-mobile-web-app-capable';
+        appleCapable.content = 'yes';
+        doc.head.appendChild(appleCapable);
+
+        const appleTitle = doc.createElement('meta');
+        appleTitle.name = 'apple-mobile-web-app-title';
+        appleTitle.content = 'Appraze';
+        doc.head.appendChild(appleTitle);
+
+        const appleStatusBar = doc.createElement('meta');
+        appleStatusBar.name = 'apple-mobile-web-app-status-bar-style';
+        appleStatusBar.content = 'black-translucent';
+        doc.head.appendChild(appleStatusBar);
     })();
     </script>
     """,
