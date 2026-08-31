@@ -1043,7 +1043,7 @@ with tab_ai:
                 try:
                     body = json.dumps({
                         "model": "claude-sonnet-5",
-                        "max_tokens": 900,
+                        "max_tokens": 2000,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": content}],
                     }).encode()
@@ -1054,7 +1054,26 @@ with tab_ai:
                     with urllib.request.urlopen(req, timeout=30) as resp:
                         result = json.loads(resp.read().decode())
                     raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
-                    parsed = json.loads(raw_text)
+
+                    # Claude is instructed to return raw JSON, but models don't always
+                    # follow that perfectly - defensively strip markdown code fences if
+                    # present, then fall back to pulling out the first {...} block if
+                    # there's any surrounding text. This is what actually fixes the
+                    # "response wasn't valid JSON" error, not just the system prompt wording.
+                    cleaned = raw_text.strip()
+                    if cleaned.startswith("```"):
+                        cleaned = cleaned.split("```")[1] if cleaned.count("```") >= 2 else cleaned.lstrip("`")
+                        cleaned = cleaned.removeprefix("json").strip()
+                    try:
+                        parsed = json.loads(cleaned)
+                    except json.JSONDecodeError:
+                        start = cleaned.find("{")
+                        end = cleaned.rfind("}")
+                        if start != -1 and end != -1 and end > start:
+                            parsed = json.loads(cleaned[start:end + 1])
+                        else:
+                            raise
+
                     if not isinstance(parsed, dict):
                         raise ValueError("Response wasn't a JSON object")
                     # Store in session state so the result (and its "Add to Inventory"
