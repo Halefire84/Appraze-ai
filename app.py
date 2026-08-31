@@ -22,6 +22,7 @@ from finance import (
     compute_verdict, deal_roi, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, sales_tax, GOLD_PURITY, SILVER_PURITY,
 )
+import sheets
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -30,7 +31,10 @@ st.set_page_config(
     page_title="Appraze",
     page_icon="🪙",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto" (not "expanded") so phones/narrow tablets - this gets used live
+    # at auctions and at a POS station - land on the dashboard instead of a
+    # sidebar that covers almost the whole screen on first load.
+    initial_sidebar_state="auto",
 )
 
 DARK_CSS = """
@@ -168,7 +172,13 @@ if "deals_by_ws" not in st.session_state:
     st.session_state.deals_by_ws = {}
 
 if WORKSPACE not in st.session_state.deals_by_ws:
-    if WORKSPACE == "business":
+    _sheet_deals = sheets.load_df("deals")
+    if _sheet_deals is not None:
+        # Sheets is configured - it's the source of truth, so never seed the
+        # dev sample row into someone's real persisted business data.
+        st.session_state.deals_by_ws[WORKSPACE] = _sheet_deals
+        sheets.mark_synced("deals", _sheet_deals)
+    elif WORKSPACE == "business":
         st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame([
             {
                 "Date Added": date.today().isoformat(),
@@ -213,6 +223,10 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 with st.sidebar:
     st.markdown("### 🪙 Appraze")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
+    if sheets.is_configured():
+        st.caption("\u2705 Synced to Google Sheets \u2014 data persists across sessions.")
+    else:
+        st.caption("\u26a0\ufe0f Not persisted \u2014 data lives only in this browser session and resets on reload. Add GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Secrets to enable saving.")
     if st.button("Sign out", width="stretch"):
         st.session_state.authed = False
         st.rerun()
@@ -250,6 +264,7 @@ with st.sidebar:
                     [st.session_state.deals, new_row], ignore_index=True
                 )
                 st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+                sheets.sync_table("deals", st.session_state.deals)
                 st.session_state.editor_key += 1
                 st.success(f"Added: {item.strip()}")
 
@@ -270,6 +285,7 @@ with st.sidebar:
                     [st.session_state.deals, imported], ignore_index=True
                 )
                 st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+                sheets.sync_table("deals", st.session_state.deals)
                 st.success(f"Imported {len(imported)} rows.")
             else:
                 st.error(f"CSV must include columns: {', '.join(required)}")
@@ -287,7 +303,53 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.caption("Note: this app resets its data if the free hosting instance restarts. Download a CSV backup regularly, then re-import it next session.")
+    if sheets.is_configured():
+        st.caption("Data is saved to Google Sheets on every change, so it survives a free hosting instance restarting. The CSV export above is still a good manual backup.")
+    else:
+        st.caption("Note: this app resets its data if the free hosting instance restarts. Download a CSV backup regularly, then re-import it next session.")
+
+    st.markdown("---")
+    st.markdown("#### 🆘 Support")
+    try:
+        support_email = st.secrets.get("SUPPORT_EMAIL", None)
+    except Exception:
+        support_email = None
+    if support_email:
+        st.caption(f"Found a bug or have feedback? Email {support_email}.")
+    else:
+        st.caption("Found a bug or have feedback? Add a `SUPPORT_EMAIL` secret in Settings → Secrets so this shows a real contact address.")
+
+    with st.expander("Terms of Service & Privacy Policy"):
+        st.caption(
+            "This is a starting-point template, not legal advice — have a lawyer review it "
+            "before relying on it for a live business."
+        )
+        st.markdown(
+            """
+**Terms of Service (template)**
+
+- This app is provided as-is for Cooper River Trading Co.'s internal use in tracking deals,
+  inventory, suppliers, customers, and sales.
+- Card payments are processed entirely by Stripe via Payment Links — this app never receives,
+  stores, or transmits raw card numbers.
+- The AI Analyzer sends the photo and/or description you submit to Anthropic's API to generate
+  an identification and value estimate — only what you explicitly submit on that tab is sent,
+  and only when you click Analyze.
+- Estimated values, verdicts, and suggested prices are informational only. You are responsible
+  for your own purchase, pricing, and sale decisions.
+
+**Privacy Policy (template)**
+
+- Data entered in this app (deals, inventory, suppliers, customers, sales log) is stored either
+  in this browser session only, or — when Google Sheets persistence is configured — in a Google
+  Sheet you control, accessed via a service account you set up.
+- This app does not sell or share your data with third parties, other than the services you've
+  explicitly configured (Stripe for payments, Anthropic for the AI Analyzer, Google for
+  persistence) — each only receives the specific data needed for that feature to work.
+- Supplier and customer contact info (name, phone, email) is stored only for your own
+  recordkeeping and is never used for anything beyond that.
+            """
+        )
 
 
 # --------------------------------------------------------------------------
@@ -342,7 +404,12 @@ with tab_inv_home:
     if "sales_log_by_ws" not in st.session_state:
         st.session_state.sales_log_by_ws = {}
     if WORKSPACE not in st.session_state.sales_log_by_ws:
-        st.session_state.sales_log_by_ws[WORKSPACE] = []
+        _sheet_sales = sheets.load_df("sales_log")
+        if _sheet_sales is not None:
+            st.session_state.sales_log_by_ws[WORKSPACE] = _sheet_sales.to_dict("records")
+            sheets.mark_synced("sales_log", _sheet_sales)
+        else:
+            st.session_state.sales_log_by_ws[WORKSPACE] = []
 
     inv_log = st.session_state.sales_log_by_ws[WORKSPACE]
 
@@ -457,6 +524,7 @@ with tab_dash:
             extra_rows = edited.iloc[len(filtered):]
             st.session_state.deals = pd.concat([st.session_state.deals, extra_rows], ignore_index=True)
         st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+        sheets.sync_table("deals", st.session_state.deals)
 
     st.markdown("---")
     st.markdown("#### Quick profit view per deal (30/70 · 50/50)")
@@ -582,10 +650,15 @@ with tab_inv:
     if "inventory_by_ws" not in st.session_state:
         st.session_state.inventory_by_ws = {}
     if WORKSPACE not in st.session_state.inventory_by_ws:
-        st.session_state.inventory_by_ws[WORKSPACE] = pd.DataFrame([
-            {"Item Name": "Sample: Vintage Camera", "Category": "Collectibles", "Cost Basis": 40.0, "List Price": 120.0,
-             "Status": "Available", "Description": "Edit or delete me", "Notes": "Edit or delete me"},
-        ] if WORKSPACE == "business" else [], columns=["Item Name", "Category", "Cost Basis", "List Price", "Status", "Description", "Notes"])
+        _sheet_inv = sheets.load_df("inventory")
+        if _sheet_inv is not None:
+            st.session_state.inventory_by_ws[WORKSPACE] = _sheet_inv
+            sheets.mark_synced("inventory", _sheet_inv)
+        else:
+            st.session_state.inventory_by_ws[WORKSPACE] = pd.DataFrame([
+                {"Item Name": "Sample: Vintage Camera", "Category": "Collectibles", "Cost Basis": 40.0, "List Price": 120.0,
+                 "Status": "Available", "Description": "Edit or delete me", "Notes": "Edit or delete me"},
+            ] if WORKSPACE == "business" else [], columns=["Item Name", "Category", "Cost Basis", "List Price", "Status", "Description", "Notes"])
 
     # Backward-compat: older sessions/rows created before these columns existed
     for _col, _default in [("Status", "Available"), ("Category", "Other"), ("Description", ""), ("Barcode", "")]:
@@ -645,6 +718,7 @@ with tab_inv:
                     st.session_state.inventory_by_ws[WORKSPACE] = pd.concat(
                         [st.session_state.inventory_by_ws[WORKSPACE], new_row], ignore_index=True
                     )
+                    sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE])
                     st.success(f"Added {new_barcode_name.strip()} with barcode {code}.")
                     st.session_state.last_scanned_barcode = None
                     st.rerun()
@@ -698,6 +772,7 @@ with tab_inv:
         },
     )
     st.session_state.inventory_by_ws[WORKSPACE] = edited_inv
+    sheets.sync_table("inventory", edited_inv)
 
     if len(edited_inv):
         disp = edited_inv.copy()
@@ -738,19 +813,24 @@ with tab_sup:
     if "suppliers_by_ws" not in st.session_state:
         st.session_state.suppliers_by_ws = {}
     if WORKSPACE not in st.session_state.suppliers_by_ws:
-        st.session_state.suppliers_by_ws[WORKSPACE] = pd.DataFrame([
-            {
-                "Supplier Name": "Sample: Caring Transitions Charleston", "Contact Person": "Ann",
-                "Phone": "", "Email": "", "Tier": 2, "Category": "Estate sale",
-                "First Contact Date": date.today().isoformat(), "Last Contact Date": date.today().isoformat(),
-                "Relationship Status": "Warm", "Compliance Doc Status": "N/A", "Value Potential": "Medium",
-                "Notes": "Edit or delete me",
-            }
-        ] if WORKSPACE == "business" else [], columns=[
-            "Supplier Name", "Contact Person", "Phone", "Email", "Tier", "Category",
-            "First Contact Date", "Last Contact Date", "Relationship Status",
-            "Compliance Doc Status", "Value Potential", "Notes",
-        ])
+        _sheet_sup = sheets.load_df("suppliers")
+        if _sheet_sup is not None:
+            st.session_state.suppliers_by_ws[WORKSPACE] = _sheet_sup
+            sheets.mark_synced("suppliers", _sheet_sup)
+        else:
+            st.session_state.suppliers_by_ws[WORKSPACE] = pd.DataFrame([
+                {
+                    "Supplier Name": "Sample: Caring Transitions Charleston", "Contact Person": "Ann",
+                    "Phone": "", "Email": "", "Tier": 2, "Category": "Estate sale",
+                    "First Contact Date": date.today().isoformat(), "Last Contact Date": date.today().isoformat(),
+                    "Relationship Status": "Warm", "Compliance Doc Status": "N/A", "Value Potential": "Medium",
+                    "Notes": "Edit or delete me",
+                }
+            ] if WORKSPACE == "business" else [], columns=[
+                "Supplier Name", "Contact Person", "Phone", "Email", "Tier", "Category",
+                "First Contact Date", "Last Contact Date", "Relationship Status",
+                "Compliance Doc Status", "Value Potential", "Notes",
+            ])
 
     sup_df = st.session_state.suppliers_by_ws[WORKSPACE].copy()
 
@@ -797,6 +877,7 @@ with tab_sup:
         },
     )
     st.session_state.suppliers_by_ws[WORKSPACE] = edited_sup
+    sheets.sync_table("suppliers", edited_sup)
 
     if view != "All" and len(view_df):
         st.markdown("---")
@@ -820,12 +901,17 @@ with tab_cust:
     if "customers_by_ws" not in st.session_state:
         st.session_state.customers_by_ws = {}
     if WORKSPACE not in st.session_state.customers_by_ws:
-        st.session_state.customers_by_ws[WORKSPACE] = pd.DataFrame([
-            {"Customer Name": "Sample: Ann Whitfield", "Phone": "", "Email": "", "Segment": "Regular",
-             "First Visit Date": date.today().isoformat(), "Notes": "Edit or delete me"},
-        ] if WORKSPACE == "business" else [], columns=[
-            "Customer Name", "Phone", "Email", "Segment", "First Visit Date", "Notes",
-        ])
+        _sheet_cust = sheets.load_df("customers")
+        if _sheet_cust is not None:
+            st.session_state.customers_by_ws[WORKSPACE] = _sheet_cust
+            sheets.mark_synced("customers", _sheet_cust)
+        else:
+            st.session_state.customers_by_ws[WORKSPACE] = pd.DataFrame([
+                {"Customer Name": "Sample: Ann Whitfield", "Phone": "", "Email": "", "Segment": "Regular",
+                 "First Visit Date": date.today().isoformat(), "Notes": "Edit or delete me"},
+            ] if WORKSPACE == "business" else [], columns=[
+                "Customer Name", "Phone", "Email", "Segment", "First Visit Date", "Notes",
+            ])
 
     st.markdown("#### Customers")
     st.caption("Total Spent, Last Purchase, and # of Purchases are computed automatically from the Sales Log on the Point of Sale tab - never entered by hand, so they can't drift out of sync.")
@@ -840,6 +926,7 @@ with tab_cust:
         },
     )
     st.session_state.customers_by_ws[WORKSPACE] = edited_cust
+    sheets.sync_table("customers", edited_cust)
 
     sales_log_for_cust = st.session_state.get("sales_log_by_ws", {}).get(WORKSPACE, [])
     if len(edited_cust):
@@ -1063,6 +1150,7 @@ with tab_charge:
                         if len(match):
                             inv_df_live.loc[match.index[0], "Status"] = "Sold"
                 st.session_state.inventory_by_ws[WORKSPACE] = inv_df_live
+                sheets.sync_table("inventory", inv_df_live)
 
             st.session_state.sales_log_by_ws[WORKSPACE].append({
                 "Invoice #": invoice_num,
@@ -1076,6 +1164,7 @@ with tab_charge:
                 "Status": status,
                 "Link": link_url,
             })
+            sheets.sync_table("sales_log", pd.DataFrame(st.session_state.sales_log_by_ws[WORKSPACE]))
             st.session_state.cart_by_ws[WORKSPACE] = []
 
             st.session_state.pos_last_sale = {
@@ -1235,6 +1324,7 @@ with tab_ai:
                 st.session_state.inventory_by_ws[WORKSPACE] = pd.concat(
                     [st.session_state.inventory_by_ws[WORKSPACE], new_item], ignore_index=True
                 )
+                sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE])
                 st.success("Added to Inventory \u2014 go set the real Cost Basis on the Inventory tab.")
                 st.session_state.ai_last_result = None
 
