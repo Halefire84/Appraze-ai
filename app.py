@@ -9,6 +9,7 @@ Run locally (optional, no terminal needed for deployment - see DEPLOY.md):
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime
 import io
@@ -35,6 +36,51 @@ st.set_page_config(
     # at auctions and at a POS station - land on the dashboard instead of a
     # sidebar that covers almost the whole screen on first load.
     initial_sidebar_state="auto",
+)
+
+# --------------------------------------------------------------------------
+# PWA MANIFEST + ICONS ("Install as app" from Chrome, incl. on Windows 11)
+# --------------------------------------------------------------------------
+# Streamlit doesn't expose an API to add tags to the page <head>, so this
+# runs a tiny script inside a components.v1.html iframe. That iframe is
+# same-origin with the parent page (it's rendered via srcdoc, which inherits
+# the parent's origin), so it can reach window.parent.document.head - a
+# well-known pattern for injecting things Streamlit has no API for (a PWA
+# manifest and touch icons, here). Guarded so a rerun doesn't add duplicates.
+# Requires enableStaticServing=true in .streamlit/config.toml, which serves
+# ./static/* at <app-url>/app/static/* - see static/manifest.json.
+components.html(
+    """
+    <script>
+    (function() {
+        const doc = window.parent.document;
+        if (doc.querySelector('link[rel="manifest"]')) return;
+
+        const manifest = doc.createElement('link');
+        manifest.rel = 'manifest';
+        manifest.href = 'app/static/manifest.json';
+        doc.head.appendChild(manifest);
+
+        const icon = doc.createElement('link');
+        icon.rel = 'icon';
+        icon.type = 'image/png';
+        icon.sizes = '192x192';
+        icon.href = 'app/static/icon-192.png';
+        doc.head.appendChild(icon);
+
+        const appleIcon = doc.createElement('link');
+        appleIcon.rel = 'apple-touch-icon';
+        appleIcon.href = 'app/static/icon-192.png';
+        doc.head.appendChild(appleIcon);
+
+        const themeColor = doc.createElement('meta');
+        themeColor.name = 'theme-color';
+        themeColor.content = '#0b0f14';
+        doc.head.appendChild(themeColor);
+    })();
+    </script>
+    """,
+    height=0,
 )
 
 DARK_CSS = """
