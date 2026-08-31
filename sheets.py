@@ -25,6 +25,12 @@ Setup, one time, in Google Cloud Console:
     5. Reload the app. Worksheets (tabs) for each table are created
        automatically inside that spreadsheet on first use.
 
+Every function here takes a `workspace` name (defaulting to "business",
+the single-shared-workspace default) and reads/writes a separate worksheet
+per workspace+table - see app.py's APP_PASSWORDS multi-tester login mode,
+where each isolated tester gets their own workspace and therefore their
+own tabs in the one shared spreadsheet, never colliding with each other.
+
 Without those two secrets set, every function below returns None/False and
 the app falls back to in-memory session state only - this mirrors the
 existing optional-secret pattern already used for STRIPE_SECRET_KEY and
@@ -113,7 +119,18 @@ def is_configured() -> bool:
     return bool(sheet_id) and _get_client() is not None
 
 
-def _get_or_create_worksheet(sheet_name: str):
+def _worksheet_title(sheet_name: str, workspace: str) -> str:
+    # "business" is the original single-workspace default - kept unprefixed
+    # so anyone who already set up a Sheet before multi-workspace support
+    # existed doesn't have their tabs silently renamed out from under them.
+    # Any other workspace (one of a handful of isolated testers) gets its
+    # own suffixed tab so their data never collides with anyone else's.
+    if workspace == "business":
+        return sheet_name
+    return f"{sheet_name}__{workspace}"
+
+
+def _get_or_create_worksheet(sheet_name: str, workspace: str):
     client = _get_client()
     try:
         sheet_id = st.secrets.get("GOOGLE_SHEET_ID")
@@ -122,21 +139,23 @@ def _get_or_create_worksheet(sheet_name: str):
     if client is None or not sheet_id:
         return None
     columns = TABLE_COLUMNS[sheet_name]
+    title = _worksheet_title(sheet_name, workspace)
     spreadsheet = client.open_by_key(sheet_id)
     try:
-        return spreadsheet.worksheet(sheet_name)
+        return spreadsheet.worksheet(title)
     except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=sheet_name, rows=200, cols=max(len(columns), 10))
+        ws = spreadsheet.add_worksheet(title=title, rows=200, cols=max(len(columns), 10))
         ws.append_row(columns)
         return ws
 
 
-def load_df(sheet_name: str):
-    """Returns a DataFrame for the given table, or None if Sheets isn't
-    configured/reachable (caller should fall back to local defaults)."""
+def load_df(sheet_name: str, workspace: str = "business"):
+    """Returns a DataFrame for the given table + workspace, or None if
+    Sheets isn't configured/reachable (caller should fall back to local
+    defaults)."""
     columns = TABLE_COLUMNS[sheet_name]
     try:
-        ws = _get_or_create_worksheet(sheet_name)
+        ws = _get_or_create_worksheet(sheet_name, workspace)
         if ws is None:
             return None
         records = ws.get_all_records()
@@ -154,11 +173,12 @@ def load_df(sheet_name: str):
         return None
 
 
-def save_df(sheet_name: str, df: pd.DataFrame) -> bool:
-    """Overwrites the given worksheet with df's contents. Returns True on success."""
+def save_df(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -> bool:
+    """Overwrites the given table + workspace's worksheet with df's contents.
+    Returns True on success."""
     columns = TABLE_COLUMNS[sheet_name]
     try:
-        ws = _get_or_create_worksheet(sheet_name)
+        ws = _get_or_create_worksheet(sheet_name, workspace)
         if ws is None:
             return False
         out = df.reindex(columns=columns).fillna("")
@@ -169,24 +189,24 @@ def save_df(sheet_name: str, df: pd.DataFrame) -> bool:
         return False
 
 
-def sync_table(sheet_name: str, df: pd.DataFrame) -> None:
+def sync_table(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -> None:
     """Persists df to Sheets only if it actually changed since the last sync
     this session - avoids hammering the Sheets API on every Streamlit rerun
     (the whole script re-executes on every widget interaction, not just
     edits to this particular table)."""
     if not is_configured():
         return
-    cache_key = f"_sheets_synced_{sheet_name}"
+    cache_key = f"_sheets_synced_{workspace}_{sheet_name}"
     prev = st.session_state.get(cache_key)
     try:
         changed = prev is None or not df.reset_index(drop=True).equals(prev.reset_index(drop=True))
     except Exception:
         changed = True
-    if changed and save_df(sheet_name, df):
+    if changed and save_df(sheet_name, df, workspace):
         st.session_state[cache_key] = df.copy()
 
 
-def mark_synced(sheet_name: str, df: pd.DataFrame) -> None:
+def mark_synced(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -> None:
     """Records df as already in sync (used right after a fresh load, so we
     don't immediately re-save the data we just read)."""
-    st.session_state[f"_sheets_synced_{sheet_name}"] = df.copy()
+    st.session_state[f"_sheets_synced_{workspace}_{sheet_name}"] = df.copy()

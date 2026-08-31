@@ -182,22 +182,42 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 # --------------------------------------------------------------------------
 # LOGIN GATE
 # --------------------------------------------------------------------------
-# Single-user login. This template gets customized per customer, so there's
-# just one password gate here rather than multiple named accounts.
+# Two modes, both password-only (no usernames):
 #
-# The password lives in Streamlit's Secrets manager (Settings -> Secrets on
-# Streamlit Community Cloud), never hardcoded here. Set this secret:
+# Single-user (default): one shared password gates one shared workspace.
+# Set this secret:
 #   APP_PASSWORD = "whatever you pick"
-# If it isn't set yet, the app falls back to a placeholder so it still runs
-# on first deploy - set the real one in Secrets before sharing the link.
+#
+# Multi-tester (for handing this out to a few people to test in isolation):
+# set APP_PASSWORDS instead - each entry is its own password mapped to its
+# own workspace name, so each person gets their own separate deals /
+# inventory / suppliers / customers / sales log, invisible to the others.
+# When set, this takes priority over APP_PASSWORD.
+#   [APP_PASSWORDS]
+#   a = "password1"
+#   b = "password2"
+#   c = "password3"
+#   d = "password4"
+#
+# Passwords live in Streamlit's Secrets manager (Settings -> Secrets on
+# Streamlit Community Cloud), never hardcoded here. If neither secret is
+# set yet, the app falls back to a placeholder so it still runs on first
+# deploy - set the real one(s) in Secrets before sharing the link.
 
-WORKSPACE = "business"
-
-def _get_password() -> str:
+def _get_password_workspace_map() -> dict:
+    """Returns {password: workspace_name}. Prefers APP_PASSWORDS (multiple
+    isolated testers) over the single-workspace APP_PASSWORD fallback."""
     try:
-        return st.secrets.get("APP_PASSWORD", "changeme")
+        multi = st.secrets.get("APP_PASSWORDS", None)
     except Exception:
-        return "changeme"
+        multi = None
+    if multi:
+        return {password: workspace for workspace, password in dict(multi).items()}
+    try:
+        single = st.secrets.get("APP_PASSWORD", "changeme")
+    except Exception:
+        single = "changeme"
+    return {single: "business"}
 
 def login_screen():
     st.markdown(
@@ -213,14 +233,19 @@ def login_screen():
     with col2:
         st.write("")
         pwd = st.text_input("Password", type="password", key="login_pwd")
-        expected = _get_password()
+        password_workspace_map = _get_password_workspace_map()
 
         if st.button("Sign in", width="stretch"):
-            if secrets.compare_digest(pwd, expected):
+            matched_workspace = next(
+                (ws for valid_pwd, ws in password_workspace_map.items() if secrets.compare_digest(pwd, valid_pwd)),
+                None,
+            )
+            if matched_workspace:
                 st.session_state.authed = True
+                st.session_state.workspace = matched_workspace
                 st.rerun()
             else:
-                st.error("Wrong password. Set or find the current one under Settings \u2192 Secrets \u2192 APP_PASSWORD.")
+                st.error("Wrong password. Set or find the current one(s) under Settings \u2192 Secrets \u2192 APP_PASSWORD or APP_PASSWORDS.")
 
 if "authed" not in st.session_state:
     st.session_state.authed = False
@@ -228,6 +253,8 @@ if "authed" not in st.session_state:
 if not st.session_state.authed:
     login_screen()
     st.stop()
+
+WORKSPACE = st.session_state.workspace
 
 DISPLAY_NAME = "Owner"
 
@@ -242,12 +269,12 @@ if "deals_by_ws" not in st.session_state:
     st.session_state.deals_by_ws = {}
 
 if WORKSPACE not in st.session_state.deals_by_ws:
-    _sheet_deals = sheets.load_df("deals")
+    _sheet_deals = sheets.load_df("deals", WORKSPACE)
     if _sheet_deals is not None:
         # Sheets is configured - it's the source of truth, so never seed the
         # dev sample row into someone's real persisted business data.
         st.session_state.deals_by_ws[WORKSPACE] = _sheet_deals
-        sheets.mark_synced("deals", _sheet_deals)
+        sheets.mark_synced("deals", _sheet_deals, WORKSPACE)
     elif WORKSPACE == "business":
         st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame([
             {
@@ -334,7 +361,7 @@ with st.sidebar:
                     [st.session_state.deals, new_row], ignore_index=True
                 )
                 st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
-                sheets.sync_table("deals", st.session_state.deals)
+                sheets.sync_table("deals", st.session_state.deals, WORKSPACE)
                 st.session_state.editor_key += 1
                 st.success(f"Added: {item.strip()}")
 
@@ -355,7 +382,7 @@ with st.sidebar:
                     [st.session_state.deals, imported], ignore_index=True
                 )
                 st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
-                sheets.sync_table("deals", st.session_state.deals)
+                sheets.sync_table("deals", st.session_state.deals, WORKSPACE)
                 st.success(f"Imported {len(imported)} rows.")
             else:
                 st.error(f"CSV must include columns: {', '.join(required)}")
@@ -474,10 +501,10 @@ with tab_inv_home:
     if "sales_log_by_ws" not in st.session_state:
         st.session_state.sales_log_by_ws = {}
     if WORKSPACE not in st.session_state.sales_log_by_ws:
-        _sheet_sales = sheets.load_df("sales_log")
+        _sheet_sales = sheets.load_df("sales_log", WORKSPACE)
         if _sheet_sales is not None:
             st.session_state.sales_log_by_ws[WORKSPACE] = _sheet_sales.to_dict("records")
-            sheets.mark_synced("sales_log", _sheet_sales)
+            sheets.mark_synced("sales_log", _sheet_sales, WORKSPACE)
         else:
             st.session_state.sales_log_by_ws[WORKSPACE] = []
 
@@ -594,7 +621,7 @@ with tab_dash:
             extra_rows = edited.iloc[len(filtered):]
             st.session_state.deals = pd.concat([st.session_state.deals, extra_rows], ignore_index=True)
         st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
-        sheets.sync_table("deals", st.session_state.deals)
+        sheets.sync_table("deals", st.session_state.deals, WORKSPACE)
 
     st.markdown("---")
     st.markdown("#### Quick profit view per deal (30/70 · 50/50)")
@@ -720,10 +747,10 @@ with tab_inv:
     if "inventory_by_ws" not in st.session_state:
         st.session_state.inventory_by_ws = {}
     if WORKSPACE not in st.session_state.inventory_by_ws:
-        _sheet_inv = sheets.load_df("inventory")
+        _sheet_inv = sheets.load_df("inventory", WORKSPACE)
         if _sheet_inv is not None:
             st.session_state.inventory_by_ws[WORKSPACE] = _sheet_inv
-            sheets.mark_synced("inventory", _sheet_inv)
+            sheets.mark_synced("inventory", _sheet_inv, WORKSPACE)
         else:
             st.session_state.inventory_by_ws[WORKSPACE] = pd.DataFrame([
                 {"Item Name": "Sample: Vintage Camera", "Category": "Collectibles", "Cost Basis": 40.0, "List Price": 120.0,
@@ -788,7 +815,7 @@ with tab_inv:
                     st.session_state.inventory_by_ws[WORKSPACE] = pd.concat(
                         [st.session_state.inventory_by_ws[WORKSPACE], new_row], ignore_index=True
                     )
-                    sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE])
+                    sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE], WORKSPACE)
                     st.success(f"Added {new_barcode_name.strip()} with barcode {code}.")
                     st.session_state.last_scanned_barcode = None
                     st.rerun()
@@ -842,7 +869,7 @@ with tab_inv:
         },
     )
     st.session_state.inventory_by_ws[WORKSPACE] = edited_inv
-    sheets.sync_table("inventory", edited_inv)
+    sheets.sync_table("inventory", edited_inv, WORKSPACE)
 
     if len(edited_inv):
         disp = edited_inv.copy()
@@ -883,10 +910,10 @@ with tab_sup:
     if "suppliers_by_ws" not in st.session_state:
         st.session_state.suppliers_by_ws = {}
     if WORKSPACE not in st.session_state.suppliers_by_ws:
-        _sheet_sup = sheets.load_df("suppliers")
+        _sheet_sup = sheets.load_df("suppliers", WORKSPACE)
         if _sheet_sup is not None:
             st.session_state.suppliers_by_ws[WORKSPACE] = _sheet_sup
-            sheets.mark_synced("suppliers", _sheet_sup)
+            sheets.mark_synced("suppliers", _sheet_sup, WORKSPACE)
         else:
             st.session_state.suppliers_by_ws[WORKSPACE] = pd.DataFrame([
                 {
@@ -947,7 +974,7 @@ with tab_sup:
         },
     )
     st.session_state.suppliers_by_ws[WORKSPACE] = edited_sup
-    sheets.sync_table("suppliers", edited_sup)
+    sheets.sync_table("suppliers", edited_sup, WORKSPACE)
 
     if view != "All" and len(view_df):
         st.markdown("---")
@@ -971,10 +998,10 @@ with tab_cust:
     if "customers_by_ws" not in st.session_state:
         st.session_state.customers_by_ws = {}
     if WORKSPACE not in st.session_state.customers_by_ws:
-        _sheet_cust = sheets.load_df("customers")
+        _sheet_cust = sheets.load_df("customers", WORKSPACE)
         if _sheet_cust is not None:
             st.session_state.customers_by_ws[WORKSPACE] = _sheet_cust
-            sheets.mark_synced("customers", _sheet_cust)
+            sheets.mark_synced("customers", _sheet_cust, WORKSPACE)
         else:
             st.session_state.customers_by_ws[WORKSPACE] = pd.DataFrame([
                 {"Customer Name": "Sample: Ann Whitfield", "Phone": "", "Email": "", "Segment": "Regular",
@@ -996,7 +1023,7 @@ with tab_cust:
         },
     )
     st.session_state.customers_by_ws[WORKSPACE] = edited_cust
-    sheets.sync_table("customers", edited_cust)
+    sheets.sync_table("customers", edited_cust, WORKSPACE)
 
     sales_log_for_cust = st.session_state.get("sales_log_by_ws", {}).get(WORKSPACE, [])
     if len(edited_cust):
@@ -1220,7 +1247,7 @@ with tab_charge:
                         if len(match):
                             inv_df_live.loc[match.index[0], "Status"] = "Sold"
                 st.session_state.inventory_by_ws[WORKSPACE] = inv_df_live
-                sheets.sync_table("inventory", inv_df_live)
+                sheets.sync_table("inventory", inv_df_live, WORKSPACE)
 
             st.session_state.sales_log_by_ws[WORKSPACE].append({
                 "Invoice #": invoice_num,
@@ -1234,7 +1261,7 @@ with tab_charge:
                 "Status": status,
                 "Link": link_url,
             })
-            sheets.sync_table("sales_log", pd.DataFrame(st.session_state.sales_log_by_ws[WORKSPACE]))
+            sheets.sync_table("sales_log", pd.DataFrame(st.session_state.sales_log_by_ws[WORKSPACE]), WORKSPACE)
             st.session_state.cart_by_ws[WORKSPACE] = []
 
             st.session_state.pos_last_sale = {
@@ -1394,7 +1421,7 @@ with tab_ai:
                 st.session_state.inventory_by_ws[WORKSPACE] = pd.concat(
                     [st.session_state.inventory_by_ws[WORKSPACE], new_item], ignore_index=True
                 )
-                sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE])
+                sheets.sync_table("inventory", st.session_state.inventory_by_ws[WORKSPACE], WORKSPACE)
                 st.success("Added to Inventory \u2014 go set the real Cost Basis on the Inventory tab.")
                 st.session_state.ai_last_result = None
 
