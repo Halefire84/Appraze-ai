@@ -90,14 +90,30 @@ This connects read-only over IMAP — Appraze never sends, replies to,
 deletes, or modifies anything in the inbox.
 
 It's one shared inbox for the whole app (not a separate one per
-`APP_PASSWORDS` tester), so it only shows up in the workspace named
-`"business"` by default — every other workspace sees "not available on
-this deployment" instead of the owner's real email. If your own workspace
-in `APP_PASSWORDS` is named something else (e.g. `owner`), set:
+`APP_PASSWORDS` tester), so it only shows up in the owner's own workspace
+by default (see `OWNER_WORKSPACE` below) — every other workspace sees "not
+available on this deployment" instead of the owner's real email. To point
+Mail at a different workspace than `OWNER_WORKSPACE` specifically, set:
 
 ```toml
 MAIL_WORKSPACE = "owner"
 ```
+
+### Owner workspace (which login is "you")
+
+```toml
+OWNER_WORKSPACE = "owner"
+```
+
+Defaults to `"business"` (the single-`APP_PASSWORD` default). Set this if
+you're running multi-tester mode (`APP_PASSWORDS`) and your own workspace
+key is named something else, e.g. `owner = [...]`. This gates two things
+to your workspace only, invisible to every demo tester: the Mail tab
+(unless overridden separately by `MAIL_WORKSPACE`), and a "Debug detail"
+expander that appears under a failed Stripe/AI Analyzer request showing
+the real underlying error (invalid key, out of credits, rate limit,
+wrong model name, etc.) — useful while you're the one testing; safe to
+leave configured for a real launch since testers never see it.
 
 ### Card payments (Point of Sale tab)
 

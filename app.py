@@ -393,6 +393,34 @@ def friendly_api_error(service: str, status_code, raw_body: str, secret_name: st
     return f"{service} couldn't complete this request right now (no further detail given). Try again in a moment."
 
 
+def _is_owner_workspace() -> bool:
+    """True if the current session is the app owner's own workspace, not a
+    demo tester's - default "business" (the single-APP_PASSWORD default),
+    overridable via an OWNER_WORKSPACE secret for multi-tester setups that
+    use a different name for the owner's own workspace (e.g. the
+    `owner = [...]` key from the APP_PASSWORDS comment above). Gates
+    anything that should only be visible to the person running the
+    business, never to outside testers - the Mail tab, and the debug
+    detail on API errors below."""
+    try:
+        owner_workspace = st.secrets.get("OWNER_WORKSPACE", "business")
+    except Exception:
+        owner_workspace = "business"
+    return WORKSPACE == owner_workspace
+
+
+def show_debug_detail(detail: str) -> None:
+    """Shows the real, technical error behind a friendly_api_error() message
+    - but only in the owner's own workspace, never to demo testers - so you
+    can actually diagnose a real problem (invalid key, out of credits,
+    wrong model name, rate limit) without exposing internals to anyone
+    else with app access. Safe to leave in for a real launch since it's
+    invisible to every workspace but yours."""
+    if _is_owner_workspace():
+        with st.expander("Debug detail (only visible in the owner's workspace)"):
+            st.code(detail, language=None)
+
+
 # --------------------------------------------------------------------------
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
@@ -681,14 +709,12 @@ with tab_mail:
     # APP_PASSWORDS workspace would leak the owner's real business email
     # (subjects, senders, detected invoice/tracking data) to every demo
     # tester, which breaks the isolation every other tab already gives
-    # them. Restrict it to one configured workspace - defaults to
-    # "business" (the single-APP_PASSWORD default, and the workspace name
-    # already treated as the owner's for sample-data seeding above), but
-    # overridable via a MAIL_WORKSPACE secret for anyone running
-    # multi-tester mode with a differently-named owner workspace (e.g. the
-    # `owner = [...]` key from this file's APP_PASSWORDS comment).
+    # them. Restrict it to the owner's workspace (see _is_owner_workspace)
+    # by default, but allow a separate MAIL_WORKSPACE override in case Mail
+    # should ever be shown somewhere other than wherever OWNER_WORKSPACE
+    # points.
     try:
-        _mail_workspace = st.secrets.get("MAIL_WORKSPACE", "business")
+        _mail_workspace = st.secrets.get("MAIL_WORKSPACE", None) or st.secrets.get("OWNER_WORKSPACE", "business")
     except Exception:
         _mail_workspace = "business"
     if WORKSPACE != _mail_workspace:
@@ -1423,10 +1449,13 @@ with tab_charge:
                     link_url = result.get("url", "") if isinstance(result, dict) else ""
                     status = "Awaiting Payment"
                 except urllib.error.HTTPError as e:
-                    st.error(friendly_api_error("Stripe", e.code, e.read().decode(errors="ignore"), "STRIPE_SECRET_KEY"))
+                    raw_body = e.read().decode(errors="ignore")
+                    st.error(friendly_api_error("Stripe", e.code, raw_body, "STRIPE_SECRET_KEY"))
+                    show_debug_detail(f"HTTP {e.code}: {raw_body}")
                     st.stop()
-                except Exception:
+                except Exception as e:
                     st.error("Couldn't reach Stripe right now — check your network connection and try again. Nothing was charged.")
+                    show_debug_detail(f"{type(e).__name__}: {e}")
                     st.stop()
 
             # Mark inventory-sourced items as Sold so they don't get sold twice
@@ -1546,11 +1575,18 @@ with tab_ai:
                     # make the button click silently do nothing.
                     st.session_state.ai_last_result = parsed
                 except urllib.error.HTTPError as e:
-                    st.error(friendly_api_error("Claude (Anthropic)", e.code, e.read().decode(errors="ignore"), "ANTHROPIC_API_KEY"))
-                except json.JSONDecodeError:
+                    raw_body = e.read().decode(errors="ignore")
+                    st.error(friendly_api_error("Claude (Anthropic)", e.code, raw_body, "ANTHROPIC_API_KEY"))
+                    show_debug_detail(f"HTTP {e.code}: {raw_body}")
+                except json.JSONDecodeError as e:
                     st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
-                except Exception:
+                    # raw_text is only set once the outer response itself parsed as
+                    # JSON (line ~1570) - a malformed top-level response can raise
+                    # this same exception type before that assignment happens.
+                    show_debug_detail(f"{type(e).__name__}: {e}\n\nraw_text:\n{locals().get('raw_text', '(not available)')}")
+                except Exception as e:
                     st.error("Couldn't reach the AI service right now \u2014 check your network connection and try again.")
+                    show_debug_detail(f"{type(e).__name__}: {e}")
 
         if st.session_state.get("ai_last_result"):
             parsed = st.session_state.ai_last_result
