@@ -64,6 +64,21 @@ data lands in its own worksheet tabs inside that one spreadsheet (e.g.
 `deals__a`, `deals__b`), so you can watch everyone's data live without it
 colliding.
 
+### Mail tab (supplier invoices & tracking numbers)
+
+Without this, the Mail tab shows a "not connected" message instead of
+erroring. See `mail.py`'s docstring for the full one-time Gmail setup
+(turn on 2-Step Verification, create an App Password, confirm IMAP is
+enabled). Once you have those:
+
+```toml
+GMAIL_ADDRESS = "the inbox to watch, e.g. chale@cooperrivertradingco.com"
+GMAIL_APP_PASSWORD = "the 16-character App Password Google generated"
+```
+
+This connects read-only over IMAP — Appraze never sends, replies to,
+deletes, or modifies anything in the inbox.
+
 ### Card payments (Point of Sale tab)
 
 ```toml

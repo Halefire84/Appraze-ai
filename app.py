@@ -24,6 +24,7 @@ from finance import (
     melt_value, max_bid_after_premium, sales_tax, GOLD_PURITY, SILVER_PURITY,
 )
 import sheets
+import mail
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -445,6 +446,9 @@ with st.sidebar:
 - The AI Analyzer sends the photo and/or description you submit to Anthropic's API to generate
   an identification and value estimate — only what you explicitly submit on that tab is sent,
   and only when you click Analyze.
+- When the Mail tab is configured, it connects read-only to the Gmail inbox you specify via IMAP
+  to surface supplier invoices and shipment tracking numbers — this app never sends, replies to,
+  deletes, or modifies anything in that inbox.
 - Estimated values, verdicts, and suggested prices are informational only. You are responsible
   for your own purchase, pricing, and sale decisions.
 
@@ -455,7 +459,8 @@ with st.sidebar:
   Sheet you control, accessed via a service account you set up.
 - This app does not sell or share your data with third parties, other than the services you've
   explicitly configured (Stripe for payments, Anthropic for the AI Analyzer, Google for
-  persistence) — each only receives the specific data needed for that feature to work.
+  persistence, Gmail for the Mail tab) — each only receives the specific data needed for that
+  feature to work.
 - Supplier and customer contact info (name, phone, email) is stored only for your own
   recordkeeping and is never used for anything beyond that.
             """
@@ -497,8 +502,8 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_inv_home, tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
-    "🧾  Invoices", "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
+tab_inv_home, tab_mail, tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
+    "🧾  Invoices", "📬  Mail", "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "👤  Customers", "💳  Point of Sale", "🔍  AI Analyzer",
 ])
 
@@ -581,6 +586,80 @@ with tab_inv_home:
             file_name=f"appraze_invoices_{date.today().isoformat()}.csv",
             mime="text/csv",
         )
+
+# ==========================================================================
+# MAIL TAB — supplier invoices & shipment tracking numbers, read-only
+# ==========================================================================
+with tab_mail:
+    st.markdown("#### Supplier Mail — Invoices & Tracking Numbers")
+    st.caption(
+        "Read-only view of the inbox you connect below — flags anything that looks like a "
+        "shipment tracking number or a supplier invoice so you don't have to scroll through "
+        "Gmail by hand. Detection is best-effort; always check the original email before "
+        "relying on it. Appraze never sends, replies to, deletes, or modifies anything here."
+    )
+
+    if not mail.is_configured():
+        st.info(
+            "Not connected yet. Add two secrets under Settings → Secrets to turn this on:\n\n"
+            "- `GMAIL_ADDRESS` — the inbox to watch (e.g. chale@cooperrivertradingco.com)\n"
+            "- `GMAIL_APP_PASSWORD` — a 16-character Gmail App Password from "
+            "myaccount.google.com/apppasswords (not your normal login password)\n\n"
+            "See `mail.py`'s docstring for the full one-time setup."
+        )
+    else:
+        mcol1, mcol2 = st.columns([1, 3])
+        with mcol1:
+            mail_days = st.slider("Look back (days)", 1, 60, 14, key="mail_lookback_days")
+        with mcol2:
+            st.write("")
+            if st.button("\U0001f504 Refresh inbox"):
+                mail.fetch_recent_messages.clear()
+
+        mail_messages = mail.fetch_recent_messages(days=mail_days)
+
+        if mail_messages is None:
+            st.error(
+                "Couldn't connect to Gmail. Double-check `GMAIL_ADDRESS`/`GMAIL_APP_PASSWORD` in "
+                "Secrets, that IMAP is enabled on the account (Gmail Settings → Forwarding and "
+                "POP/IMAP), and that the App Password hasn't been revoked."
+            )
+        elif not mail_messages:
+            st.info(f"No messages in the last {mail_days} day(s).")
+        else:
+            mail_df = pd.DataFrame(mail_messages)
+
+            mm1, mm2, mm3 = st.columns(3)
+            with mm1:
+                st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Messages</div>
+                    <div class="kpi-value">{len(mail_df)}</div></div>""", unsafe_allow_html=True)
+            with mm2:
+                st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Tracking Detected</div>
+                    <div class="kpi-value">{int((mail_df['Category'] == 'Tracking').sum())}</div></div>""", unsafe_allow_html=True)
+            with mm3:
+                st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Invoices Detected</div>
+                    <div class="kpi-value">{int((mail_df['Category'] == 'Invoice').sum())}</div></div>""", unsafe_allow_html=True)
+
+            mail_cat_filter = st.multiselect(
+                "Filter by category", ["Tracking", "Invoice", "Other"],
+                default=["Tracking", "Invoice"], key="mail_cat_filter",
+            )
+            mail_filtered = mail_df[mail_df["Category"].isin(mail_cat_filter)] if mail_cat_filter else mail_df
+
+            st.dataframe(
+                mail_filtered,
+                width="stretch",
+                column_config={"Amount": st.column_config.NumberColumn(format="$%.2f")},
+            )
+
+            mail_csv_buffer = io.StringIO()
+            mail_df.to_csv(mail_csv_buffer, index=False)
+            st.download_button(
+                "Download Mail as CSV",
+                data=mail_csv_buffer.getvalue(),
+                file_name=f"appraze_mail_{date.today().isoformat()}.csv",
+                mime="text/csv",
+            )
 
 with tab_dash:
     st.markdown("#### Filters")
