@@ -34,7 +34,7 @@ Setup, one time, on the Google account being watched:
 Without those two secrets set, every function here returns None/False and
 the Mail tab just explains how to turn it on — this mirrors the existing
 optional-secret pattern already used for STRIPE_SECRET_KEY,
-ANTHROPIC_API_KEY, and GOOGLE_SHEET_ID/GOOGLE_SERVICE_ACCOUNT_JSON.
+ANTHROPIC_API_KEY, and APPS_SCRIPT_URL/APPS_SCRIPT_TOKEN (sheets.py).
 
 Split in two like sheets.py splits load/save from the rest of the app:
 the actual pattern-matching (detect_tracking, detect_invoice_ref, etc.) is

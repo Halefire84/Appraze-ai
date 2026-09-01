@@ -31,7 +31,8 @@ python3 -m unittest discover -s tests -v
 
 - `app.py` — the Streamlit UI, all tabs
 - `finance.py` — pure profit/margin/tax math, unit-tested, no Streamlit/pandas dependency
-- `sheets.py` — optional Google Sheets persistence layer
+- `sheets.py` — optional Google Sheets persistence layer, via a Google Apps Script Web App (no Google Cloud/IAM needed)
+- `appscript/Code.gs` — the Apps Script backend `sheets.py` talks to; paste into a Sheet's Extensions → Apps Script
 - `mail_parse.py` — pure tracking-number/invoice-ref detection, unit-tested, no dependencies
 - `mail.py` — optional read-only Gmail (IMAP) inbox tracking, built on `mail_parse.py`
 - `static/` — PWA manifest + icons for "Install as app"

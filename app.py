@@ -206,7 +206,7 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 # section - in TOML, a `[section]` header silently swallows every
 # `key = value` line that comes after it into that section, until the next
 # `[section]` header. So a bracketed `[APP_PASSWORDS]` followed later in the
-# same secrets box by GOOGLE_SHEET_ID/STRIPE_SECRET_KEY/etc (as a natural
+# same secrets box by APPS_SCRIPT_URL/STRIPE_SECRET_KEY/etc (as a natural
 # copy-paste top-to-bottom through this file's docs would do) makes those
 # secrets vanish into APP_PASSWORDS instead of being read as top-level
 # secrets - Sheets, Stripe, the AI Analyzer, and the Mail tab would all
@@ -244,8 +244,8 @@ def _get_password_workspace_map() -> dict:
 
 
 _OTHER_TOP_LEVEL_SECRET_NAMES = [
-    "GOOGLE_SHEET_ID", "GOOGLE_SERVICE_ACCOUNT_JSON", "STRIPE_SECRET_KEY",
-    "ANTHROPIC_API_KEY", "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "SUPPORT_EMAIL",
+    "APPS_SCRIPT_URL", "APPS_SCRIPT_TOKEN", "STRIPE_SECRET_KEY", "ANTHROPIC_API_KEY",
+    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "SUPPORT_EMAIL", "OWNER_WORKSPACE", "MAIL_WORKSPACE",
 ]
 
 
@@ -437,11 +437,11 @@ with st.sidebar:
         )
     if sheets.is_configured():
         if sheets.last_sync_failed():
-            st.caption("\u26a0\ufe0f Google Sheets sync just failed \u2014 your latest changes are only in this browser session for now. Check that GOOGLE_SHEET_ID is correct and the service account still has Editor access to the sheet, then make another edit to retry.")
+            st.caption("\u26a0\ufe0f Google Sheets sync just failed \u2014 your latest changes are only in this browser session for now. Check that APPS_SCRIPT_URL/APPS_SCRIPT_TOKEN are correct and the Apps Script is still deployed, then make another edit to retry.")
         else:
             st.caption("\u2705 Synced to Google Sheets \u2014 data persists across sessions.")
     else:
-        st.caption("\u26a0\ufe0f Not persisted \u2014 data lives only in this browser session and resets on reload. Add GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Secrets to enable saving.")
+        st.caption("\u26a0\ufe0f Not persisted \u2014 data lives only in this browser session and resets on reload. Add APPS_SCRIPT_URL and APPS_SCRIPT_TOKEN in Secrets to enable saving \u2014 see DEPLOY.md.")
     if st.button("Sign out", width="stretch"):
         st.session_state.authed = False
         st.rerun()
@@ -560,7 +560,7 @@ with st.sidebar:
 
 - Data entered in this app (deals, inventory, suppliers, customers, sales log) is stored either
   in this browser session only, or — when Google Sheets persistence is configured — in a Google
-  Sheet you control, accessed via a service account you set up.
+  Sheet you control, accessed via a small script you deploy on it yourself.
 - This app does not sell or share your data with third parties, other than the services you've
   explicitly configured (Stripe for payments, Anthropic for the AI Analyzer, Google for
   persistence, Gmail for the Mail tab) — each only receives the specific data needed for that

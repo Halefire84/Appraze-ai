@@ -41,7 +41,7 @@ APP_PASSWORDS = { a = "password1", b = "password2", c = "password3", d = "passwo
 
 ⚠️ **Use that one-line form, not a bracketed `[APP_PASSWORDS]` section.**
 In TOML, a `[section]` header silently swallows every `key = value` line
-pasted after it into that section — so if you paste `GOOGLE_SHEET_ID`,
+pasted after it into that section — so if you paste `APPS_SCRIPT_URL`,
 `STRIPE_SECRET_KEY`, etc. below a bracketed `[APP_PASSWORDS]` block (the
 natural thing to do, copying this doc top-to-bottom into one secrets box),
 those secrets vanish into `APP_PASSWORDS` instead of being read as their
@@ -59,20 +59,43 @@ before sharing the link.
 ### Persistence (optional, strongly recommended before real use)
 
 Without this, all data lives only in each browser session and resets on
-every reload or app restart. See `sheets.py`'s docstring for the full
-one-time Google Cloud setup (create a project, enable the Sheets + Drive
-APIs, create a service account, download its JSON key, share a spreadsheet
-with it). Once you have those:
+every reload or app restart.
+
+Backed by a small Google Apps Script Web App deployed from inside a Google
+Sheet — **no Google Cloud Console, no service account, no IAM at all.**
+(An earlier version of this used a Cloud service account key, but since May
+2024 new Google Cloud accounts get an "organization" auto-provisioned with
+a security baseline that disables service-account key creation by default
+— a dead end for anyone without an org-level admin to unblock it. Apps
+Script sidesteps that whole category of problem.)
+
+One-time setup, entirely inside Google Sheets (works fine on mobile):
+1. Create a blank Google Sheet (any name).
+2. **Extensions → Apps Script**. Delete the placeholder code, paste in the
+   full contents of [`appscript/Code.gs`](appscript/Code.gs) from this repo.
+3. Near the top, change `TOKEN = "REPLACE_WITH_YOUR_OWN_LONG_RANDOM_STRING"`
+   to a long random string of your own — treat it like a password.
+4. **Deploy → New deployment** → gear icon → **Web app**. Set "Execute as"
+   to **Me** and "Who has access" to **Anyone**. Click **Deploy**, and
+   authorize it when prompted (it's your own script running on your own
+   spreadsheet — the "Anyone" setting just means anyone who has the URL
+   *and* your token can reach it; without the right token every request is
+   rejected before it touches the sheet).
+5. Copy the **Web app URL** it gives you.
+
+Then set two Streamlit secrets:
 
 ```toml
-GOOGLE_SHEET_ID = "the spreadsheet ID from its URL"
-GOOGLE_SERVICE_ACCOUNT_JSON = '''{ ...full service-account JSON key... }'''
+APPS_SCRIPT_URL = "the Web app URL from step 5"
+APPS_SCRIPT_TOKEN = "the same string you set as TOKEN in step 3"
 ```
 
 With multi-tester login (`APP_PASSWORDS`) also configured, each tester's
 data lands in its own worksheet tabs inside that one spreadsheet (e.g.
 `deals__a`, `deals__b`), so you can watch everyone's data live without it
 colliding.
+
+See `sheets.py`'s docstring for more detail on how this works.
 
 ### Mail tab (supplier invoices & tracking numbers)
 
