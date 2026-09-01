@@ -54,6 +54,15 @@ import streamlit as st
 from mail_parse import classify_message, detect_amount, detect_invoice_ref, detect_tracking
 
 _IMAP_HOST = "imap.gmail.com"
+# imaplib has no default timeout - an unreachable/slow IMAP server would
+# otherwise hang the socket connect indefinitely, and since Streamlit runs
+# the whole script top-to-bottom on every rerun, that doesn't just break
+# this tab, it freezes the entire app for that session (nothing below the
+# Mail tab in app.py would ever render). The timeout applies to the
+# underlying socket for the connection's whole lifetime, so it also bounds
+# every later login/select/search/fetch call on the same connection, not
+# just the initial connect.
+_IMAP_TIMEOUT_SECONDS = 15
 
 
 def is_configured() -> bool:
@@ -75,7 +84,7 @@ def _connect():
     if not address or not app_password:
         return None
     try:
-        conn = imaplib.IMAP4_SSL(_IMAP_HOST)
+        conn = imaplib.IMAP4_SSL(_IMAP_HOST, timeout=_IMAP_TIMEOUT_SECONDS)
         conn.login(address, str(app_password).replace(" ", ""))
         return conn
     except Exception:

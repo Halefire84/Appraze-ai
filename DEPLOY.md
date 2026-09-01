@@ -36,12 +36,22 @@ invisible-to-the-others copy of every table (deals, inventory, suppliers,
 customers, sales log). Takes priority over `APP_PASSWORD` when set:
 
 ```toml
-[APP_PASSWORDS]
-a = "password1"
-b = "password2"
-c = "password3"
-d = "password4"
+APP_PASSWORDS = { a = "password1", b = "password2", c = "password3", d = "password4" }
 ```
+
+⚠️ **Use that one-line form, not a bracketed `[APP_PASSWORDS]` section.**
+In TOML, a `[section]` header silently swallows every `key = value` line
+pasted after it into that section — so if you paste `GOOGLE_SHEET_ID`,
+`STRIPE_SECRET_KEY`, etc. below a bracketed `[APP_PASSWORDS]` block (the
+natural thing to do, copying this doc top-to-bottom into one secrets box),
+those secrets vanish into `APP_PASSWORDS` instead of being read as their
+own secrets. Every other feature in the app would then look "not
+configured" with **no error anywhere** — this exact mistake is a common
+cause of "my testers' accounts don't seem connected to anything." The
+one-line form above avoids the trap entirely; if you ever paste a
+bracketed `[APP_PASSWORDS]` section instead, the sidebar will flag it for
+you after you log in with a "Secrets misconfigured" warning naming exactly
+which secrets got swallowed.
 
 If neither is set, the login password defaults to `changeme` — set one
 before sharing the link.
@@ -78,6 +88,16 @@ GMAIL_APP_PASSWORD = "the 16-character App Password Google generated"
 
 This connects read-only over IMAP — Appraze never sends, replies to,
 deletes, or modifies anything in the inbox.
+
+It's one shared inbox for the whole app (not a separate one per
+`APP_PASSWORDS` tester), so it only shows up in the workspace named
+`"business"` by default — every other workspace sees "not available on
+this deployment" instead of the owner's real email. If your own workspace
+in `APP_PASSWORDS` is named something else (e.g. `owner`), set:
+
+```toml
+MAIL_WORKSPACE = "owner"
+```
 
 ### Card payments (Point of Sale tab)
 

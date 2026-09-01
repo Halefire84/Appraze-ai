@@ -199,10 +199,21 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 # actually stays in sync across separate devices/sessions once Google
 # Sheets persistence (see sheets.py) is configured; without it, two people
 # using the same workspace still each get their own private in-memory copy.
-#   [APP_PASSWORDS]
-#   owner = ["my-password", "ashleys-password"]
-#   a = "password1"
-#   b = "password2"
+#   APP_PASSWORDS = { owner = ["my-password", "ashleys-password"], a = "password1", b = "password2" }
+#
+# Use that one-line inline-table form, not a bracketed `[APP_PASSWORDS]`
+# section - in TOML, a `[section]` header silently swallows every
+# `key = value` line that comes after it into that section, until the next
+# `[section]` header. So a bracketed `[APP_PASSWORDS]` followed later in the
+# same secrets box by GOOGLE_SHEET_ID/STRIPE_SECRET_KEY/etc (as a natural
+# copy-paste top-to-bottom through this file's docs would do) makes those
+# secrets vanish into APP_PASSWORDS instead of being read as top-level
+# secrets - Sheets, Stripe, the AI Analyzer, and the Mail tab would all
+# silently stop working with no error anywhere, since every st.secrets.get()
+# in this app treats "missing" as just "not configured yet". The inline
+# form isn't order-sensitive, so it can't be broken this way. (See also
+# _detect_swallowed_secrets() below, which watches for exactly this and
+# surfaces a warning if it happens anyway.)
 #
 # Passwords live in Streamlit's Secrets manager (Settings -> Secrets on
 # Streamlit Community Cloud), never hardcoded here. If neither secret is
@@ -229,6 +240,33 @@ def _get_password_workspace_map() -> dict:
     except Exception:
         single = "changeme"
     return {single: "business"}
+
+
+_OTHER_TOP_LEVEL_SECRET_NAMES = [
+    "GOOGLE_SHEET_ID", "GOOGLE_SERVICE_ACCOUNT_JSON", "STRIPE_SECRET_KEY",
+    "ANTHROPIC_API_KEY", "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "SUPPORT_EMAIL",
+]
+
+
+def _detect_swallowed_secrets() -> list:
+    """Returns the names of any other Appraze secrets that accidentally
+    ended up nested inside APP_PASSWORDS instead of being top-level secrets
+    - the classic TOML footgun where a bracketed `[APP_PASSWORDS]` section
+    silently swallows every `key = value` line that follows it (see the
+    comment above this function). Those secrets would otherwise just look
+    "not configured" with no indication why, since every st.secrets.get()
+    in this app treats "missing" and "swallowed by TOML" identically."""
+    try:
+        multi = st.secrets.get("APP_PASSWORDS", None)
+    except Exception:
+        return []
+    if not multi:
+        return []
+    try:
+        return [name for name in _OTHER_TOP_LEVEL_SECRET_NAMES if name in dict(multi)]
+    except Exception:
+        return []
+
 
 def login_screen():
     st.markdown(
@@ -325,12 +363,49 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def friendly_api_error(service: str, status_code, raw_body: str, secret_name: str) -> str:
+    """Turns a raw HTTPError body from Stripe/Anthropic into a message a
+    non-technical demo tester can actually understand, instead of a wall of
+    JSON. Best-effort: falls back to a generic message if the body isn't
+    the {"error": {"message": ...}} shape both APIs use - this is a UX
+    nicety, not something that should ever itself raise."""
+    message = ""
+    try:
+        parsed = json.loads(raw_body)
+        error_obj = parsed.get("error") if isinstance(parsed, dict) else None
+        if isinstance(error_obj, dict):
+            message = error_obj.get("message", "") or ""
+    except Exception:
+        pass
+    lowered = message.lower()
+    if status_code in (401, 403) or "api key" in lowered:
+        return (
+            f"{service} rejected the request — the `{secret_name}` secret looks invalid, "
+            f"expired, or revoked. Double-check it under Settings → Secrets."
+        )
+    if "credit balance" in lowered or "insufficient" in lowered:
+        return f"{service} says this account is out of credits. Add credits/check billing, then try again."
+    if status_code == 429 or "rate limit" in lowered:
+        return f"{service} is rate-limiting requests right now. Wait a moment and try again."
+    if message:
+        return f"{service} couldn't complete this request: {message}"
+    return f"{service} couldn't complete this request right now (no further detail given). Try again in a moment."
+
+
 # --------------------------------------------------------------------------
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("### 🪙 Appraze")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
+    _swallowed_secrets = _detect_swallowed_secrets()
+    if _swallowed_secrets:
+        st.error(
+            "Secrets misconfigured: " + ", ".join(_swallowed_secrets) + " landed inside "
+            "APP_PASSWORDS instead of being read as their own secrets \u2014 a TOML `[APP_PASSWORDS]` "
+            "section swallows every line pasted after it. Move APP_PASSWORDS to the one-line form "
+            "`APP_PASSWORDS = { ... }` in Settings \u2192 Secrets to fix this."
+        )
     if sheets.is_configured():
         if sheets.last_sync_failed():
             st.caption("\u26a0\ufe0f Google Sheets sync just failed \u2014 your latest changes are only in this browser session for now. Check that GOOGLE_SHEET_ID is correct and the service account still has Editor access to the sheet, then make another edit to retry.")
@@ -599,7 +674,25 @@ with tab_mail:
         "relying on it. Appraze never sends, replies to, deletes, or modifies anything here."
     )
 
-    if not mail.is_configured():
+    # Unlike deals/inventory/suppliers/customers/sales log, this tab isn't
+    # backed by a per-workspace secret - GMAIL_ADDRESS/GMAIL_APP_PASSWORD
+    # point at one shared inbox for the whole app. Showing it to every
+    # APP_PASSWORDS workspace would leak the owner's real business email
+    # (subjects, senders, detected invoice/tracking data) to every demo
+    # tester, which breaks the isolation every other tab already gives
+    # them. Restrict it to one configured workspace - defaults to
+    # "business" (the single-APP_PASSWORD default, and the workspace name
+    # already treated as the owner's for sample-data seeding above), but
+    # overridable via a MAIL_WORKSPACE secret for anyone running
+    # multi-tester mode with a differently-named owner workspace (e.g. the
+    # `owner = [...]` key from this file's APP_PASSWORDS comment).
+    try:
+        _mail_workspace = st.secrets.get("MAIL_WORKSPACE", "business")
+    except Exception:
+        _mail_workspace = "business"
+    if WORKSPACE != _mail_workspace:
+        st.info("Mail tracking is only available in the owner's workspace on this deployment.")
+    elif not mail.is_configured():
         st.info(
             "Not connected yet. Add two secrets under Settings → Secrets to turn this on:\n\n"
             "- `GMAIL_ADDRESS` — the inbox to watch (e.g. chale@cooperrivertradingco.com)\n"
@@ -1324,10 +1417,10 @@ with tab_charge:
                     link_url = result.get("url", "") if isinstance(result, dict) else ""
                     status = "Awaiting Payment"
                 except urllib.error.HTTPError as e:
-                    st.error(f"Stripe error: {e.read().decode()[:300]}")
+                    st.error(friendly_api_error("Stripe", e.code, e.read().decode(errors="ignore"), "STRIPE_SECRET_KEY"))
                     st.stop()
-                except Exception as e:
-                    st.error(f"Couldn't create the payment link: {e}")
+                except Exception:
+                    st.error("Couldn't reach Stripe right now — check your network connection and try again. Nothing was charged.")
                     st.stop()
 
             # Mark inventory-sourced items as Sold so they don't get sold twice
@@ -1447,11 +1540,11 @@ with tab_ai:
                     # make the button click silently do nothing.
                     st.session_state.ai_last_result = parsed
                 except urllib.error.HTTPError as e:
-                    st.error(f"Claude API error: {e.read().decode()[:300]}")
+                    st.error(friendly_api_error("Claude (Anthropic)", e.code, e.read().decode(errors="ignore"), "ANTHROPIC_API_KEY"))
                 except json.JSONDecodeError:
                     st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
-                except Exception as e:
-                    st.error(f"Something went wrong: {e}")
+                except Exception:
+                    st.error("Couldn't reach the AI service right now \u2014 check your network connection and try again.")
 
         if st.session_state.get("ai_last_result"):
             parsed = st.session_state.ai_last_result

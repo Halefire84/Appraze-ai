@@ -105,7 +105,15 @@ def _get_client():
     try:
         creds_dict = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
         creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
-        return gspread.authorize(creds)
+        client = gspread.authorize(creds)
+        # gspread's HTTPClient has no timeout by default (a bare `requests`
+        # call with timeout=None waits forever) - a stalled Sheets/Drive API
+        # request would otherwise hang this function's caller indefinitely,
+        # and since it's called from the middle of app.py's top-to-bottom
+        # script run, that would freeze the whole app for that session, not
+        # just the table being loaded.
+        client.set_timeout(20)
+        return client
     except Exception:
         return None
 
