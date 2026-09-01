@@ -12,6 +12,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime
+import html
 import io
 import secrets
 import base64
@@ -1273,9 +1274,14 @@ with tab_charge:
     if st.session_state.get("pos_last_sale"):
         sale = st.session_state.pos_last_sale
         st.success(f"Sale complete — Invoice {sale['invoice_num']}")
+        # item_summary is built from free-text "Manual entry" item names, so
+        # it has to be HTML-escaped before going into an unsafe_allow_html
+        # block - otherwise anyone typing e.g. <img src=x onerror=...> as an
+        # item description gets it rendered as live HTML instead of text.
+        safe_item_summary = html.escape(sale["item_summary"])
         st.markdown(f"""<div class="kpi-card" style="margin-top:10px;">
             <div class="kpi-label">Invoice {sale['invoice_num']}</div>
-            <div style="margin:8px 0;color:#e6e9ef;">{sale['item_summary']}</div>
+            <div style="margin:8px 0;color:#e6e9ef;">{safe_item_summary}</div>
             <div style="color:#8b96a5;">Subtotal ${sale['subtotal']:,.2f} + Tax ${sale['tax_amt']:,.2f} = <b style="color:#f7f9fc;">Total ${sale['total']:,.2f}</b></div>
             <div style="margin-top:6px;color:#8b96a5;">Payment: {sale['payment_method']} · Status: {sale['status']}</div>
             </div>""", unsafe_allow_html=True)
