@@ -331,7 +331,10 @@ with st.sidebar:
     st.markdown("### 🪙 Appraze")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if sheets.is_configured():
-        st.caption("\u2705 Synced to Google Sheets \u2014 data persists across sessions.")
+        if sheets.last_sync_failed():
+            st.caption("\u26a0\ufe0f Google Sheets sync just failed \u2014 your latest changes are only in this browser session for now. Check that GOOGLE_SHEET_ID is correct and the service account still has Editor access to the sheet, then make another edit to retry.")
+        else:
+            st.caption("\u2705 Synced to Google Sheets \u2014 data persists across sessions.")
     else:
         st.caption("\u26a0\ufe0f Not persisted \u2014 data lives only in this browser session and resets on reload. Add GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Secrets to enable saving.")
     if st.button("Sign out", width="stretch"):

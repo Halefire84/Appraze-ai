@@ -193,7 +193,12 @@ def sync_table(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -
     """Persists df to Sheets only if it actually changed since the last sync
     this session - avoids hammering the Sheets API on every Streamlit rerun
     (the whole script re-executes on every widget interaction, not just
-    edits to this particular table)."""
+    edits to this particular table).
+
+    Records success/failure in session_state (see last_sync_failed()) so the
+    UI can warn the user instead of silently claiming "synced" while a save
+    is actually failing - the whole point of this module is to not lose
+    data, so a failed write has to be visible somewhere."""
     if not is_configured():
         return
     cache_key = f"_sheets_synced_{workspace}_{sheet_name}"
@@ -202,8 +207,19 @@ def sync_table(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -
         changed = prev is None or not df.reset_index(drop=True).equals(prev.reset_index(drop=True))
     except Exception:
         changed = True
-    if changed and save_df(sheet_name, df, workspace):
+    if not changed:
+        return
+    if save_df(sheet_name, df, workspace):
         st.session_state[cache_key] = df.copy()
+        st.session_state["_sheets_last_sync_failed"] = False
+    else:
+        st.session_state["_sheets_last_sync_failed"] = True
+
+
+def last_sync_failed() -> bool:
+    """True if the most recent sync_table() save attempt this session
+    actually failed (as opposed to Sheets simply not being configured)."""
+    return bool(st.session_state.get("_sheets_last_sync_failed", False))
 
 
 def mark_synced(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -> None:
