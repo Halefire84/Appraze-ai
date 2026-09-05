@@ -12,6 +12,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime
+import html
 import io
 import secrets
 import base64
@@ -24,6 +25,7 @@ from finance import (
     melt_value, max_bid_after_premium, sales_tax, GOLD_PURITY, SILVER_PURITY,
 )
 import sheets
+import mail
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -198,10 +200,21 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 # actually stays in sync across separate devices/sessions once Google
 # Sheets persistence (see sheets.py) is configured; without it, two people
 # using the same workspace still each get their own private in-memory copy.
-#   [APP_PASSWORDS]
-#   owner = ["my-password", "ashleys-password"]
-#   a = "password1"
-#   b = "password2"
+#   APP_PASSWORDS = { owner = ["my-password", "ashleys-password"], a = "password1", b = "password2" }
+#
+# Use that one-line inline-table form, not a bracketed `[APP_PASSWORDS]`
+# section - in TOML, a `[section]` header silently swallows every
+# `key = value` line that comes after it into that section, until the next
+# `[section]` header. So a bracketed `[APP_PASSWORDS]` followed later in the
+# same secrets box by APPS_SCRIPT_URL/STRIPE_SECRET_KEY/etc (as a natural
+# copy-paste top-to-bottom through this file's docs would do) makes those
+# secrets vanish into APP_PASSWORDS instead of being read as top-level
+# secrets - Sheets, Stripe, the AI Analyzer, and the Mail tab would all
+# silently stop working with no error anywhere, since every st.secrets.get()
+# in this app treats "missing" as just "not configured yet". The inline
+# form isn't order-sensitive, so it can't be broken this way. (See also
+# _detect_swallowed_secrets() below, which watches for exactly this and
+# surfaces a warning if it happens anyway.)
 #
 # Passwords live in Streamlit's Secrets manager (Settings -> Secrets on
 # Streamlit Community Cloud), never hardcoded here. If neither secret is
@@ -228,6 +241,33 @@ def _get_password_workspace_map() -> dict:
     except Exception:
         single = "changeme"
     return {single: "business"}
+
+
+_OTHER_TOP_LEVEL_SECRET_NAMES = [
+    "APPS_SCRIPT_URL", "APPS_SCRIPT_TOKEN", "STRIPE_SECRET_KEY", "ANTHROPIC_API_KEY",
+    "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD", "SUPPORT_EMAIL", "OWNER_WORKSPACE", "MAIL_WORKSPACE",
+]
+
+
+def _detect_swallowed_secrets() -> list:
+    """Returns the names of any other Appraze secrets that accidentally
+    ended up nested inside APP_PASSWORDS instead of being top-level secrets
+    - the classic TOML footgun where a bracketed `[APP_PASSWORDS]` section
+    silently swallows every `key = value` line that follows it (see the
+    comment above this function). Those secrets would otherwise just look
+    "not configured" with no indication why, since every st.secrets.get()
+    in this app treats "missing" and "swallowed by TOML" identically."""
+    try:
+        multi = st.secrets.get("APP_PASSWORDS", None)
+    except Exception:
+        return []
+    if not multi:
+        return []
+    try:
+        return [name for name in _OTHER_TOP_LEVEL_SECRET_NAMES if name in dict(multi)]
+    except Exception:
+        return []
+
 
 def login_screen():
     st.markdown(
@@ -324,16 +364,84 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def friendly_api_error(service: str, status_code, raw_body: str, secret_name: str) -> str:
+    """Turns a raw HTTPError body from Stripe/Anthropic into a message a
+    non-technical demo tester can actually understand, instead of a wall of
+    JSON. Best-effort: falls back to a generic message if the body isn't
+    the {"error": {"message": ...}} shape both APIs use - this is a UX
+    nicety, not something that should ever itself raise."""
+    message = ""
+    try:
+        parsed = json.loads(raw_body)
+        error_obj = parsed.get("error") if isinstance(parsed, dict) else None
+        if isinstance(error_obj, dict):
+            message = error_obj.get("message", "") or ""
+    except Exception:
+        pass
+    lowered = message.lower()
+    if status_code in (401, 403) or "api key" in lowered:
+        return (
+            f"{service} rejected the request — the `{secret_name}` secret looks invalid, "
+            f"expired, or revoked. Double-check it under Settings → Secrets."
+        )
+    if "credit balance" in lowered or "insufficient" in lowered:
+        return f"{service} says this account is out of credits. Add credits/check billing, then try again."
+    if status_code == 429 or "rate limit" in lowered:
+        return f"{service} is rate-limiting requests right now. Wait a moment and try again."
+    if message:
+        return f"{service} couldn't complete this request: {message}"
+    return f"{service} couldn't complete this request right now (no further detail given). Try again in a moment."
+
+
+def _is_owner_workspace() -> bool:
+    """True if the current session is the app owner's own workspace, not a
+    demo tester's - default "business" (the single-APP_PASSWORD default),
+    overridable via an OWNER_WORKSPACE secret for multi-tester setups that
+    use a different name for the owner's own workspace (e.g. the
+    `owner = [...]` key from the APP_PASSWORDS comment above). Gates
+    anything that should only be visible to the person running the
+    business, never to outside testers - the Mail tab, and the debug
+    detail on API errors below."""
+    try:
+        owner_workspace = st.secrets.get("OWNER_WORKSPACE", "business")
+    except Exception:
+        owner_workspace = "business"
+    return WORKSPACE == owner_workspace
+
+
+def show_debug_detail(detail: str) -> None:
+    """Shows the real, technical error behind a friendly_api_error() message
+    - but only in the owner's own workspace, never to demo testers - so you
+    can actually diagnose a real problem (invalid key, out of credits,
+    wrong model name, rate limit) without exposing internals to anyone
+    else with app access. Safe to leave in for a real launch since it's
+    invisible to every workspace but yours."""
+    if _is_owner_workspace():
+        with st.expander("Debug detail (only visible in the owner's workspace)"):
+            st.code(detail, language=None)
+
+
 # --------------------------------------------------------------------------
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("### 🪙 Appraze")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
+    _swallowed_secrets = _detect_swallowed_secrets()
+    if _swallowed_secrets:
+        st.error(
+            "Secrets misconfigured: " + ", ".join(_swallowed_secrets) + " landed inside "
+            "APP_PASSWORDS instead of being read as their own secrets \u2014 a TOML `[APP_PASSWORDS]` "
+            "section swallows every line pasted after it. Move APP_PASSWORDS to the one-line form "
+            "`APP_PASSWORDS = { ... }` in Settings \u2192 Secrets to fix this."
+        )
     if sheets.is_configured():
-        st.caption("\u2705 Synced to Google Sheets \u2014 data persists across sessions.")
+        if sheets.last_sync_failed():
+            st.caption("\u26a0\ufe0f Google Sheets sync just failed \u2014 your latest changes are only in this browser session for now. Check that APPS_SCRIPT_URL/APPS_SCRIPT_TOKEN are correct and the Apps Script is still deployed, then make another edit to retry.")
+        else:
+            st.caption("\u2705 Synced to Google Sheets \u2014 data persists across sessions.")
     else:
-        st.caption("\u26a0\ufe0f Not persisted \u2014 data lives only in this browser session and resets on reload. Add GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Secrets to enable saving.")
+        st.caption("\u26a0\ufe0f Not persisted \u2014 data lives only in this browser session and resets on reload. Add APPS_SCRIPT_URL and APPS_SCRIPT_TOKEN in Secrets to enable saving \u2014 see DEPLOY.md.")
     if st.button("Sign out", width="stretch"):
         st.session_state.authed = False
         st.rerun()
@@ -442,6 +550,9 @@ with st.sidebar:
 - The AI Analyzer sends the photo and/or description you submit to Anthropic's API to generate
   an identification and value estimate — only what you explicitly submit on that tab is sent,
   and only when you click Analyze.
+- When the Mail tab is configured, it connects read-only to the Gmail inbox you specify via IMAP
+  to surface supplier invoices and shipment tracking numbers — this app never sends, replies to,
+  deletes, or modifies anything in that inbox.
 - Estimated values, verdicts, and suggested prices are informational only. You are responsible
   for your own purchase, pricing, and sale decisions.
 
@@ -449,10 +560,11 @@ with st.sidebar:
 
 - Data entered in this app (deals, inventory, suppliers, customers, sales log) is stored either
   in this browser session only, or — when Google Sheets persistence is configured — in a Google
-  Sheet you control, accessed via a service account you set up.
+  Sheet you control, accessed via a small script you deploy on it yourself.
 - This app does not sell or share your data with third parties, other than the services you've
   explicitly configured (Stripe for payments, Anthropic for the AI Analyzer, Google for
-  persistence) — each only receives the specific data needed for that feature to work.
+  persistence, Gmail for the Mail tab) — each only receives the specific data needed for that
+  feature to work.
 - Supplier and customer contact info (name, phone, email) is stored only for your own
   recordkeeping and is never used for anything beyond that.
             """
@@ -494,8 +606,8 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_inv_home, tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
-    "🧾  Invoices", "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
+tab_inv_home, tab_mail, tab_dash, tab_calc, tab_inv, tab_sup, tab_cust, tab_charge, tab_ai = st.tabs([
+    "🧾  Invoices", "📬  Mail", "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "👤  Customers", "💳  Point of Sale", "🔍  AI Analyzer",
 ])
 
@@ -578,6 +690,96 @@ with tab_inv_home:
             file_name=f"appraze_invoices_{date.today().isoformat()}.csv",
             mime="text/csv",
         )
+
+# ==========================================================================
+# MAIL TAB — supplier invoices & shipment tracking numbers, read-only
+# ==========================================================================
+with tab_mail:
+    st.markdown("#### Supplier Mail — Invoices & Tracking Numbers")
+    st.caption(
+        "Read-only view of the inbox you connect below — flags anything that looks like a "
+        "shipment tracking number or a supplier invoice so you don't have to scroll through "
+        "Gmail by hand. Detection is best-effort; always check the original email before "
+        "relying on it. Appraze never sends, replies to, deletes, or modifies anything here."
+    )
+
+    # Unlike deals/inventory/suppliers/customers/sales log, this tab isn't
+    # backed by a per-workspace secret - GMAIL_ADDRESS/GMAIL_APP_PASSWORD
+    # point at one shared inbox for the whole app. Showing it to every
+    # APP_PASSWORDS workspace would leak the owner's real business email
+    # (subjects, senders, detected invoice/tracking data) to every demo
+    # tester, which breaks the isolation every other tab already gives
+    # them. Restrict it to the owner's workspace (see _is_owner_workspace)
+    # by default, but allow a separate MAIL_WORKSPACE override in case Mail
+    # should ever be shown somewhere other than wherever OWNER_WORKSPACE
+    # points.
+    try:
+        _mail_workspace = st.secrets.get("MAIL_WORKSPACE", None) or st.secrets.get("OWNER_WORKSPACE", "business")
+    except Exception:
+        _mail_workspace = "business"
+    if WORKSPACE != _mail_workspace:
+        st.info("Mail tracking is only available in the owner's workspace on this deployment.")
+    elif not mail.is_configured():
+        st.info(
+            "Not connected yet. Add two secrets under Settings → Secrets to turn this on:\n\n"
+            "- `GMAIL_ADDRESS` — the inbox to watch (e.g. chale@cooperrivertradingco.com)\n"
+            "- `GMAIL_APP_PASSWORD` — a 16-character Gmail App Password from "
+            "myaccount.google.com/apppasswords (not your normal login password)\n\n"
+            "See `mail.py`'s docstring for the full one-time setup."
+        )
+    else:
+        mcol1, mcol2 = st.columns([1, 3])
+        with mcol1:
+            mail_days = st.slider("Look back (days)", 1, 60, 14, key="mail_lookback_days")
+        with mcol2:
+            st.write("")
+            if st.button("\U0001f504 Refresh inbox"):
+                mail.fetch_recent_messages.clear()
+
+        mail_messages = mail.fetch_recent_messages(days=mail_days)
+
+        if mail_messages is None:
+            st.error(
+                "Couldn't connect to Gmail. Double-check `GMAIL_ADDRESS`/`GMAIL_APP_PASSWORD` in "
+                "Secrets, that IMAP is enabled on the account (Gmail Settings → Forwarding and "
+                "POP/IMAP), and that the App Password hasn't been revoked."
+            )
+        elif not mail_messages:
+            st.info(f"No messages in the last {mail_days} day(s).")
+        else:
+            mail_df = pd.DataFrame(mail_messages)
+
+            mm1, mm2, mm3 = st.columns(3)
+            with mm1:
+                st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Messages</div>
+                    <div class="kpi-value">{len(mail_df)}</div></div>""", unsafe_allow_html=True)
+            with mm2:
+                st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Tracking Detected</div>
+                    <div class="kpi-value">{int((mail_df['Category'] == 'Tracking').sum())}</div></div>""", unsafe_allow_html=True)
+            with mm3:
+                st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Invoices Detected</div>
+                    <div class="kpi-value">{int((mail_df['Category'] == 'Invoice').sum())}</div></div>""", unsafe_allow_html=True)
+
+            mail_cat_filter = st.multiselect(
+                "Filter by category", ["Tracking", "Invoice", "Other"],
+                default=["Tracking", "Invoice"], key="mail_cat_filter",
+            )
+            mail_filtered = mail_df[mail_df["Category"].isin(mail_cat_filter)] if mail_cat_filter else mail_df
+
+            st.dataframe(
+                mail_filtered,
+                width="stretch",
+                column_config={"Amount": st.column_config.NumberColumn(format="$%.2f")},
+            )
+
+            mail_csv_buffer = io.StringIO()
+            mail_df.to_csv(mail_csv_buffer, index=False)
+            st.download_button(
+                "Download Mail as CSV",
+                data=mail_csv_buffer.getvalue(),
+                file_name=f"appraze_mail_{date.today().isoformat()}.csv",
+                mime="text/csv",
+            )
 
 with tab_dash:
     st.markdown("#### Filters")
@@ -1098,9 +1300,14 @@ with tab_charge:
     if st.session_state.get("pos_last_sale"):
         sale = st.session_state.pos_last_sale
         st.success(f"Sale complete — Invoice {sale['invoice_num']}")
+        # item_summary is built from free-text "Manual entry" item names, so
+        # it has to be HTML-escaped before going into an unsafe_allow_html
+        # block - otherwise anyone typing e.g. <img src=x onerror=...> as an
+        # item description gets it rendered as live HTML instead of text.
+        safe_item_summary = html.escape(sale["item_summary"])
         st.markdown(f"""<div class="kpi-card" style="margin-top:10px;">
             <div class="kpi-label">Invoice {sale['invoice_num']}</div>
-            <div style="margin:8px 0;color:#e6e9ef;">{sale['item_summary']}</div>
+            <div style="margin:8px 0;color:#e6e9ef;">{safe_item_summary}</div>
             <div style="color:#8b96a5;">Subtotal ${sale['subtotal']:,.2f} + Tax ${sale['tax_amt']:,.2f} = <b style="color:#f7f9fc;">Total ${sale['total']:,.2f}</b></div>
             <div style="margin-top:6px;color:#8b96a5;">Payment: {sale['payment_method']} · Status: {sale['status']}</div>
             </div>""", unsafe_allow_html=True)
@@ -1246,10 +1453,13 @@ with tab_charge:
                     link_url = result.get("url", "") if isinstance(result, dict) else ""
                     status = "Awaiting Payment"
                 except urllib.error.HTTPError as e:
-                    st.error(f"Stripe error: {e.read().decode()[:300]}")
+                    raw_body = e.read().decode(errors="ignore")
+                    st.error(friendly_api_error("Stripe", e.code, raw_body, "STRIPE_SECRET_KEY"))
+                    show_debug_detail(f"HTTP {e.code}: {raw_body}")
                     st.stop()
                 except Exception as e:
-                    st.error(f"Couldn't create the payment link: {e}")
+                    st.error("Couldn't reach Stripe right now — check your network connection and try again. Nothing was charged.")
+                    show_debug_detail(f"{type(e).__name__}: {e}")
                     st.stop()
 
             # Mark inventory-sourced items as Sold so they don't get sold twice
@@ -1382,11 +1592,18 @@ with tab_ai:
                     # make the button click silently do nothing.
                     st.session_state.ai_last_result = parsed
                 except urllib.error.HTTPError as e:
-                    st.error(f"Claude API error: {e.read().decode()[:300]}")
-                except json.JSONDecodeError:
+                    raw_body = e.read().decode(errors="ignore")
+                    st.error(friendly_api_error("Claude (Anthropic)", e.code, raw_body, "ANTHROPIC_API_KEY"))
+                    show_debug_detail(f"HTTP {e.code}: {raw_body}")
+                except json.JSONDecodeError as e:
                     st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
+                    # raw_text is only set once the outer response itself parsed as
+                    # JSON (line ~1570) - a malformed top-level response can raise
+                    # this same exception type before that assignment happens.
+                    show_debug_detail(f"{type(e).__name__}: {e}\n\nraw_text:\n{locals().get('raw_text', '(not available)')}")
                 except Exception as e:
-                    st.error(f"Something went wrong: {e}")
+                    st.error("Couldn't reach the AI service right now \u2014 check your network connection and try again.")
+                    show_debug_detail(f"{type(e).__name__}: {e}")
 
         if st.session_state.get("ai_last_result"):
             parsed = st.session_state.ai_last_result

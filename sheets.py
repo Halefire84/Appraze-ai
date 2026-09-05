@@ -5,24 +5,37 @@ Streamlit Community Cloud's free tier has no built-in database and wipes
 st.session_state on every browser refresh and every app restart/redeploy.
 For real (even beta) use, losing the deals/inventory/suppliers/customers/
 sales log between sessions is a dealbreaker. This backs those five tables
-with a Google Sheet instead, authenticating via a Google Cloud service
-account rather than asking end users to sign in to Google themselves.
+with a Google Sheet instead.
+
+Talks to a small Google Apps Script Web App (see appscript/Code.gs)
+deployed from inside the target spreadsheet itself, rather than a Google
+Cloud service account. That's a deliberate choice: since May 2024, new
+Google Cloud accounts get an "organization" auto-provisioned with a
+security baseline that disables service-account key creation by default,
+which makes the previously-standard service-account setup a dead end for
+a lot of people without a Cloud IAM admin to unblock it (see
+appscript/Code.gs's own docstring, and DEPLOY.md, for the full story).
+Apps Script needs none of that - it runs with the permissions of whoever
+deploys it, using only the Google account that already owns the Sheet.
 
 To enable it, set two Streamlit secrets (Settings -> Secrets):
-    GOOGLE_SHEET_ID = "the spreadsheet ID from its URL"
-    GOOGLE_SERVICE_ACCOUNT_JSON = '''{ ...full service-account JSON key... }'''
+    APPS_SCRIPT_URL = "the Web app URL Apps Script gives you on deploy"
+    APPS_SCRIPT_TOKEN = "the same random string you set as TOKEN in Code.gs"
 
-Setup, one time, in Google Cloud Console:
-    1. Create (or reuse) a Google Cloud project.
-    2. Enable the "Google Sheets API" and "Google Drive API" for it.
-    3. Create a Service Account, then a JSON key for it - download the key
-       file and paste its full contents as the GOOGLE_SERVICE_ACCOUNT_JSON
-       secret above.
-    4. Create a blank Google Sheet (any name), share it with the service
-       account's email (looks like ...@...iam.gserviceaccount.com) as an
-       Editor, and put the sheet's ID (the long string in its URL between
-       /d/ and /edit) in the GOOGLE_SHEET_ID secret above.
-    5. Reload the app. Worksheets (tabs) for each table are created
+Setup, one time, no Google Cloud Console involved at all:
+    1. Create a blank Google Sheet (any name).
+    2. Extensions -> Apps Script. Delete the default code, paste in the
+       contents of appscript/Code.gs from this repo.
+    3. Change the TOKEN constant near the top to a long random string of
+       your own (this is the shared secret between Appraze and this
+       script - anyone with both the URL and this token can read/write
+       this one spreadsheet, so keep it as private as a password).
+    4. Deploy -> New deployment -> gear icon -> Web app. Execute as "Me",
+       who has access "Anyone". Deploy, and authorize it when prompted
+       (it's your own script acting on your own spreadsheet).
+    5. Copy the Web app URL it gives you into the APPS_SCRIPT_URL secret;
+       copy the TOKEN you set in step 3 into APPS_SCRIPT_TOKEN.
+    6. Reload the app. Worksheets (tabs) for each table are created
        automatically inside that spreadsheet on first use.
 
 Every function here takes a `workspace` name (defaulting to "business",
@@ -42,25 +55,13 @@ functions as untested until exercised against a real spreadsheet.
 """
 
 import json
+import urllib.error
+import urllib.request
 
 import pandas as pd
 import streamlit as st
 
-try:
-    import gspread
-    from google.oauth2.service_account import Credentials
-    _GSPREAD_AVAILABLE = True
-except BaseException:
-    # Deliberately broad: a broken/incompatible native dependency in gspread's
-    # own import chain (seen in the wild as a Rust-level pyo3_runtime.PanicException
-    # from the cryptography package, which is NOT an ImportError) must never be
-    # allowed to take down the whole app - persistence just stays disabled.
-    _GSPREAD_AVAILABLE = False
-
-_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file",
-]
+_REQUEST_TIMEOUT_SECONDS = 20
 
 # Column order for each persisted table - kept here (not just in app.py) so
 # load/save always agree on shape regardless of what changed in the sheet.
@@ -91,62 +92,68 @@ NUMERIC_COLUMNS = {
 }
 
 
-@st.cache_resource(show_spinner=False)
-def _get_client():
-    if not _GSPREAD_AVAILABLE:
-        return None
-    creds_raw = None
+class _PreservePostRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Apps Script Web Apps commonly answer the first hit to a `/exec` URL
+    with a 301/302/303 redirect to a script.googleusercontent.com URL that
+    actually serves the response. Python's default redirect handling (like
+    most HTTP clients, including `requests`) turns a POST into a GET and
+    drops the body on those specific codes - which would silently turn
+    every load/save into a no-op instead of an error, since the request
+    would still "succeed" against the wrong endpoint with no payload. This
+    preserves the original method and body across the redirect instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if code in (301, 302, 303) and req.get_method() == "POST":
+            new_req = urllib.request.Request(newurl, data=req.data, method="POST")
+            for key, val in req.header_items():
+                new_req.add_header(key, val)
+            return new_req
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_PreservePostRedirectHandler)
+
+
+def _get_config():
     try:
-        creds_raw = st.secrets.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        url = st.secrets.get("APPS_SCRIPT_URL")
+        token = st.secrets.get("APPS_SCRIPT_TOKEN")
     except Exception:
-        return None
-    if not creds_raw:
-        return None
-    try:
-        creds_dict = json.loads(creds_raw) if isinstance(creds_raw, str) else dict(creds_raw)
-        creds = Credentials.from_service_account_info(creds_dict, scopes=_SCOPES)
-        return gspread.authorize(creds)
-    except Exception:
-        return None
+        return None, None
+    return url, token
 
 
 def is_configured() -> bool:
-    """True only once both secrets are present and a client was built successfully."""
-    try:
-        sheet_id = st.secrets.get("GOOGLE_SHEET_ID")
-    except Exception:
-        sheet_id = None
-    return bool(sheet_id) and _get_client() is not None
+    """True only once both secrets are present."""
+    url, token = _get_config()
+    return bool(url) and bool(token)
 
 
-def _worksheet_title(sheet_name: str, workspace: str) -> str:
-    # "business" is the original single-workspace default - kept unprefixed
-    # so anyone who already set up a Sheet before multi-workspace support
-    # existed doesn't have their tabs silently renamed out from under them.
-    # Any other workspace (one of a handful of isolated testers) gets its
-    # own suffixed tab so their data never collides with anyone else's.
-    if workspace == "business":
-        return sheet_name
-    return f"{sheet_name}__{workspace}"
-
-
-def _get_or_create_worksheet(sheet_name: str, workspace: str):
-    client = _get_client()
-    try:
-        sheet_id = st.secrets.get("GOOGLE_SHEET_ID")
-    except Exception:
-        sheet_id = None
-    if client is None or not sheet_id:
+def _call(action: str, table: str, workspace: str, rows=None, columns=None):
+    """POSTs one request to the Apps Script Web App. Returns the parsed
+    {"ok": true, ...} dict on success, or None on any failure (not
+    configured, unreachable, timed out, rejected token, malformed
+    response) - callers treat None uniformly as "couldn't sync right now,
+    fall back to local state" rather than raising."""
+    url, token = _get_config()
+    if not url or not token:
         return None
-    columns = TABLE_COLUMNS[sheet_name]
-    title = _worksheet_title(sheet_name, workspace)
-    spreadsheet = client.open_by_key(sheet_id)
+    payload = {"token": token, "action": action, "table": table, "workspace": workspace}
+    if rows is not None:
+        payload["rows"] = rows
+    if columns is not None:
+        payload["columns"] = columns
     try:
-        return spreadsheet.worksheet(title)
-    except gspread.WorksheetNotFound:
-        ws = spreadsheet.add_worksheet(title=title, rows=200, cols=max(len(columns), 10))
-        ws.append_row(columns)
-        return ws
+        body = json.dumps(payload).encode()
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("content-type", "application/json")
+        with _opener.open(req, timeout=_REQUEST_TIMEOUT_SECONDS) as resp:
+            result = json.loads(resp.read().decode())
+        if not isinstance(result, dict) or not result.get("ok"):
+            return None
+        return result
+    except Exception:
+        return None
 
 
 def load_df(sheet_name: str, workspace: str = "business"):
@@ -154,11 +161,11 @@ def load_df(sheet_name: str, workspace: str = "business"):
     Sheets isn't configured/reachable (caller should fall back to local
     defaults)."""
     columns = TABLE_COLUMNS[sheet_name]
+    result = _call("load", sheet_name, workspace)
+    if result is None:
+        return None
     try:
-        ws = _get_or_create_worksheet(sheet_name, workspace)
-        if ws is None:
-            return None
-        records = ws.get_all_records()
+        records = result.get("rows") or []
         if not records:
             return pd.DataFrame(columns=columns)
         df = pd.DataFrame(records)
@@ -178,22 +185,24 @@ def save_df(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -> b
     Returns True on success."""
     columns = TABLE_COLUMNS[sheet_name]
     try:
-        ws = _get_or_create_worksheet(sheet_name, workspace)
-        if ws is None:
-            return False
         out = df.reindex(columns=columns).fillna("")
-        ws.clear()
-        ws.update([columns] + out.astype(str).values.tolist())
-        return True
+        rows = out.astype(str).to_dict("records")
     except Exception:
         return False
+    result = _call("save", sheet_name, workspace, rows=rows, columns=columns)
+    return result is not None
 
 
 def sync_table(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -> None:
     """Persists df to Sheets only if it actually changed since the last sync
-    this session - avoids hammering the Sheets API on every Streamlit rerun
-    (the whole script re-executes on every widget interaction, not just
-    edits to this particular table)."""
+    this session - avoids hammering the Apps Script endpoint on every
+    Streamlit rerun (the whole script re-executes on every widget
+    interaction, not just edits to this particular table).
+
+    Records success/failure in session_state (see last_sync_failed()) so the
+    UI can warn the user instead of silently claiming "synced" while a save
+    is actually failing - the whole point of this module is to not lose
+    data, so a failed write has to be visible somewhere."""
     if not is_configured():
         return
     cache_key = f"_sheets_synced_{workspace}_{sheet_name}"
@@ -202,8 +211,19 @@ def sync_table(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -
         changed = prev is None or not df.reset_index(drop=True).equals(prev.reset_index(drop=True))
     except Exception:
         changed = True
-    if changed and save_df(sheet_name, df, workspace):
+    if not changed:
+        return
+    if save_df(sheet_name, df, workspace):
         st.session_state[cache_key] = df.copy()
+        st.session_state["_sheets_last_sync_failed"] = False
+    else:
+        st.session_state["_sheets_last_sync_failed"] = True
+
+
+def last_sync_failed() -> bool:
+    """True if the most recent sync_table() save attempt this session
+    actually failed (as opposed to Sheets simply not being configured)."""
+    return bool(st.session_state.get("_sheets_last_sync_failed", False))
 
 
 def mark_synced(sheet_name: str, df: pd.DataFrame, workspace: str = "business") -> None:
