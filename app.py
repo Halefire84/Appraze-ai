@@ -1444,6 +1444,10 @@ with tab_charge:
                     req = urllib.request.Request("https://api.stripe.com/v1/payment_links", data=data, method="POST")
                     auth = base64.b64encode(f"{stripe_key}:".encode()).decode()
                     req.add_header("Authorization", f"Basic {auth}")
+                    # Without an explicit Content-Type, urllib sends the urlencoded
+                    # body with no header at all - Stripe then fails to parse it as
+                    # form data and rejects the request as missing required params.
+                    req.add_header("Content-Type", "application/x-www-form-urlencoded")
                     with urllib.request.urlopen(req, timeout=15) as resp:
                         result = json.loads(resp.read().decode())
                     link_url = result.get("url", "") if isinstance(result, dict) else ""
@@ -1555,7 +1559,11 @@ with tab_ai:
                 try:
                     body = json.dumps({
                         "model": "claude-sonnet-5",
-                        "max_tokens": 900,
+                        # 900 was too tight for a full response (7 fields plus
+                        # three platform listing drafts) - it routinely got cut
+                        # off mid-JSON, which surfaced as a JSON parse error
+                        # even though the API call itself succeeded.
+                        "max_tokens": 2000,
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": content}],
                     }).encode()
@@ -1563,9 +1571,18 @@ with tab_ai:
                     req.add_header("x-api-key", anthropic_key)
                     req.add_header("anthropic-version", "2023-06-01")
                     req.add_header("content-type", "application/json")
-                    with urllib.request.urlopen(req, timeout=30) as resp:
+                    with urllib.request.urlopen(req, timeout=60) as resp:
                         result = json.loads(resp.read().decode())
                     raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
+                    # The model is told not to wrap its answer in markdown fences,
+                    # but strip them defensively if it does anyway rather than
+                    # failing the whole analysis.
+                    raw_text = raw_text.strip()
+                    if raw_text.startswith("```"):
+                        raw_text = raw_text.split("\n", 1)[-1]
+                        if raw_text.endswith("```"):
+                            raw_text = raw_text.rsplit("```", 1)[0]
+                        raw_text = raw_text.strip()
                     parsed = json.loads(raw_text)
                     if not isinstance(parsed, dict):
                         raise ValueError("Response wasn't a JSON object")
