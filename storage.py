@@ -37,7 +37,10 @@ def _identity_params() -> dict:
     }
 
 
-def save_deals(df: pd.DataFrame) -> StorageResult:
+def save_table(df: pd.DataFrame, table: str = "deals") -> StorageResult:
+    """Persist any named table (e.g. "deals", "inventory") under this
+    session's owner key. Each table is stored independently server-side —
+    saving one never touches another."""
     try:
         payload = df.to_json(orient="records", date_format="iso")
         resp = requests.get(
@@ -45,6 +48,7 @@ def save_deals(df: pd.DataFrame) -> StorageResult:
             params={
                 "token": _token(),
                 "action": "save_data",
+                "table": table,
                 "payload": payload,
                 **_identity_params(),
             },
@@ -57,13 +61,14 @@ def save_deals(df: pd.DataFrame) -> StorageResult:
         return StorageResult(False, error=f"connection error: {e}")
 
 
-def load_deals() -> StorageResult:
+def load_table(table: str = "deals") -> StorageResult:
     try:
         resp = requests.get(
             _apps_script_url(),
             params={
                 "token": _token(),
                 "action": "load_data",
+                "table": table,
                 **_identity_params(),
             },
             timeout=15,
@@ -79,3 +84,11 @@ def load_deals() -> StorageResult:
         return StorageResult(True, payload=records)
     except Exception as e:
         return StorageResult(False, error=f"connection error: {e}")
+
+
+def save_deals(df: pd.DataFrame) -> StorageResult:
+    return save_table(df, "deals")
+
+
+def load_deals() -> StorageResult:
+    return load_table("deals")

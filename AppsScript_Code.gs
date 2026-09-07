@@ -15,21 +15,29 @@
  *     so your deal data is one shared workspace, not two separate copies.
  *   - Everyone else gets their own private row keyed by their username —
  *     fully isolated, nobody else can read or overwrite it.
+ *
+ * SECURITY: SHEET_ID, TOKEN, and ADMIN_SETUP_CODE below are placeholders.
+ * Replace all three with your own values before deploying — never commit
+ * real values to source control. This file previously had real values
+ * checked in; if this repo is that one, treat that TOKEN and
+ * ADMIN_SETUP_CODE as compromised and rotate them (redeploy with new
+ * values and update the APPS_SCRIPT_TOKEN secret) even after this fix.
  */
 
-const SHEET_ID = "1WGF1rkhIsKn64QjTcWwSHFs3zNjDrtofguHzPNHFFYk";
-const TOKEN = "aX9k2mQ7rT4vY8pL1nW6zC3jH5bF0sD";
+const SHEET_ID = "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID";
+const TOKEN = "REPLACE_WITH_YOUR_OWN_LONG_RANDOM_STRING";
 
 // Change this to your own private value before deploying, then share it only
-// with Ashley. Anyone who signs up with this code becomes an admin and joins
-// the shared workspace. Leave blank to disable admin signup entirely.
-const ADMIN_SETUP_CODE = "9XlW1kpXbNZhJizlsGjf";
+// with whoever else should be an admin. Anyone who signs up with this code
+// becomes an admin and joins the shared workspace. Leave blank to disable
+// admin signup entirely.
+const ADMIN_SETUP_CODE = "REPLACE_WITH_YOUR_OWN_ADMIN_INVITE_CODE";
 
 const USERS_SHEET_NAME = "Users";
 const USERS_HEADER = ["username", "password_hash", "display_name", "is_admin", "is_paid", "created_at"];
 
 const STORAGE_SHEET_NAME = "Storage";
-const STORAGE_HEADER = ["owner_key", "payload_json", "updated_at"];
+const STORAGE_HEADER = ["owner_key", "table", "payload_json", "updated_at"];
 
 const PROCESSED_SHEET_NAME = "ProcessedFiles";
 const PROCESSED_HEADER = ["file_id", "file_name", "processed_at"];
@@ -192,26 +200,32 @@ function resolveOwnerKey_(params) {
 
 function handleSaveData_(sheet, params) {
   const ownerKey = resolveOwnerKey_(params);
+  const table = String(params.table || "deals");
   const payload = String(params.payload || "{}");
 
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === ownerKey) {
-      sheet.getRange(i + 1, 2).setValue(payload);
-      sheet.getRange(i + 1, 3).setValue(new Date().toISOString());
+    // Legacy rows saved before the "table" column existed are treated as
+    // "deals" so existing beta data isn't orphaned by this change.
+    const rowTable = data[i][1] || "deals";
+    if (data[i][0] === ownerKey && rowTable === table) {
+      sheet.getRange(i + 1, 3).setValue(payload);
+      sheet.getRange(i + 1, 4).setValue(new Date().toISOString());
       return jsonResponse({ success: true });
     }
   }
-  sheet.appendRow([ownerKey, payload, new Date().toISOString()]);
+  sheet.appendRow([ownerKey, table, payload, new Date().toISOString()]);
   return jsonResponse({ success: true });
 }
 
 function handleLoadData_(sheet, params) {
   const ownerKey = resolveOwnerKey_(params);
+  const table = String(params.table || "deals");
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === ownerKey) {
-      return jsonResponse({ success: true, payload: data[i][1], updated_at: data[i][2] });
+    const rowTable = data[i][1] || "deals";
+    if (data[i][0] === ownerKey && rowTable === table) {
+      return jsonResponse({ success: true, payload: data[i][2], updated_at: data[i][3] });
     }
   }
   return jsonResponse({ success: true, payload: null });
