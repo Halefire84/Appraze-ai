@@ -37,6 +37,7 @@ from storage import save_deals, load_deals, save_table, load_table
 from billing import verify_checkout_session, payment_link_url
 from drive_scan import scan_invoice_folder, mark_files_processed
 from pos import create_pos_checkout, check_payment_status
+import mail
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -534,8 +535,8 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS
 # --------------------------------------------------------------------------
-tab_dash, tab_inventory, tab_calc, tab_melt, tab_ai, tab_invoice, tab_pos = st.tabs(
-    ["📊  Deal Dashboard", "📦  Inventory", "🧮  Profit Calculator", "⚖️  Melt Calculator", "🤖  AI Analyzer", "📨  Invoice Import", "💳  POS Checkout"]
+tab_dash, tab_inventory, tab_calc, tab_melt, tab_ai, tab_invoice, tab_mail, tab_pos = st.tabs(
+    ["📊  Deal Dashboard", "📦  Inventory", "🧮  Profit Calculator", "⚖️  Melt Calculator", "🤖  AI Analyzer", "📨  Invoice Import", "✉️  Mail", "💳  POS Checkout"]
 )
 
 # ============================================================================
@@ -1176,6 +1177,63 @@ with tab_invoice:
                 st.warning("Nothing was checked — nothing added.")
 
 # ============================================================================
+# TAB — MAIL (read-only Gmail tracking of supplier invoices/shipments)
+# ============================================================================
+with tab_mail:
+    st.markdown("#### Mail")
+    st.caption(
+        "Read-only scan of the connected inbox's recent messages — flags anything that looks like a "
+        "shipment tracking number or a supplier invoice. Nothing is ever sent, replied to, deleted, "
+        "or modified."
+    )
+
+    if not mail.is_configured():
+        st.info(
+            "Not connected yet. Set `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` in Streamlit secrets to "
+            "turn this on — see DEPLOY.md for the one-time Gmail App Password setup."
+        )
+    else:
+        mc1, mc2 = st.columns([1, 3])
+        with mc1:
+            mail_days = st.slider("Look back (days)", 1, 30, 14, key="mail_days")
+        with mc2:
+            st.write("")
+            if st.button("🔄 Refresh inbox", key="mail_refresh"):
+                mail.fetch_recent_messages.clear()
+
+        with st.spinner("Checking inbox..."):
+            messages = mail.fetch_recent_messages(days=mail_days)
+
+        if messages is None:
+            st.error("Couldn't connect to the inbox — check GMAIL_ADDRESS/GMAIL_APP_PASSWORD and that IMAP is enabled.")
+        elif not messages:
+            st.info(f"No messages in the last {mail_days} day(s).")
+        else:
+            mail_df = pd.DataFrame(messages)
+            mf1, mf2 = st.columns(2)
+            with mf1:
+                mail_category_filter = st.multiselect("Category", ["Tracking", "Invoice", "Other"], key="mail_cat_filter")
+            with mf2:
+                mail_search = st.text_input("Search subject / sender", key="mail_search")
+
+            filtered_mail = mail_df.copy()
+            if mail_category_filter:
+                filtered_mail = filtered_mail[filtered_mail["Category"].isin(mail_category_filter)]
+            if mail_search:
+                s = mail_search.lower()
+                filtered_mail = filtered_mail[
+                    filtered_mail["Subject"].str.lower().str.contains(s, na=False)
+                    | filtered_mail["From"].str.lower().str.contains(s, na=False)
+                ]
+
+            st.markdown(f"#### {len(filtered_mail)} message(s)")
+            st.dataframe(
+                filtered_mail[["Date", "From", "Subject", "Category", "Carrier", "Tracking #", "Invoice/Order Ref", "Amount"]],
+                use_container_width=True,
+                column_config={"Amount": st.column_config.NumberColumn(format="$%.2f")},
+            )
+
+# ============================================================================
 # TAB 6 — POS CHECKOUT
 # ============================================================================
 with tab_pos:
@@ -1186,8 +1244,27 @@ with tab_pos:
         "link you text/send remotely."
     )
 
-    if "pos_pending" not in st.session_state:
-        st.session_state.pos_pending = []  # list of dicts: session_id, description, amount, deal_index
+    if "sales_log_loaded" not in st.session_state:
+        with st.spinner("Loading pending checkouts..."):
+            sales_result = load_table("sales_log")
+        st.session_state.sales_log = sales_result.payload if (sales_result.success and sales_result.payload) else []
+        st.session_state.sales_log_loaded = True
+
+    def persist_sales_log():
+        """Pending checkouts used to live only in st.session_state, so a page
+        refresh silently lost them even though the Stripe session was still
+        valid. Persisting through the same backend as Deals/Inventory fixes
+        that, and lets the standalone webhook service (stripe_webhook_server.py)
+        reconcile a sale automatically without this tab even being open."""
+        save_table(pd.DataFrame(st.session_state.sales_log), "sales_log")
+
+    if st.button("🔄 Refresh (picks up webhook-confirmed payments)", use_container_width=False):
+        refreshed = load_table("sales_log")
+        if refreshed.success:
+            st.session_state.sales_log = refreshed.payload or []
+            st.rerun()
+        else:
+            st.warning(f"Couldn't refresh: {refreshed.error}")
 
     pos_mode = st.radio(
         "How do you want to set the amount?",
@@ -1226,29 +1303,37 @@ with tab_pos:
         else:
             result = create_pos_checkout(pos_amount, pos_description, pos_email)
             if result.success:
-                st.session_state.pos_pending.append({
+                st.session_state.sales_log.append({
+                    "Invoice #": result.invoice_id,
                     "session_id": result.session_id,
                     "description": pos_description,
                     "amount": pos_amount,
                     "deal_index": pos_deal_index,
                     "checkout_url": result.checkout_url,
+                    "Status": "Awaiting Payment",
                 })
-                st.success("Checkout link ready — hand off the device, or copy the link below.")
+                persist_sales_log()
+                st.success(f"Checkout link ready ({result.invoice_id}) — hand off the device, or copy the link below.")
             else:
                 st.error(result.error)
 
-    if st.session_state.pos_pending:
+    pending = [tx for tx in st.session_state.sales_log if tx.get("Status") != "Paid (Card)"]
+    if pending:
         st.markdown("---")
         st.markdown("##### Pending checkouts")
-        st.caption("Click Check Status after the customer pays — works whether they paid on this device or their own.")
+        st.caption(
+            "Click Check Status after the customer pays, or hit Refresh above if the Stripe webhook "
+            "service (see DEPLOY.md) already confirmed it automatically — works whether they paid on "
+            "this device or their own."
+        )
 
-        still_pending = []
-        for tx in st.session_state.pos_pending:
+        changed = False
+        for tx in pending:
             with st.container():
                 c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
                     st.markdown(f"**{tx['description']}** — ${tx['amount']:,.2f}")
-                    st.caption(tx["checkout_url"])
+                    st.caption(f"{tx.get('Invoice #', '')} · {tx['checkout_url']}")
                 with c2:
                     st.link_button("Open", tx["checkout_url"], use_container_width=True)
                 with c3:
@@ -1257,17 +1342,17 @@ with tab_pos:
                 if check_clicked:
                     if check_payment_status(tx["session_id"]):
                         st.success(f"Paid! ${tx['amount']:,.2f} confirmed.")
+                        tx["Status"] = "Paid (Card)"
+                        changed = True
                         if tx["deal_index"] is not None and tx["deal_index"] in st.session_state.deals.index:
                             st.session_state.deals.loc[tx["deal_index"], "Status"] = "Sold"
                             st.session_state.deals.loc[tx["deal_index"], "Est. Resale Value"] = tx["amount"]
                             persist()
-                        # don't keep this one in the pending list
                     else:
                         st.info("Not paid yet — try again once the customer confirms.")
-                        still_pending.append(tx)
-                else:
-                    still_pending.append(tx)
-        st.session_state.pos_pending = still_pending
+        if changed:
+            persist_sales_log()
+            st.rerun()
 
 st.markdown("---")
 st.caption("Appraze · Cooper River Trading Co. · built for CTBids / eBay / HiBid / FB Marketplace / Mercari / Chairish / Etsy sourcing")

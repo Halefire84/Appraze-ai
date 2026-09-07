@@ -71,13 +71,43 @@ Stripe's read-only session lookup). `APP_URL` is used to build redirect URLs
 for the Point-of-Sale tab's one-off checkout sessions; POS still works
 without it, just with a generic redirect target.
 
-Webhook-based invoice reconciliation (`stripe_webhooks.py`) is implemented
-as pure, unit-tested logic but is **not yet wired to a live endpoint** —
-Streamlit can't host webhooks natively, so it needs a small separate
-service (e.g. FastAPI) to receive Stripe's POSTs, verify them with
-`STRIPE_WEBHOOK_SECRET`, and call `process_webhook_event`. That service
-does not exist in this repo yet; the POS tab's "Check Status" button
-already covers manual reconciliation without it.
+### Automatic payment reconciliation (optional — POS tab works fine without it)
+
+The POS tab's "Check Status" button already covers manual reconciliation
+(click it after the customer pays). `stripe_webhook_server.py` is a small,
+separate FastAPI service that does the same thing automatically — useful
+when the customer pays on their own device/phone and nobody remembers to
+click Check Status.
+
+This runs as its **own service**, separate from the Streamlit app
+(Streamlit can't receive inbound webhooks). To turn it on:
+
+1. Deploy `stripe_webhook_server.py` somewhere that can run a small Python
+   web service (Replit, Render, Fly.io, a VPS — anywhere). It needs
+   `requirements-webhook.txt` installed and is started with:
+   ```bash
+   uvicorn stripe_webhook_server:app --host 0.0.0.0 --port 8000
+   ```
+2. Set these environment variables on that service (NOT in Streamlit
+   secrets — this is a different process):
+   ```
+   STRIPE_WEBHOOK_SECRET = the signing secret from step 4 below
+   APPS_SCRIPT_URL       = same value as the Streamlit secret
+   APPS_SCRIPT_TOKEN     = same value as the Streamlit secret
+   ```
+3. Note the public URL that service gets (e.g.
+   `https://your-service.example.com`).
+4. In the Stripe Dashboard → **Developers → Webhooks → Add endpoint**:
+   - Endpoint URL: `https://your-service.example.com/stripe/webhook`
+   - Events to send: `charge.succeeded`, `charge.failed`, `charge.refunded`
+   - Copy the **Signing secret** it gives you into `STRIPE_WEBHOOK_SECRET`
+     above.
+
+Once running, the POS tab's "🔄 Refresh" button picks up whatever the
+webhook already confirmed — no separate UI needed. Every POS sale is
+logged under one shared "sales_log" table (one shared cash register for
+the whole business), so this doesn't depend on which login created the
+checkout link.
 
 ### AI Analyzer / Invoice Import tabs
 
@@ -88,18 +118,25 @@ ANTHROPIC_API_KEY = "sk-ant-..."
 Without it, both tabs show a "not configured yet" / error message instead
 of working, rather than crashing the app.
 
-### Mail tracking (not yet on a tab)
+### Mail tab (supplier invoices & tracking numbers)
 
-`mail.py` / `mail_parse.py` implement read-only Gmail (IMAP) tracking of
-supplier invoices and shipment numbers, fully unit-tested
-(`tests/test_mail_parse.py`), but there is currently no "Mail" tab in
-`app.py` wiring them into the UI — treat this as ready-to-integrate
-plumbing, not an active feature. If you do wire it in, it needs:
+Without this, the Mail tab shows a "not connected" message instead of
+erroring. Read-only over IMAP — Appraze never sends, replies to, deletes,
+or modifies anything in the inbox.
 
 ```toml
-GMAIL_ADDRESS = "the inbox to watch"
-GMAIL_APP_PASSWORD = "a 16-character Gmail App Password"
+GMAIL_ADDRESS = "the inbox to watch, e.g. chale@cooperrivertradingco.com"
+GMAIL_APP_PASSWORD = "the 16-character App Password Google generated"
 ```
+
+One-time setup on the Google account being watched:
+1. Turn on 2-Step Verification (myaccount.google.com/security) if it isn't
+   already on.
+2. Create an App Password at myaccount.google.com/apppasswords (choose
+   "Mail"). Paste the 16-character password it shows into
+   `GMAIL_APP_PASSWORD` above — this is NOT your normal Google password.
+3. Confirm IMAP is enabled: Gmail Settings (gear icon) → See all settings →
+   Forwarding and POP/IMAP → Enable IMAP → Save Changes.
 
 ## 3. Install as a desktop/home-screen app (optional)
 

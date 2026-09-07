@@ -13,12 +13,22 @@ Payment Link. Same security model, just via the API endpoint that
 supports a dynamic amount rather than one pre-made fixed price.
 """
 
+import secrets as _secrets
 from dataclasses import dataclass
+from datetime import date
 
 import requests
 import streamlit as st
 
 from billing import verify_checkout_session  # reuse the same read-only status check
+
+# Every POS sale is tagged with this owner key when persisted to the
+# "sales_log" table, regardless of which login created it — POS is a single
+# shared cash register for the business, not a per-tester feature (matching
+# storage.py's existing "admins share one workspace" model). The stand-alone
+# Stripe webhook service (stripe_webhook_server.py) writes to this exact
+# same key when it reconciles a payment, so both paths land in one place.
+SALES_LOG_OWNER_KEY = "admin_shared"
 
 
 def _secret_key() -> str:
@@ -28,11 +38,16 @@ def _secret_key() -> str:
     return key
 
 
+def _new_invoice_id() -> str:
+    return f"POS-{date.today().isoformat()}-{_secrets.token_hex(3)}"
+
+
 @dataclass
 class POSCheckoutResult:
     success: bool
     checkout_url: str = ""
     session_id: str = ""
+    invoice_id: str = ""
     error: str = ""
 
 
@@ -40,11 +55,16 @@ def create_pos_checkout(amount_dollars: float, description: str, customer_email:
     """
     Creates a one-off Stripe-hosted checkout page for a specific sale amount.
     Returns the URL to show/send to the customer (or open on a shared device
-    for a tap-to-pay-style in-person handoff).
+    for a tap-to-pay-style in-person handoff), plus an invoice_id that's
+    embedded in the Checkout Session's metadata — the Stripe webhook service
+    reads that metadata back off the charge event to know which sales_log
+    row to mark paid, since the webhook has no access to this app's session
+    state (it runs as a separate process).
     """
     if amount_dollars <= 0:
         return POSCheckoutResult(False, error="Amount must be greater than $0.")
 
+    invoice_id = _new_invoice_id()
     app_url = st.secrets.get("APP_URL", "").rstrip("/")
     # These redirect URLs are mostly a nice-to-have: if APP_URL is set and the
     # SAME device completes payment (e.g. handed to the customer and back),
@@ -63,6 +83,8 @@ def create_pos_checkout(amount_dollars: float, description: str, customer_email:
             "line_items[0][price_data][product_data][name]": description or "Cooper River Trading Co. item",
             "success_url": success_url,
             "cancel_url": cancel_url,
+            "payment_intent_data[metadata][invoice_id]": invoice_id,
+            "payment_intent_data[metadata][owner_key]": SALES_LOG_OWNER_KEY,
         }
         if customer_email:
             payload["customer_email"] = customer_email
@@ -75,7 +97,7 @@ def create_pos_checkout(amount_dollars: float, description: str, customer_email:
         )
         resp.raise_for_status()
         data = resp.json()
-        return POSCheckoutResult(True, checkout_url=data["url"], session_id=data["id"])
+        return POSCheckoutResult(True, checkout_url=data["url"], session_id=data["id"], invoice_id=invoice_id)
     except requests.exceptions.HTTPError as e:
         detail = e.response.text[:200] if e.response is not None else str(e)
         return POSCheckoutResult(False, error=f"Stripe error: {detail}")
