@@ -172,9 +172,9 @@ class TestFinanceCore(unittest.TestCase):
         self.assertEqual(result.verdict_tier, "strong_buy")
 
     def test_verdict_scale_buy(self):
-        """ROI 40-59% should be BUY."""
-        result = self.finance.calc_deal(100, 250)  # ~130% ROI before fees
-        self.assertIn(result.verdict, ["BUY", "AT CEILING"])  # Depends on fees
+        """ROI 40-59% (after default 13% fee / 18% premium) should be BUY."""
+        result = self.finance.calc_deal(100, 190)  # true_cost 118, net_resale 165.3 -> ~40.1% ROI
+        self.assertEqual(result.verdict, "BUY")
 
     def test_verdict_scale_pass(self):
         """ROI < 5% should be PASS."""
