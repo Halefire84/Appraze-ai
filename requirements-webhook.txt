@@ -1,3 +1,6 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 requests>=2.31
+# Test-only: fastapi.testclient (used by tests/test_stripe_webhook_server.py)
+# needs starlette's TestClient, which requires httpx2 to be installed.
+httpx2
