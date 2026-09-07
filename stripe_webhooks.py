@@ -22,7 +22,6 @@ Without webhook handling, invoices stay "Awaiting Payment" forever, and you'd
 need manual reconciliation with Stripe dashboard. This automates that.
 """
 
-import json
 import hmac
 import hashlib
 from datetime import datetime
