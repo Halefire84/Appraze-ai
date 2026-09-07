@@ -15,21 +15,29 @@
  *     so your deal data is one shared workspace, not two separate copies.
  *   - Everyone else gets their own private row keyed by their username —
  *     fully isolated, nobody else can read or overwrite it.
+ *
+ * SECURITY: SHEET_ID, TOKEN, and ADMIN_SETUP_CODE below are placeholders.
+ * Replace all three with your own values before deploying — never commit
+ * real values to source control. This file previously had real values
+ * checked in; if this repo is that one, treat that TOKEN and
+ * ADMIN_SETUP_CODE as compromised and rotate them (redeploy with new
+ * values and update the APPS_SCRIPT_TOKEN secret) even after this fix.
  */
 
-const SHEET_ID = "1WGF1rkhIsKn64QjTcWwSHFs3zNjDrtofguHzPNHFFYk";
-const TOKEN = "aX9k2mQ7rT4vY8pL1nW6zC3jH5bF0sD";
+const SHEET_ID = "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID";
+const TOKEN = "REPLACE_WITH_YOUR_OWN_LONG_RANDOM_STRING";
 
 // Change this to your own private value before deploying, then share it only
-// with Ashley. Anyone who signs up with this code becomes an admin and joins
-// the shared workspace. Leave blank to disable admin signup entirely.
-const ADMIN_SETUP_CODE = "9XlW1kpXbNZhJizlsGjf";
+// with whoever else should be an admin. Anyone who signs up with this code
+// becomes an admin and joins the shared workspace. Leave blank to disable
+// admin signup entirely.
+const ADMIN_SETUP_CODE = "REPLACE_WITH_YOUR_OWN_ADMIN_INVITE_CODE";
 
 const USERS_SHEET_NAME = "Users";
 const USERS_HEADER = ["username", "password_hash", "display_name", "is_admin", "is_paid", "created_at"];
 
 const STORAGE_SHEET_NAME = "Storage";
-const STORAGE_HEADER = ["owner_key", "payload_json", "updated_at"];
+const STORAGE_HEADER = ["owner_key", "table", "payload_json", "updated_at"];
 
 const PROCESSED_SHEET_NAME = "ProcessedFiles";
 const PROCESSED_HEADER = ["file_id", "file_name", "processed_at"];
@@ -67,6 +75,8 @@ function handleRequest(e) {
         return handleSaveData_(getStorageSheet_(), params);
       case "load_data":
         return handleLoadData_(getStorageSheet_(), params);
+      case "update_sales_log_status":
+        return handleUpdateSalesLogStatus_(getStorageSheet_(), params);
       case "set_paid":
         return handleSetPaid_(getUsersSheet_(), params);
       case "scan_folder":
@@ -97,8 +107,58 @@ function getStorageSheet_() {
   if (!sheet) {
     sheet = ss.insertSheet(STORAGE_SHEET_NAME);
     sheet.appendRow(STORAGE_HEADER);
+    return sheet;
   }
+  migrateStorageSheetIfNeeded_(sheet);
   return sheet;
+}
+
+// One-time migration for sheets created before multi-table support: the
+// old schema was [owner_key, payload_json, updated_at] (every row was
+// implicitly the "deals" table, the only one that existed). Detecting
+// this per-row at read time doesn't work — payload_json is always
+// truthy, so a naive "column B is empty -> legacy row" check silently
+// misreads every legacy row's JSON payload as if it were the table name,
+// meaning the row never matches table="deals" again and looks like the
+// data vanished. Migrating the whole sheet once, keyed off the header
+// row, is the only reliable way to tell old rows from new ones.
+function migrateStorageSheetIfNeeded_(sheet) {
+  // Cheap check before taking the lock: the common case (already migrated,
+  // or a brand-new sheet) never needs to wait on anything.
+  if (!isLegacySchema_(sheet)) return;
+
+  // Two requests can both reach here for the same still-legacy sheet at
+  // the same time (Apps Script Web Apps run concurrently). Without a
+  // lock, both would see 3 columns and both call insertColumnAfter(1),
+  // inserting two columns instead of one and shifting payload/updated_at
+  // out of place. The lock plus a second header check after acquiring it
+  // (double-checked locking) guarantees only the first execution to get
+  // the lock actually performs the insert; the second sees the
+  // already-migrated 4-column header and no-ops.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (!isLegacySchema_(sheet)) return;
+
+    const lastRow = sheet.getLastRow();
+    sheet.insertColumnAfter(1);
+    sheet.getRange(1, 2).setValue("table");
+    const numDataRows = lastRow - 1;
+    if (numDataRows > 0) {
+      const tableColumnValues = [];
+      for (let i = 0; i < numDataRows; i++) tableColumnValues.push(["deals"]);
+      sheet.getRange(2, 2, numDataRows, 1).setValues(tableColumnValues);
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function isLegacySchema_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) return false; // brand-new empty sheet, nothing to migrate
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return header.length === 3 && header[0] === "owner_key" && header[1] === "payload_json";
 }
 
 function getProcessedSheet_() {
@@ -191,30 +251,90 @@ function resolveOwnerKey_(params) {
 }
 
 function handleSaveData_(sheet, params) {
+  // migrateStorageSheetIfNeeded_ (called from getStorageSheet_, before this
+  // ever runs) guarantees every row already has a real "table" value, so
+  // there's no legacy-row case left to special-case here.
   const ownerKey = resolveOwnerKey_(params);
+  const table = String(params.table || "deals");
   const payload = String(params.payload || "{}");
 
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === ownerKey) {
-      sheet.getRange(i + 1, 2).setValue(payload);
-      sheet.getRange(i + 1, 3).setValue(new Date().toISOString());
-      return jsonResponse({ success: true });
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === ownerKey && data[i][1] === table) {
+        sheet.getRange(i + 1, 3).setValue(payload);
+        sheet.getRange(i + 1, 4).setValue(new Date().toISOString());
+        return jsonResponse({ success: true });
+      }
     }
+    sheet.appendRow([ownerKey, table, payload, new Date().toISOString()]);
+    return jsonResponse({ success: true });
+  } finally {
+    lock.releaseLock();
   }
-  sheet.appendRow([ownerKey, payload, new Date().toISOString()]);
-  return jsonResponse({ success: true });
 }
 
 function handleLoadData_(sheet, params) {
   const ownerKey = resolveOwnerKey_(params);
+  const table = String(params.table || "deals");
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === ownerKey) {
-      return jsonResponse({ success: true, payload: data[i][1], updated_at: data[i][2] });
+    if (data[i][0] === ownerKey && data[i][1] === table) {
+      return jsonResponse({ success: true, payload: data[i][2], updated_at: data[i][3] });
     }
   }
   return jsonResponse({ success: true, payload: null });
+}
+
+// Atomic single-row update for the sales_log table, used by the Stripe
+// webhook service instead of load-mutate-save (see webhook_store.py /
+// stripe_webhook_server.py). Read + mutate + write happen inside this one
+// locked execution, so two webhook deliveries arriving close together
+// can't race and silently clobber each other's status update the way a
+// separate load-then-save round trip from the caller could.
+function handleUpdateSalesLogStatus_(sheet, params) {
+  const invoiceId = String(params.invoice_id || "");
+  const newStatus = String(params.new_status || "");
+  if (!invoiceId || !newStatus) {
+    return jsonResponse({ success: false, error: "invoice_id and new_status are required" });
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ownerKey = "admin_shared";
+    const table = "sales_log";
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === ownerKey && data[i][1] === table) {
+        let rows;
+        try {
+          rows = JSON.parse(data[i][2] || "[]");
+        } catch (e) {
+          return jsonResponse({ success: false, error: "sales_log payload is not valid JSON" });
+        }
+        let found = false;
+        for (let j = 0; j < rows.length; j++) {
+          if (rows[j]["Invoice #"] === invoiceId) {
+            rows[j]["Status"] = newStatus;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          return jsonResponse({ success: true, found: false });
+        }
+        sheet.getRange(i + 1, 3).setValue(JSON.stringify(rows));
+        sheet.getRange(i + 1, 4).setValue(new Date().toISOString());
+        return jsonResponse({ success: true, found: true });
+      }
+    }
+    return jsonResponse({ success: true, found: false }); // sales_log table doesn't exist yet
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function jsonResponse(obj) {

@@ -9,109 +9,152 @@ import unittest
 
 from finance import (
     GOLD_PURITY,
+    LOW_MARGIN_PCT_THRESHOLD,
+    LOW_MARGIN_PROFIT_THRESHOLD,
+    MELT_CEILING_PCT,
     SILVER_PURITY,
     TROY_OZ_PER_GRAM,
-    compute_verdict,
-    deal_roi,
+    calc_deal,
+    calc_melt,
+    five_tier_verdict,
+    format_roi,
+    inventory_health,
     inventory_margin,
-    max_bid_after_premium,
-    melt_value,
-    profit_calc,
+    max_cost_for_target_roi,
     sales_tax,
 )
 
 
-class TestComputeVerdict(unittest.TestCase):
+class TestFiveTierVerdict(unittest.TestCase):
     def test_strong_buy_at_and_above_60(self):
-        self.assertEqual(compute_verdict(60)[0], "STRONG BUY")
-        self.assertEqual(compute_verdict(100)[0], "STRONG BUY")
+        self.assertEqual(five_tier_verdict(60)[0], "STRONG BUY")
+        self.assertEqual(five_tier_verdict(100)[0], "STRONG BUY")
+        self.assertEqual(five_tier_verdict(60)[1], "strong_buy")
 
     def test_buy_between_40_and_60(self):
-        self.assertEqual(compute_verdict(40)[0], "BUY")
-        self.assertEqual(compute_verdict(59.99)[0], "BUY")
+        self.assertEqual(five_tier_verdict(40)[0], "BUY")
+        self.assertEqual(five_tier_verdict(59.99)[0], "BUY")
 
     def test_at_ceiling_between_20_and_40(self):
-        self.assertEqual(compute_verdict(20)[0], "AT CEILING")
-        self.assertEqual(compute_verdict(39.99)[0], "AT CEILING")
+        self.assertEqual(five_tier_verdict(20)[0], "AT CEILING")
+        self.assertEqual(five_tier_verdict(39.99)[0], "AT CEILING")
 
     def test_borderline_between_5_and_20(self):
-        self.assertEqual(compute_verdict(5)[0], "BORDERLINE")
-        self.assertEqual(compute_verdict(19.99)[0], "BORDERLINE")
+        self.assertEqual(five_tier_verdict(5)[0], "BORDERLINE")
+        self.assertEqual(five_tier_verdict(19.99)[0], "BORDERLINE")
 
     def test_pass_below_5(self):
-        self.assertEqual(compute_verdict(4.99)[0], "PASS")
-        self.assertEqual(compute_verdict(0)[0], "PASS")
-        self.assertEqual(compute_verdict(-50)[0], "PASS")
+        self.assertEqual(five_tier_verdict(4.99)[0], "PASS")
+        self.assertEqual(five_tier_verdict(0)[0], "PASS")
+        self.assertEqual(five_tier_verdict(-50)[0], "PASS")
 
-    def test_badge_classes_are_distinct_and_paired_correctly(self):
-        expected = {
-            "STRONG BUY": "badge-strongbuy",
-            "BUY": "badge-buy",
-            "AT CEILING": "badge-ceiling",
-            "BORDERLINE": "badge-borderline",
-            "PASS": "badge-passverdict",
-        }
-        for roi, (label, badge) in [
-            (75, compute_verdict(75)),
-            (45, compute_verdict(45)),
-            (25, compute_verdict(25)),
-            (10, compute_verdict(10)),
-            (-10, compute_verdict(-10)),
-        ]:
-            self.assertEqual(badge, expected[label])
+    def test_tiers_are_distinct(self):
+        tiers = {five_tier_verdict(roi)[1] for roi in [75, 45, 25, 10, -10]}
+        self.assertEqual(tiers, {"strong_buy", "buy", "at_ceiling", "borderline", "pass"})
 
 
-class TestDealRoi(unittest.TestCase):
-    def test_normal_profit(self):
-        profit, roi = deal_roi(100, 250)
-        self.assertEqual(profit, 150)
-        self.assertEqual(roi, 150.0)
-
-    def test_loss(self):
-        profit, roi = deal_roi(200, 150)
-        self.assertEqual(profit, -50)
-        self.assertEqual(roi, -25.0)
-
-    def test_zero_cost_never_divides_by_zero(self):
-        profit, roi = deal_roi(0, 100)
-        self.assertEqual(profit, 100)
-        self.assertEqual(roi, 0)
-
-    def test_none_inputs_treated_as_zero(self):
-        profit, roi = deal_roi(None, None)
-        self.assertEqual(profit, 0)
-        self.assertEqual(roi, 0)
-
-    def test_break_even(self):
-        profit, roi = deal_roi(100, 100)
-        self.assertEqual(profit, 0)
-        self.assertEqual(roi, 0.0)
-
-
-class TestProfitCalc(unittest.TestCase):
+class TestCalcDeal(unittest.TestCase):
     def test_normal_case_with_fees_and_premium(self):
-        true_cost, net_resale, gross_profit, roi = profit_calc(100, 250, fee_pct=13.0, premium_pct=18.0)
-        self.assertAlmostEqual(true_cost, 118.0)
-        self.assertAlmostEqual(net_resale, 217.5)
-        self.assertAlmostEqual(gross_profit, 99.5)
-        self.assertAlmostEqual(roi, 99.5 / 118.0 * 100)
+        result = calc_deal(100, 250, fee_pct=13.0, premium_pct=18.0)
+        self.assertAlmostEqual(result.true_cost, 118.0)
+        self.assertAlmostEqual(result.net_resale, 217.5)
+        self.assertAlmostEqual(result.gross_profit, 99.5)
+        self.assertAlmostEqual(result.roi_pct, 99.5 / 118.0 * 100)
 
     def test_zero_fees_and_premium(self):
-        true_cost, net_resale, gross_profit, roi = profit_calc(100, 200, fee_pct=0, premium_pct=0)
-        self.assertEqual(true_cost, 100)
-        self.assertEqual(net_resale, 200)
-        self.assertEqual(gross_profit, 100)
-        self.assertEqual(roi, 100.0)
+        result = calc_deal(100, 200, fee_pct=0, premium_pct=0)
+        self.assertEqual(result.true_cost, 100)
+        self.assertEqual(result.net_resale, 200)
+        self.assertEqual(result.gross_profit, 100)
+        self.assertEqual(result.roi_pct, 100.0)
 
-    def test_zero_purchase_cost_never_divides_by_zero(self):
-        true_cost, net_resale, gross_profit, roi = profit_calc(0, 100, fee_pct=10, premium_pct=0)
-        self.assertEqual(true_cost, 0)
-        self.assertEqual(roi, 0)
+    def test_free_find_is_infinite_roi_and_strong_buy(self):
+        result = calc_deal(0, 100)
+        self.assertEqual(result.roi_pct, float("inf"))
+        self.assertEqual(result.verdict, "STRONG BUY")
+
+    def test_zero_cost_zero_resale_never_divides_by_zero(self):
+        result = calc_deal(0, 0)
+        self.assertEqual(result.gross_profit, 0)
+        self.assertEqual(result.roi_pct, 0.0)
+        self.assertEqual(result.verdict, "PASS")
+
+    def test_loss_scenario(self):
+        result = calc_deal(100, 0)
+        self.assertLess(result.gross_profit, 0)
+        self.assertEqual(result.verdict, "PASS")
 
     def test_full_fee_wipes_out_resale_value(self):
-        true_cost, net_resale, gross_profit, roi = profit_calc(50, 100, fee_pct=100, premium_pct=0)
-        self.assertEqual(net_resale, 0)
-        self.assertEqual(gross_profit, -50)
+        result = calc_deal(50, 100, fee_pct=100, premium_pct=0)
+        self.assertEqual(result.net_resale, 0)
+        self.assertEqual(result.gross_profit, -50)
+
+    def test_verdict_scale_strong_buy(self):
+        result = calc_deal(100, 400)
+        self.assertEqual(result.verdict, "STRONG BUY")
+        self.assertEqual(result.verdict_tier, "strong_buy")
+
+    def test_verdict_scale_pass(self):
+        result = calc_deal(100, 104)
+        self.assertEqual(result.verdict, "PASS")
+        self.assertEqual(result.verdict_tier, "pass")
+
+
+class TestMaxCostForTargetRoi(unittest.TestCase):
+    def test_max_cost_hits_target_roi_exactly(self):
+        max_cost = max_cost_for_target_roi(300, target_roi_pct=40.0, fee_pct=13.0, premium_pct=18.0)
+        result = calc_deal(max_cost, 300, fee_pct=13.0, premium_pct=18.0)
+        self.assertAlmostEqual(result.roi_pct, 40.0, places=4)
+
+    def test_max_cost_is_less_than_resale_value(self):
+        max_cost = max_cost_for_target_roi(300, target_roi_pct=40.0)
+        self.assertGreater(max_cost, 0)
+        self.assertLess(max_cost, 300)
+
+    def test_impossible_target_roi_floors_at_zero(self):
+        self.assertEqual(max_cost_for_target_roi(300, target_roi_pct=-150), 0.0)
+
+
+class TestCalcMelt(unittest.TestCase):
+    def test_troy_oz_per_gram_constant_is_correct(self):
+        self.assertAlmostEqual(TROY_OZ_PER_GRAM, 1 / 31.1034768)
+
+    def test_normal_melt_and_80_percent_ceiling(self):
+        melt = calc_melt(weight_grams=10, purity_fraction=0.585, spot_price_per_oz=2000)
+        self.assertGreater(melt.melt_value, 0)
+        self.assertAlmostEqual(melt.ceiling_price / melt.melt_value, MELT_CEILING_PCT / 100, places=6)
+
+    def test_zero_weight_is_zero_value(self):
+        melt = calc_melt(0, 0.585, 2000)
+        self.assertEqual(melt.melt_value, 0)
+        self.assertEqual(melt.ceiling_price, 0)
+
+    def test_zero_spot_price_is_zero_value(self):
+        melt = calc_melt(10, 0.585, 0)
+        self.assertEqual(melt.melt_value, 0)
+        self.assertEqual(melt.ceiling_price, 0)
+
+    def test_purity_scales_value_linearly(self):
+        full = calc_melt(10, 1.0, 2000)
+        half = calc_melt(10, 0.5, 2000)
+        self.assertAlmostEqual(half.melt_value, full.melt_value / 2)
+
+    def test_gold_purity_table_has_expected_karats(self):
+        self.assertIn("24k (.999 fine)", GOLD_PURITY)
+        self.assertIn("14k", GOLD_PURITY)
+        self.assertEqual(GOLD_PURITY["24k (.999 fine)"], 0.999)
+
+    def test_silver_purity_table_has_sterling(self):
+        self.assertIn("Sterling (.925)", SILVER_PURITY)
+        self.assertEqual(SILVER_PURITY["Sterling (.925)"], 0.925)
+
+
+class TestFormatRoi(unittest.TestCase):
+    def test_normal_roi(self):
+        self.assertEqual(format_roi(45.5), "45.5%")
+
+    def test_infinite_roi(self):
+        self.assertIn("∞", format_roi(float("inf")))
 
 
 class TestInventoryMargin(unittest.TestCase):
@@ -131,56 +174,30 @@ class TestInventoryMargin(unittest.TestCase):
         self.assertEqual(net, 80)
         self.assertAlmostEqual(margin_pct, 80 / 120 * 100)
 
+    def test_default_fee_pct_is_13(self):
+        _, net_default, _ = inventory_margin(cost_basis=40, list_price=120)
+        _, net_explicit, _ = inventory_margin(cost_basis=40, list_price=120, fee_pct=13.0)
+        self.assertAlmostEqual(net_default, net_explicit)
 
-class TestMeltValue(unittest.TestCase):
-    def test_troy_oz_direct(self):
-        value, ceiling = melt_value(spot_price_per_troy_oz=2000, weight=1, weight_unit="Troy oz", purity=1.0)
-        self.assertEqual(value, 2000)
-        self.assertEqual(ceiling, 1600)
-
-    def test_grams_converted_to_troy_oz(self):
-        value, ceiling = melt_value(spot_price_per_troy_oz=2000, weight=31.1035, weight_unit="Grams", purity=1.0)
-        self.assertAlmostEqual(value, 2000, places=4)
-        self.assertAlmostEqual(ceiling, 1600, places=4)
-
-    def test_purity_scales_value_linearly(self):
-        full, _ = melt_value(2000, 10, "Grams", purity=1.0)
-        half, _ = melt_value(2000, 10, "Grams", purity=0.5)
-        self.assertAlmostEqual(half, full / 2)
-
-    def test_zero_weight(self):
-        value, ceiling = melt_value(2000, 0, "Grams", 0.5833)
-        self.assertEqual(value, 0)
-        self.assertEqual(ceiling, 0)
-
-    def test_gold_purity_table_has_expected_karats(self):
-        self.assertIn("24k (.999 fine)", GOLD_PURITY)
-        self.assertIn("14k", GOLD_PURITY)
-        self.assertEqual(GOLD_PURITY["24k (.999 fine)"], 0.999)
-
-    def test_silver_purity_table_has_sterling(self):
-        self.assertIn("Sterling / 925", SILVER_PURITY)
-        self.assertEqual(SILVER_PURITY["Sterling / 925"], 0.925)
-
-    def test_troy_oz_per_gram_constant_is_correct(self):
-        self.assertAlmostEqual(TROY_OZ_PER_GRAM, 1 / 31.1035)
+    def test_negative_margin_on_underwater_item(self):
+        gross, net, margin_pct = inventory_margin(cost_basis=100, list_price=50, fee_pct=13)
+        self.assertLess(gross, 0)
+        self.assertLess(net, 0)
+        self.assertLess(margin_pct, 0)
 
 
-class TestMaxBidAfterPremium(unittest.TestCase):
-    def test_zero_premium_returns_ceiling_unchanged(self):
-        self.assertEqual(max_bid_after_premium(1000, 0), 1000)
+class TestInventoryHealth(unittest.TestCase):
+    def test_healthy_above_both_thresholds(self):
+        self.assertEqual(inventory_health(net_margin_pct=25, net_profit=20), "HEALTHY")
 
-    def test_positive_premium_reduces_max_bid(self):
-        result = max_bid_after_premium(1000, 18)
-        self.assertAlmostEqual(result, 1000 / 1.18)
-        self.assertLess(result, 1000)
+    def test_low_margin_below_pct_threshold(self):
+        self.assertEqual(inventory_health(net_margin_pct=LOW_MARGIN_PCT_THRESHOLD - 0.01, net_profit=100), "LOW MARGIN")
 
-    def test_never_divides_by_zero_for_any_nonnegative_premium(self):
-        # (1 + premium_pct/100) >= 1 whenever premium_pct >= 0
-        for premium in [0, 5, 18, 25, 100]:
-            result = max_bid_after_premium(500, premium)
-            self.assertGreater(result, 0)
-            self.assertLessEqual(result, 500)
+    def test_low_margin_below_profit_threshold(self):
+        self.assertEqual(inventory_health(net_margin_pct=50, net_profit=LOW_MARGIN_PROFIT_THRESHOLD - 0.01), "LOW MARGIN")
+
+    def test_boundary_values_are_healthy(self):
+        self.assertEqual(inventory_health(net_margin_pct=LOW_MARGIN_PCT_THRESHOLD, net_profit=LOW_MARGIN_PROFIT_THRESHOLD), "HEALTHY")
 
 
 class TestSalesTax(unittest.TestCase):

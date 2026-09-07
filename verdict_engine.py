@@ -24,7 +24,6 @@ Drop this file next to app.py and `from verdict_engine import score_deal`.
 
 from dataclasses import dataclass
 from typing import Optional, List
-import math
 
 
 @dataclass

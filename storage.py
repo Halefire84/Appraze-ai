@@ -29,15 +29,30 @@ class StorageResult:
     error: str = ""
 
 
-def _identity_params() -> dict:
-    """Params the backend uses to resolve which storage row this session owns."""
+def _identity_params(shared: bool = False) -> dict:
+    """Params the backend uses to resolve which storage row this session
+    owns. shared=True forces the fixed "admin_shared" row regardless of
+    who's logged in — AppsScript_Code.gs's resolveOwnerKey_ resolves
+    "admin_shared" whenever is_admin=true, independent of username, so
+    this doesn't need a real username at all. Used for tables like
+    "sales_log" that are one shared cash register for the whole business,
+    not per-tester data — without this, a non-admin login's POS checkouts
+    would land under their own "tester_<username>" row, where the
+    standalone Stripe webhook service (which only ever looks at
+    admin_shared) could never find them to reconcile."""
+    if shared:
+        return {"username": "", "is_admin": "true"}
     return {
         "username": st.session_state.get("username", ""),
         "is_admin": str(bool(st.session_state.get("user_is_admin", False))).lower(),
     }
 
 
-def save_deals(df: pd.DataFrame) -> StorageResult:
+def save_table(df: pd.DataFrame, table: str = "deals", shared: bool = False) -> StorageResult:
+    """Persist any named table (e.g. "deals", "inventory") under this
+    session's owner key, or under the fixed shared admin key when
+    shared=True (see _identity_params). Each table is stored independently
+    server-side — saving one never touches another."""
     try:
         payload = df.to_json(orient="records", date_format="iso")
         resp = requests.get(
@@ -45,8 +60,9 @@ def save_deals(df: pd.DataFrame) -> StorageResult:
             params={
                 "token": _token(),
                 "action": "save_data",
+                "table": table,
                 "payload": payload,
-                **_identity_params(),
+                **_identity_params(shared),
             },
             timeout=15,
         )
@@ -57,14 +73,15 @@ def save_deals(df: pd.DataFrame) -> StorageResult:
         return StorageResult(False, error=f"connection error: {e}")
 
 
-def load_deals() -> StorageResult:
+def load_table(table: str = "deals", shared: bool = False) -> StorageResult:
     try:
         resp = requests.get(
             _apps_script_url(),
             params={
                 "token": _token(),
                 "action": "load_data",
-                **_identity_params(),
+                "table": table,
+                **_identity_params(shared),
             },
             timeout=15,
         )
@@ -79,3 +96,11 @@ def load_deals() -> StorageResult:
         return StorageResult(True, payload=records)
     except Exception as e:
         return StorageResult(False, error=f"connection error: {e}")
+
+
+def save_deals(df: pd.DataFrame) -> StorageResult:
+    return save_table(df, "deals")
+
+
+def load_deals() -> StorageResult:
+    return load_table("deals")

@@ -13,6 +13,8 @@ Core business rules encoded here:
   - CTBids buyer's premium default (18%)
   - Standard platform resale fee (13%)
   - Precious metals 80%-of-melt ceiling rule
+  - Inventory listing margin (cost basis -> list price, post-acquisition)
+  - Sales tax
 """
 
 from dataclasses import dataclass
@@ -153,3 +155,51 @@ def calc_melt(weight_grams: float, purity_fraction: float, spot_price_per_oz: fl
     melt_value = pure_troy_oz * spot_price_per_oz
     ceiling_price = melt_value * (MELT_CEILING_PCT / 100)
     return MeltResult(troy_oz_total, pure_troy_oz, melt_value, ceiling_price)
+
+
+# ---------------------------------------------------------------------------
+# INVENTORY MARGIN — post-acquisition listing math
+# ---------------------------------------------------------------------------
+# Distinct from calc_deal(): calc_deal scores whether to BUY (cost is a hammer
+# price still subject to buyer's premium). inventory_margin scores an item
+# you already own and are pricing to LIST — cost_basis is the fully-settled
+# purchase cost (premium already included), so there's no premium term here.
+
+DEFAULT_INVENTORY_FEE_PCT = 13.0
+LOW_MARGIN_PCT_THRESHOLD = 20.0
+LOW_MARGIN_PROFIT_THRESHOLD = 15.0
+
+
+def inventory_margin(
+    cost_basis: float,
+    list_price: float,
+    fee_pct: float = DEFAULT_INVENTORY_FEE_PCT,
+) -> tuple[float, float, float]:
+    """
+    Returns (gross_profit, net_profit, net_margin_pct) for a priced
+    inventory item. Never divides by zero: an unpriced item (list_price=0)
+    reports 0% margin instead of raising.
+    """
+    gross_profit = list_price - cost_basis
+    net_profit = gross_profit - list_price * (fee_pct / 100)
+    net_margin_pct = (net_profit / list_price * 100) if list_price else 0.0
+    return gross_profit, net_profit, net_margin_pct
+
+
+def inventory_health(net_margin_pct: float, net_profit: float) -> str:
+    """CRTC inventory health flag: "LOW MARGIN" below 20% margin OR below
+    $15 net profit, otherwise "HEALTHY"."""
+    if net_margin_pct < LOW_MARGIN_PCT_THRESHOLD or net_profit < LOW_MARGIN_PROFIT_THRESHOLD:
+        return "LOW MARGIN"
+    return "HEALTHY"
+
+
+# ---------------------------------------------------------------------------
+# SALES TAX
+# ---------------------------------------------------------------------------
+
+def sales_tax(subtotal: float, tax_rate_pct: float) -> tuple[float, float]:
+    """Returns (tax, total) — tax due on subtotal at tax_rate_pct, and the
+    tax-inclusive total."""
+    tax = subtotal * (tax_rate_pct / 100)
+    return tax, subtotal + tax

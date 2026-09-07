@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import List, Dict
 
 import requests
-import streamlit as st
 
 from auth import _apps_script_url, _token
 
