@@ -1407,7 +1407,7 @@ with tab_pos:
 
     if "sales_log_loaded" not in st.session_state:
         with st.spinner("Loading pending checkouts..."):
-            sales_result = load_table("sales_log")
+            sales_result = load_table("sales_log", shared=True)
         st.session_state.sales_log = sales_result.payload if (sales_result.success and sales_result.payload) else []
         st.session_state.sales_log_loaded = True
 
@@ -1416,11 +1416,18 @@ with tab_pos:
         refresh silently lost them even though the Stripe session was still
         valid. Persisting through the same backend as Deals/Inventory fixes
         that, and lets the standalone webhook service (stripe_webhook_server.py)
-        reconcile a sale automatically without this tab even being open."""
-        save_table(pd.DataFrame(st.session_state.sales_log), "sales_log")
+        reconcile a sale automatically without this tab even being open.
+
+        shared=True always targets the fixed "admin_shared" row (matching
+        pos.py's SALES_LOG_OWNER_KEY and webhook_store.py's OWNER_KEY) —
+        POS is one shared cash register for the business, not per-tester
+        data. Without it, a non-admin login's checkouts would land under
+        their own private row, where the webhook service could never find
+        them to reconcile."""
+        save_table(pd.DataFrame(st.session_state.sales_log), "sales_log", shared=True)
 
     if st.button("🔄 Refresh (picks up webhook-confirmed payments)", use_container_width=False):
-        refreshed = load_table("sales_log")
+        refreshed = load_table("sales_log", shared=True)
         if refreshed.success:
             st.session_state.sales_log = refreshed.payload or []
             st.rerun()

@@ -35,8 +35,8 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from stripe_webhooks import StripeWebhookError, process_webhook_event, update_invoice_status, verify_stripe_signature
-from webhook_store import load_sales_log, save_sales_log
+from stripe_webhooks import StripeWebhookError, process_webhook_event, verify_stripe_signature
+from webhook_store import update_sales_log_status
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("stripe_webhook_server")
@@ -89,21 +89,17 @@ async def stripe_webhook(request: Request):
 
 
 def _apply_update(update: dict) -> None:
-    """Reconciles one invoice's status into the sales_log table. Safe to
-    call more than once for the same event (Stripe retries/duplicates
-    deliveries) — update_invoice_status only ever sets a status, so
-    replaying it is a no-op once the row already matches."""
-    load_result = load_sales_log()
-    if not load_result.success:
-        logger.warning("Could not load sales_log to apply webhook update: %s", load_result.error)
-        return
-
-    rows = load_result.payload or []
-    found = update_invoice_status(rows, update["invoice_id"], update["new_status"])
-    if not found:
+    """Reconciles one invoice's status into the sales_log table via a
+    single atomic Apps Script call (read + mutate + write in one locked
+    server-side execution — see AppsScript_Code.gs's
+    handleUpdateSalesLogStatus_) rather than a separate load-then-save
+    round trip, which would let two webhook deliveries arriving close
+    together race and silently clobber each other's update. Safe to call
+    more than once for the same event either way (Stripe retries/
+    duplicates deliveries) — it only ever sets a status, so replaying it
+    is a no-op once the row already matches."""
+    result = update_sales_log_status(update["invoice_id"], update["new_status"])
+    if not result.success:
+        logger.warning("Could not update sales_log for invoice_id=%s: %s", update["invoice_id"], result.error)
+    elif not result.payload:
         logger.info("No sales_log row found for invoice_id=%s yet (event may have arrived before the row was saved).", update["invoice_id"])
-        return
-
-    save_result = save_sales_log(rows)
-    if not save_result.success:
-        logger.warning("Could not save sales_log after webhook update: %s", save_result.error)

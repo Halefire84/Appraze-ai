@@ -72,11 +72,11 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
 
     def test_unhandled_event_type_acknowledged_without_persisting(self):
         event = {"type": "customer.created", "data": {"object": {}}}
-        with mock.patch("stripe_webhook_server.load_sales_log") as mock_load:
+        with mock.patch("stripe_webhook_server.update_sales_log_status") as mock_update:
             resp = self._post(event)
             self.assertEqual(resp.status_code, 200)
             self.assertFalse(resp.json()["handled"])
-            mock_load.assert_not_called()
+            mock_update.assert_not_called()
 
     def test_charge_succeeded_updates_matching_sales_log_row(self):
         event = {
@@ -90,38 +90,29 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
                 }
             },
         }
-        existing_rows = [{"Invoice #": "POS-2026-09-07-abc123", "Status": "Awaiting Payment"}]
-        with mock.patch("stripe_webhook_server.load_sales_log", return_value=WebhookStoreResult(True, payload=existing_rows)) as mock_load, \
-             mock.patch("stripe_webhook_server.save_sales_log", return_value=WebhookStoreResult(True)) as mock_save:
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload=True)) as mock_update:
             resp = self._post(event)
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
             self.assertTrue(body["handled"])
             self.assertEqual(body["new_status"], "Paid (Card)")
-            mock_load.assert_called_once()
-            mock_save.assert_called_once()
-            saved_rows = mock_save.call_args[0][0]
-            self.assertEqual(saved_rows[0]["Status"], "Paid (Card)")
+            mock_update.assert_called_once_with("POS-2026-09-07-abc123", "Paid (Card)")
 
     def test_charge_succeeded_with_no_matching_row_does_not_crash(self):
         event = {
             "type": "charge.succeeded",
             "data": {"object": {"id": "ch_456", "metadata": {"invoice_id": "POS-DOES-NOT-EXIST"}, "amount": 100, "created": 0}},
         }
-        with mock.patch("stripe_webhook_server.load_sales_log", return_value=WebhookStoreResult(True, payload=[])), \
-             mock.patch("stripe_webhook_server.save_sales_log") as mock_save:
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload=False)):
             resp = self._post(event)
             self.assertEqual(resp.status_code, 200)
-            mock_save.assert_not_called()
 
     def test_replaying_the_same_event_twice_is_safe(self):
         event = {
             "type": "charge.succeeded",
             "data": {"object": {"id": "ch_dup", "metadata": {"invoice_id": "POS-DUP"}, "amount": 100, "created": 0}},
         }
-        rows = [{"Invoice #": "POS-DUP", "Status": "Awaiting Payment"}]
-        with mock.patch("stripe_webhook_server.load_sales_log", return_value=WebhookStoreResult(True, payload=rows)), \
-             mock.patch("stripe_webhook_server.save_sales_log", return_value=WebhookStoreResult(True)):
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload=True)):
             first = self._post(event)
             second = self._post(event)
             self.assertEqual(first.status_code, 200)
@@ -135,7 +126,7 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
             "type": "charge.succeeded",
             "data": {"object": {"id": "ch_789", "metadata": {"invoice_id": "POS-1"}, "amount": 100, "created": 0}},
         }
-        with mock.patch("stripe_webhook_server.load_sales_log", return_value=WebhookStoreResult(False, error="unreachable")):
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(False, error="unreachable")):
             resp = self._post(event)
             self.assertEqual(resp.status_code, 200)
 

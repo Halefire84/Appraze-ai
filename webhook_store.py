@@ -36,7 +36,7 @@ OWNER_KEY = "admin_shared"
 @dataclass
 class WebhookStoreResult:
     success: bool
-    payload: list = None
+    payload: object = None  # list of rows for load_sales_log; bool "found" for update_sales_log_status
     error: str = ""
 
 
@@ -90,5 +90,44 @@ def save_sales_log(rows: list) -> WebhookStoreResult:
         resp.raise_for_status()
         data = resp.json()
         return WebhookStoreResult(bool(data.get("success")), error=data.get("error", ""))
+    except Exception as e:
+        return WebhookStoreResult(False, error=f"connection error: {e}")
+
+
+def update_sales_log_status(invoice_id: str, new_status: str) -> WebhookStoreResult:
+    """
+    Atomic single-row update, preferred over load_sales_log() +
+    save_sales_log() for reconciling one invoice: those two are separate
+    HTTP round trips, so two webhook deliveries arriving close together can
+    each load the same stale snapshot and then overwrite each other's
+    change when they save the whole table back. This instead asks
+    AppsScript_Code.gs's update_sales_log_status action to read, mutate,
+    and write the one matching row in a single locked execution server-side
+    — there's no window for a second request to race it.
+
+    payload.found tells the caller whether a matching invoice_id existed
+    yet (it may not, if the webhook arrives before the POS tab has
+    persisted its "Awaiting Payment" row).
+    """
+    url = os.environ.get("APPS_SCRIPT_URL")
+    token = os.environ.get("APPS_SCRIPT_TOKEN")
+    if not url or not token:
+        return WebhookStoreResult(False, error="APPS_SCRIPT_URL/APPS_SCRIPT_TOKEN not set in this service's environment.")
+    try:
+        resp = requests.get(
+            url,
+            params={
+                "token": token,
+                "action": "update_sales_log_status",
+                "invoice_id": invoice_id,
+                "new_status": new_status,
+            },
+            timeout=_REQUEST_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            return WebhookStoreResult(False, error=data.get("error", "update failed"))
+        return WebhookStoreResult(True, payload=data.get("found"))
     except Exception as e:
         return WebhookStoreResult(False, error=f"connection error: {e}")
