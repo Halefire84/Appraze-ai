@@ -118,6 +118,29 @@ ANTHROPIC_API_KEY = "sk-ant-..."
 Without it, both tabs show a "not configured yet" / error message instead
 of working, rather than crashing the app.
 
+### Market Comps tab (optional eBay active-listing search)
+
+Manual comp entry and CSV import work with no configuration. To also pull
+active eBay listings into the comps table:
+
+```toml
+EBAY_CLIENT_ID = "your eBay developer app's Client ID"
+EBAY_CLIENT_SECRET = "your eBay developer app's Client Secret"
+```
+
+Get these from [developer.ebay.com](https://developer.ebay.com) → sign in
+→ create an application → use the **Production** keys (client credentials
+grant, no per-user OAuth needed since this only reads public listings).
+Without these, the eBay search box is hidden with a "not configured"
+note — manual/CSV comps still work fully.
+
+Note: this pulls **active (asking-price) listings only**, not sold
+comps — eBay's sold-listing data requires separate approved partner
+access (the Marketplace Insights API) that most developer accounts don't
+have. The Market Comps tab scores active-only comps at lower confidence
+for exactly this reason; a sold price you look up and type in yourself is
+stronger evidence than any eBay API this app can reach.
+
 ### Mail tab (supplier invoices & tracking numbers)
 
 Without this, the Mail tab shows a "not connected" message instead of

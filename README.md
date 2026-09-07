@@ -2,8 +2,9 @@
 
 A single-page Streamlit dashboard for tracking, filtering, and evaluating
 resale/auction deals across CTBids, eBay, HiBid, Facebook Marketplace,
-Mercari, Chairish, and Etsy — plus inventory margin tracking, an AI item
-analyzer, invoice import, mail tracking, and point-of-sale checkout.
+Mercari, Chairish, and Etsy — plus inventory margin tracking, market comps
+valuation, an AI item analyzer, invoice import, mail tracking, and
+point-of-sale checkout.
 
 ## Run locally
 
@@ -32,11 +33,22 @@ syntax.
 ## Project layout
 
 - `app.py` — the Streamlit UI and production entry point (all tabs: Deal
-  Dashboard, Inventory, Profit Calculator, Melt Calculator, AI Analyzer,
-  Invoice Import, Mail, POS Checkout)
+  Dashboard, Inventory, Profit Calculator, Melt Calculator, Market Comps,
+  AI Analyzer, Invoice Import, Mail, POS Checkout)
 - `finance.py` — pure profit/margin/melt/tax math, the single source of
   truth for every dollar figure shown in the app; unit-tested, no
   Streamlit/pandas dependency
+- `comps.py` — pure market-comps valuation math (distribution stats +
+  explainable confidence rating from a list of comparable listings), then
+  hands the result straight to `finance.calc_deal` so market evidence and
+  the verdict math never disagree; unit-tested, no Streamlit/network
+  dependency
+- `comps_adapters.py` — pluggable comp sources behind one small interface:
+  manual entry, CSV import (both always available), and a real eBay
+  Browse API integration for active listings (needs `EBAY_CLIENT_ID`/
+  `EBAY_CLIENT_SECRET` — see DEPLOY.md). Adding another source later (a
+  different marketplace, a paid sold-comps feed) means writing one more
+  adapter here, not touching `comps.py`'s math
 - `auth.py` — signup/login against the Apps Script backend, password
   hashing, session gating
 - `storage.py` — persists any named table (deals, inventory, sales_log, ...)

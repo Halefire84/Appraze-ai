@@ -38,6 +38,8 @@ from billing import verify_checkout_session, payment_link_url
 from drive_scan import scan_invoice_folder, mark_files_processed
 from pos import create_pos_checkout, check_payment_status
 import mail
+from comps import Comp, evaluate_with_comps
+from comps_adapters import CsvCompsAdapter, EbayAuthError, EbayBrowseAdapter, is_ebay_configured
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -535,8 +537,8 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS
 # --------------------------------------------------------------------------
-tab_dash, tab_inventory, tab_calc, tab_melt, tab_ai, tab_invoice, tab_mail, tab_pos = st.tabs(
-    ["📊  Deal Dashboard", "📦  Inventory", "🧮  Profit Calculator", "⚖️  Melt Calculator", "🤖  AI Analyzer", "📨  Invoice Import", "✉️  Mail", "💳  POS Checkout"]
+tab_dash, tab_inventory, tab_calc, tab_melt, tab_comps, tab_ai, tab_invoice, tab_mail, tab_pos = st.tabs(
+    ["📊  Deal Dashboard", "📦  Inventory", "🧮  Profit Calculator", "⚖️  Melt Calculator", "📈  Market Comps", "🤖  AI Analyzer", "📨  Invoice Import", "✉️  Mail", "💳  POS Checkout"]
 )
 
 # ============================================================================
@@ -808,6 +810,165 @@ with tab_melt:
                 notes=f"{purity_label} · {weight_grams:g}g · spot ${spot_price:,.2f}/oz · 80% ceiling ${melt.ceiling_price:,.2f}",
             )
             st.success(f"Added \"{melt_item_name}\" to the Dashboard.")
+
+# ============================================================================
+# TAB — MARKET COMPS (real evidence, not a guess)
+# ============================================================================
+with tab_comps:
+    st.markdown("#### Market Comps")
+    st.caption(
+        "Turns actual comparable listings — sold prices you look up yourself, an eBay search, or a "
+        "pasted CSV export — into a resale-value estimate with an honest confidence rating, then runs "
+        "it through the same five-tier verdict math as everywhere else. Sold comps are real evidence of "
+        "what buyers paid; active/asking-price listings are weaker evidence and are scored accordingly."
+    )
+
+    if "comps_rows" not in st.session_state:
+        st.session_state.comps_rows = []
+
+    with st.expander("🔎 Pull active listings from eBay (optional)"):
+        if not is_ebay_configured():
+            st.info("Not configured — set `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` in Streamlit secrets to enable this. You can still add comps manually below without it.")
+        else:
+            eq1, eq2 = st.columns([3, 1])
+            with eq1:
+                ebay_query = st.text_input("Search eBay for", placeholder="e.g. 14k gold rope chain 22 inch", key="ebay_query")
+            with eq2:
+                st.write("")
+                ebay_search_clicked = st.button("Search", key="ebay_search", use_container_width=True)
+            st.caption("eBay's Browse API only returns *active* (asking-price) listings — not sold comps — so results here are weaker evidence than a sold price you look up yourself.")
+            if ebay_search_clicked and ebay_query.strip():
+                with st.spinner("Searching eBay..."):
+                    try:
+                        found = EbayBrowseAdapter().fetch_comps(ebay_query, limit=20)
+                        for c in found:
+                            st.session_state.comps_rows.append({
+                                "Price": c.price, "Shipping": c.shipping, "Source": c.source,
+                                "Listing Type": c.listing_type, "Condition": c.condition,
+                                "Date": c.listing_date or "", "Title/Notes": c.title,
+                            })
+                        st.success(f"Added {len(found)} active listing(s) from eBay.")
+                    except EbayAuthError as e:
+                        st.error(str(e))
+                    except Exception as e:
+                        st.error(f"eBay search failed: {e}")
+
+    with st.expander("📄 Import comps from a CSV"):
+        st.caption("Columns: price (required), source, listing_type (sold/active), condition, shipping, listing_date, title, url")
+        comps_csv = st.file_uploader("Upload CSV", type=["csv"], key="comps_csv")
+        if comps_csv is not None and st.button("Import rows", key="comps_csv_import"):
+            try:
+                imported = CsvCompsAdapter(csv_bytes=comps_csv.getvalue()).fetch_comps(limit=200)
+                for c in imported:
+                    st.session_state.comps_rows.append({
+                        "Price": c.price, "Shipping": c.shipping, "Source": c.source,
+                        "Listing Type": c.listing_type, "Condition": c.condition,
+                        "Date": c.listing_date or "", "Title/Notes": c.title,
+                    })
+                st.success(f"Imported {len(imported)} comp(s).")
+            except Exception as e:
+                st.error(f"Couldn't read that CSV: {e}")
+
+    st.markdown("##### Comps")
+    st.caption("Add rows by hand for sold listings you've looked up yourself (CTBids, HiBid, eBay sold filter, Facebook Marketplace, etc.) — the most reliable evidence available without a paid data feed.")
+    comps_df = pd.DataFrame(st.session_state.comps_rows) if st.session_state.comps_rows else pd.DataFrame(
+        columns=["Price", "Shipping", "Source", "Listing Type", "Condition", "Date", "Title/Notes"]
+    )
+    edited_comps = st.data_editor(
+        comps_df,
+        num_rows="dynamic",
+        use_container_width=True,
+        height=260,
+        column_config={
+            "Price": st.column_config.NumberColumn(format="$%.2f"),
+            "Shipping": st.column_config.NumberColumn(format="$%.2f"),
+            "Listing Type": st.column_config.SelectboxColumn(options=["sold", "active"]),
+        },
+        key="comps_editor",
+    )
+    st.session_state.comps_rows = edited_comps.to_dict("records")
+
+    comps_list = [
+        Comp(
+            price=float(r["Price"]) if pd.notna(r.get("Price")) else 0.0,
+            shipping=float(r["Shipping"]) if pd.notna(r.get("Shipping")) else 0.0,
+            source=r.get("Source") or "Manual",
+            listing_type=(r.get("Listing Type") or "sold").lower(),
+            condition=r.get("Condition") or "",
+            listing_date=r.get("Date") or None,
+            title=r.get("Title/Notes") or "",
+        )
+        for r in st.session_state.comps_rows
+        if pd.notna(r.get("Price")) and float(r.get("Price") or 0) > 0
+    ]
+
+    st.markdown("---")
+    st.markdown("##### Verdict")
+    vc1, vc2 = st.columns(2)
+    with vc1:
+        comps_cost = st.number_input("Your cost / planned bid ($)", min_value=0.0, step=1.0, format="%.2f", key="comps_cost")
+    with vc2:
+        with st.expander("Fees / premium"):
+            comps_fee_pct = st.slider("Platform fee %", 0.0, 30.0, DEFAULT_FEE_PCT, 0.5, key="comps_fee")
+            comps_premium_pct = st.slider("Buyer's premium %", 0.0, 25.0, DEFAULT_PREMIUM_PCT, 0.5, key="comps_premium")
+
+    if not comps_list:
+        st.info("Add at least one comp above to get a verdict.")
+    else:
+        market_verdict = evaluate_with_comps(comps_list, comps_cost, fee_pct=comps_fee_pct, premium_pct=comps_premium_pct)
+        summary = market_verdict.comps_summary
+        deal = market_verdict.deal
+
+        confidence_badge = {"high": "badge-buy", "medium": "badge-at_ceiling", "low": "badge-pass"}[summary.confidence]
+        w1, w2, w3, w4 = st.columns(4)
+        with w1:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Suggested Value</div>
+                <div class="kpi-value">${summary.suggested_value:,.2f}</div></div>""", unsafe_allow_html=True)
+        with w2:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Range (low–high)</div>
+                <div class="kpi-value">${summary.low:,.0f}–${summary.high:,.0f}</div></div>""", unsafe_allow_html=True)
+        with w3:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Comps Used</div>
+                <div class="kpi-value">{summary.count}</div>
+                <div class="kpi-sub">{summary.sold_count} sold · {summary.active_count} active</div></div>""", unsafe_allow_html=True)
+        with w4:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Confidence</div>
+                <div style="margin-top:6px;">{verdict_badge_html(summary.confidence.upper(), confidence_badge)}</div></div>""", unsafe_allow_html=True)
+        st.caption(summary.confidence_reason)
+
+        st.markdown("---")
+        r1, r2, r3 = st.columns(3)
+        with r1:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Net Profit</div>
+                <div class="kpi-value">${deal.gross_profit:,.2f}</div>
+                <div class="{'kpi-sub' if deal.gross_profit >= 0 else 'kpi-sub neg'}">{format_roi(deal.roi_pct)} ROI</div></div>""", unsafe_allow_html=True)
+        with r2:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Verdict</div>
+                <div style="margin-top:6px;">{verdict_badge_html(deal.verdict, deal.verdict_tier)}</div></div>""", unsafe_allow_html=True)
+        with r3:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Floor Cost (Buy tier, 40%)</div>
+                <div class="kpi-value">${market_verdict.floor_cost:,.2f}</div></div>""", unsafe_allow_html=True)
+
+        st.markdown("##### ➕ Send to Dashboard")
+        comps_platform = st.selectbox("Platform for this deal", PLATFORMS, key="comps_send_platform")
+        comps_item_name = st.text_input("Item name", key="comps_item_name")
+        if st.button("➕ Add to Dashboard", key="comps_send", use_container_width=True):
+            if not comps_item_name.strip():
+                st.warning("Give the item a name first.")
+            else:
+                add_deal_row(
+                    item=comps_item_name,
+                    platform=comps_platform,
+                    category="Other",
+                    cost=comps_cost,
+                    resale=summary.suggested_value,
+                    status="Watching",
+                    notes=(
+                        f"Market comps: {summary.count} ({summary.sold_count} sold, {summary.active_count} active), "
+                        f"confidence {summary.confidence} — {summary.confidence_reason}"
+                    ),
+                )
+                st.success(f"Added \"{comps_item_name}\" to the Dashboard.")
 
 # ============================================================================
 # TAB 4 — AI ANALYZER
