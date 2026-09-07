@@ -19,62 +19,23 @@ You can also force one anytime from the app's **⋮** menu → **Reboot app**.
 ## 2. Set secrets
 
 From the app's page: **⋮** → **Settings** → **Secrets**. Paste in whichever
-of these you're ready to use — every one is optional, and the app runs
-fine with none of them set (it just falls back to a placeholder / shows a
-"not configured" warning on the relevant tab).
+of these you're ready to use.
 
-### Login (pick one)
+### Login + persistence (recommended before real use)
 
-Single shared password — everyone sees the same data:
-
-```toml
-APP_PASSWORD = "whatever you pick"
-```
-
-Or multiple isolated testers — each password gets its own separate,
-invisible-to-the-others copy of every table (deals, inventory, suppliers,
-customers, sales log). Takes priority over `APP_PASSWORD` when set:
-
-```toml
-APP_PASSWORDS = { a = "password1", b = "password2", c = "password3", d = "password4" }
-```
-
-⚠️ **Use that one-line form, not a bracketed `[APP_PASSWORDS]` section.**
-In TOML, a `[section]` header silently swallows every `key = value` line
-pasted after it into that section — so if you paste `APPS_SCRIPT_URL`,
-`STRIPE_SECRET_KEY`, etc. below a bracketed `[APP_PASSWORDS]` block (the
-natural thing to do, copying this doc top-to-bottom into one secrets box),
-those secrets vanish into `APP_PASSWORDS` instead of being read as their
-own secrets. Every other feature in the app would then look "not
-configured" with **no error anywhere** — this exact mistake is a common
-cause of "my testers' accounts don't seem connected to anything." The
-one-line form above avoids the trap entirely; if you ever paste a
-bracketed `[APP_PASSWORDS]` section instead, the sidebar will flag it for
-you after you log in with a "Secrets misconfigured" warning naming exactly
-which secrets got swallowed.
-
-If neither is set, the login password defaults to `changeme` — set one
-before sharing the link.
-
-### Persistence (optional, strongly recommended before real use)
-
-Without this, all data lives only in each browser session and resets on
-every reload or app restart.
-
-Backed by a small Google Apps Script Web App deployed from inside a Google
-Sheet — **no Google Cloud Console, no service account, no IAM at all.**
-(An earlier version of this used a Cloud service account key, but since May
-2024 new Google Cloud accounts get an "organization" auto-provisioned with
-a security baseline that disables service-account key creation by default
-— a dead end for anyone without an org-level admin to unblock it. Apps
-Script sidesteps that whole category of problem.)
+Appraze's login (sign up / log in), deal/inventory storage, and Invoice
+Import Drive scanning all talk to one Google Apps Script Web App backed by
+a Google Sheet — **no Google Cloud Console, no service account, no IAM at
+all.**
 
 One-time setup, entirely inside Google Sheets (works fine on mobile):
 1. Create a blank Google Sheet (any name).
 2. **Extensions → Apps Script**. Delete the placeholder code, paste in the
-   full contents of [`appscript/Code.gs`](appscript/Code.gs) from this repo.
-3. Near the top, change `TOKEN = "REPLACE_WITH_YOUR_OWN_LONG_RANDOM_STRING"`
-   to a long random string of your own — treat it like a password.
+   full contents of [`AppsScript_Code.gs`](AppsScript_Code.gs) from this repo.
+3. Near the top, replace `SHEET_ID`, `TOKEN`, and `ADMIN_SETUP_CODE` with
+   your own values — the Sheet's ID (from its URL), a long random string of
+   your own, and (optionally) a private invite code that grants admin/shared
+   access to anyone who signs up with it. Treat `TOKEN` like a password.
 4. **Deploy → New deployment** → gear icon → **Web app**. Set "Execute as"
    to **Me** and "Who has access" to **Anyone**. Click **Deploy**, and
    authorize it when prompted (it's your own script running on your own
@@ -90,80 +51,55 @@ APPS_SCRIPT_URL = "the Web app URL from step 5"
 APPS_SCRIPT_TOKEN = "the same string you set as TOKEN in step 3"
 ```
 
-With multi-tester login (`APP_PASSWORDS`) also configured, each tester's
-data lands in its own worksheet tabs inside that one spreadsheet (e.g.
-`deals__a`, `deals__b`), so you can watch everyone's data live without it
-colliding.
+Without these, the login gate still renders but signup/login calls will
+error (the app fails safely — it never falls back to storing passwords
+locally or skipping auth). Every table (Deal Dashboard, Inventory) is
+stored server-side under its own key, so admins share one workspace and
+every other account gets its own private, isolated storage row per table.
 
-See `sheets.py`'s docstring for more detail on how this works.
-
-### Mail tab (supplier invoices & tracking numbers)
-
-Without this, the Mail tab shows a "not connected" message instead of
-erroring. See `mail.py`'s docstring for the full one-time Gmail setup
-(turn on 2-Step Verification, create an App Password, confirm IMAP is
-enabled). Once you have those:
-
-```toml
-GMAIL_ADDRESS = "the inbox to watch, e.g. chale@cooperrivertradingco.com"
-GMAIL_APP_PASSWORD = "the 16-character App Password Google generated"
-```
-
-This connects read-only over IMAP — Appraze never sends, replies to,
-deletes, or modifies anything in the inbox.
-
-It's one shared inbox for the whole app (not a separate one per
-`APP_PASSWORDS` tester), so it only shows up in the owner's own workspace
-by default (see `OWNER_WORKSPACE` below) — every other workspace sees "not
-available on this deployment" instead of the owner's real email. To point
-Mail at a different workspace than `OWNER_WORKSPACE` specifically, set:
-
-```toml
-MAIL_WORKSPACE = "owner"
-```
-
-### Owner workspace (which login is "you")
-
-```toml
-OWNER_WORKSPACE = "owner"
-```
-
-Defaults to `"business"` (the single-`APP_PASSWORD` default). Set this if
-you're running multi-tester mode (`APP_PASSWORDS`) and your own workspace
-key is named something else, e.g. `owner = [...]`. This gates two things
-to your workspace only, invisible to every demo tester: the Mail tab
-(unless overridden separately by `MAIL_WORKSPACE`), and a "Debug detail"
-expander that appears under a failed Stripe/AI Analyzer request showing
-the real underlying error (invalid key, out of credits, rate limit,
-wrong model name, etc.) — useful while you're the one testing; safe to
-leave configured for a real launch since testers never see it.
-
-### Card payments (Point of Sale tab)
+### Card payments — subscription paywall + POS
 
 ```toml
 STRIPE_SECRET_KEY = "sk_live_... or sk_test_..."
+STRIPE_PAYMENT_LINK_URL = "the Payment Link URL for app-access subscriptions"
+APP_URL = "https://your-app-name.streamlit.app"
 ```
 
-Without it, Card is disabled with an explanatory message; Cash still
-works.
+`STRIPE_PAYMENT_LINK_URL` gates the paywall (Payment Links only — this app
+never touches raw card data, only checks payment status after the fact via
+Stripe's read-only session lookup). `APP_URL` is used to build redirect URLs
+for the Point-of-Sale tab's one-off checkout sessions; POS still works
+without it, just with a generic redirect target.
 
-### AI Analyzer tab
+Webhook-based invoice reconciliation (`stripe_webhooks.py`) is implemented
+as pure, unit-tested logic but is **not yet wired to a live endpoint** —
+Streamlit can't host webhooks natively, so it needs a small separate
+service (e.g. FastAPI) to receive Stripe's POSTs, verify them with
+`STRIPE_WEBHOOK_SECRET`, and call `process_webhook_event`. That service
+does not exist in this repo yet; the POS tab's "Check Status" button
+already covers manual reconciliation without it.
+
+### AI Analyzer / Invoice Import tabs
 
 ```toml
 ANTHROPIC_API_KEY = "sk-ant-..."
 ```
 
-Without it, the tab shows a "not configured yet" message instead of
-erroring.
+Without it, both tabs show a "not configured yet" / error message instead
+of working, rather than crashing the app.
 
-### Support contact
+### Mail tracking (not yet on a tab)
+
+`mail.py` / `mail_parse.py` implement read-only Gmail (IMAP) tracking of
+supplier invoices and shipment numbers, fully unit-tested
+(`tests/test_mail_parse.py`), but there is currently no "Mail" tab in
+`app.py` wiring them into the UI — treat this as ready-to-integrate
+plumbing, not an active feature. If you do wire it in, it needs:
 
 ```toml
-SUPPORT_EMAIL = "you@example.com"
+GMAIL_ADDRESS = "the inbox to watch"
+GMAIL_APP_PASSWORD = "a 16-character Gmail App Password"
 ```
-
-Shown in the sidebar. Without it, the sidebar shows a placeholder telling
-you to set this secret.
 
 ## 3. Install as a desktop/home-screen app (optional)
 
@@ -171,10 +107,9 @@ Once deployed over HTTPS, Chrome (desktop, including Windows 11) can
 install the live URL as a standalone app via the install icon in the
 address bar, or menu → **Cast, save and share** → **Install page as app**.
 On iOS, use Safari's Share sheet → **Add to Home Screen** (Chrome on iOS
-doesn't offer an equivalent). See `app.py`'s PWA manifest section for how
-this is wired up.
+doesn't offer an equivalent).
 
-## Running locally (optional)
+## Running locally
 
 ```bash
 pip install -r requirements.txt
@@ -183,3 +118,13 @@ streamlit run app.py
 
 Put any secrets you want available locally in `.streamlit/secrets.toml`
 (same TOML format as above) — it's git-ignored, never committed.
+
+## Security note on this repo's history
+
+An earlier commit checked in a real `SHEET_ID`, `TOKEN`, and
+`ADMIN_SETUP_CODE` directly in `AppsScript_Code.gs`. Those have since been
+replaced with placeholders in the current file, but **git history still
+contains the old values** — if this is that repository, treat that old
+token and admin code as compromised: redeploy the Apps Script with new
+values and update `APPS_SCRIPT_TOKEN` accordingly, regardless of whether
+history is ever rewritten.

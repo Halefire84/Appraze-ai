@@ -1,9 +1,9 @@
 # Appraze
 
 A single-page Streamlit dashboard for tracking, filtering, and evaluating
-resale/auction deals across Estate Auctions, eBay, HiBid, Facebook
-Marketplace, Mercari, Chairish, and Etsy — plus inventory, suppliers,
-customers, point of sale, and an AI item analyzer.
+resale/auction deals across CTBids, eBay, HiBid, Facebook Marketplace,
+Mercari, Chairish, and Etsy — plus inventory margin tracking, an AI item
+analyzer, invoice import, and point-of-sale checkout.
 
 ## Run locally
 
@@ -14,26 +14,50 @@ streamlit run app.py
 
 ## Deploy it / set it up for real use
 
-See [DEPLOY.md](DEPLOY.md) — covers Streamlit Community Cloud deployment,
-every optional secret (login, Google Sheets persistence, Gmail tracking,
-Stripe, the AI Analyzer, support contact), and installing it as a
-desktop/home-screen app.
+See [DEPLOY.md](DEPLOY.md) — covers Streamlit Community Cloud deployment
+and every secret it recognizes (login/persistence, Stripe, the AI Analyzer,
+Point of Sale).
 
 ## Tests
 
-Pure logic (`finance.py`, `mail_parse.py`) has unit test coverage:
-
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m pytest -v
 ```
+
+Pure logic (`finance.py`, `mail_parse.py`, `stripe_webhooks.py`) has full
+unit test coverage with no network/Streamlit dependency. `tests/test_smoke.py`
+additionally verifies every production module imports cleanly and has valid
+syntax.
 
 ## Project layout
 
-- `app.py` — the Streamlit UI, all tabs
-- `finance.py` — pure profit/margin/tax math, unit-tested, no Streamlit/pandas dependency
-- `sheets.py` — optional Google Sheets persistence layer, via a Google Apps Script Web App (no Google Cloud/IAM needed)
-- `appscript/Code.gs` — the Apps Script backend `sheets.py` talks to; paste into a Sheet's Extensions → Apps Script
-- `mail_parse.py` — pure tracking-number/invoice-ref detection, unit-tested, no dependencies
-- `mail.py` — optional read-only Gmail (IMAP) inbox tracking, built on `mail_parse.py`
+- `app.py` — the Streamlit UI and production entry point (all tabs: Deal
+  Dashboard, Inventory, Profit Calculator, Melt Calculator, AI Analyzer,
+  Invoice Import, POS Checkout)
+- `finance.py` — pure profit/margin/melt/tax math, the single source of
+  truth for every dollar figure shown in the app; unit-tested, no
+  Streamlit/pandas dependency
+- `auth.py` — signup/login against the Apps Script backend, password
+  hashing, session gating
+- `storage.py` — persists any named table (deals, inventory, ...) per user
+  via the same Apps Script backend
+- `billing.py` — verifies Stripe Payment Link checkout sessions (subscriber
+  paywall)
+- `pos.py` — creates one-off Stripe Checkout Sessions for point-of-sale
+  charges
+- `drive_scan.py` — scans a named Google Drive folder for new invoice
+  files via the same Apps Script backend
+- `stripe_webhooks.py` — pure, unit-tested Stripe webhook signature
+  verification + event handling; not yet wired to a live endpoint (see
+  DEPLOY.md)
+- `verdict_engine.py` — standalone deterministic buy/pass scorer with its
+  own risk/confidence model; not currently called from `app.py`
+- `mail.py` / `mail_parse.py` — optional read-only Gmail tracking of
+  supplier invoices/shipments; parsing logic is unit-tested, not yet wired
+  to a UI tab
+- `AppsScript_Code.gs` — the Apps Script backend `auth.py`/`storage.py`/
+  `drive_scan.py` talk to; paste into a Sheet's Extensions → Apps Script
+  (see DEPLOY.md — replace the placeholder `SHEET_ID`/`TOKEN`/
+  `ADMIN_SETUP_CODE` with your own before deploying)
 - `static/` — PWA manifest + icons for "Install as app"
 - `tests/` — unit tests
