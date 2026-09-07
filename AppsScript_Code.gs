@@ -123,21 +123,42 @@ function getStorageSheet_() {
 // data vanished. Migrating the whole sheet once, keyed off the header
 // row, is the only reliable way to tell old rows from new ones.
 function migrateStorageSheetIfNeeded_(sheet) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow === 0) return; // brand-new empty sheet, nothing to migrate
+  // Cheap check before taking the lock: the common case (already migrated,
+  // or a brand-new sheet) never needs to wait on anything.
+  if (!isLegacySchema_(sheet)) return;
 
-  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  const isLegacySchema = header.length === 3 && header[0] === "owner_key" && header[1] === "payload_json";
-  if (!isLegacySchema) return;
+  // Two requests can both reach here for the same still-legacy sheet at
+  // the same time (Apps Script Web Apps run concurrently). Without a
+  // lock, both would see 3 columns and both call insertColumnAfter(1),
+  // inserting two columns instead of one and shifting payload/updated_at
+  // out of place. The lock plus a second header check after acquiring it
+  // (double-checked locking) guarantees only the first execution to get
+  // the lock actually performs the insert; the second sees the
+  // already-migrated 4-column header and no-ops.
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (!isLegacySchema_(sheet)) return;
 
-  sheet.insertColumnAfter(1);
-  sheet.getRange(1, 2).setValue("table");
-  const numDataRows = lastRow - 1;
-  if (numDataRows > 0) {
-    const tableColumnValues = [];
-    for (let i = 0; i < numDataRows; i++) tableColumnValues.push(["deals"]);
-    sheet.getRange(2, 2, numDataRows, 1).setValues(tableColumnValues);
+    const lastRow = sheet.getLastRow();
+    sheet.insertColumnAfter(1);
+    sheet.getRange(1, 2).setValue("table");
+    const numDataRows = lastRow - 1;
+    if (numDataRows > 0) {
+      const tableColumnValues = [];
+      for (let i = 0; i < numDataRows; i++) tableColumnValues.push(["deals"]);
+      sheet.getRange(2, 2, numDataRows, 1).setValues(tableColumnValues);
+    }
+  } finally {
+    lock.releaseLock();
   }
+}
+
+function isLegacySchema_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) return false; // brand-new empty sheet, nothing to migrate
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return header.length === 3 && header[0] === "owner_key" && header[1] === "payload_json";
 }
 
 function getProcessedSheet_() {

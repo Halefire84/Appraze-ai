@@ -1405,122 +1405,125 @@ with tab_pos:
         "link you text/send remotely."
     )
 
-    if "sales_log_loaded" not in st.session_state:
-        with st.spinner("Loading pending checkouts..."):
-            sales_result = load_table("sales_log", shared=True)
-        st.session_state.sales_log = sales_result.payload if (sales_result.success and sales_result.payload) else []
-        st.session_state.sales_log_loaded = True
-
-    def persist_sales_log():
-        """Pending checkouts used to live only in st.session_state, so a page
-        refresh silently lost them even though the Stripe session was still
-        valid. Persisting through the same backend as Deals/Inventory fixes
-        that, and lets the standalone webhook service (stripe_webhook_server.py)
-        reconcile a sale automatically without this tab even being open.
-
-        shared=True always targets the fixed "admin_shared" row (matching
-        pos.py's SALES_LOG_OWNER_KEY and webhook_store.py's OWNER_KEY) —
-        POS is one shared cash register for the business, not per-tester
-        data. Without it, a non-admin login's checkouts would land under
-        their own private row, where the webhook service could never find
-        them to reconcile."""
-        save_table(pd.DataFrame(st.session_state.sales_log), "sales_log", shared=True)
-
-    if st.button("🔄 Refresh (picks up webhook-confirmed payments)", use_container_width=False):
-        refreshed = load_table("sales_log", shared=True)
-        if refreshed.success:
-            st.session_state.sales_log = refreshed.payload or []
-            st.rerun()
-        else:
-            st.warning(f"Couldn't refresh: {refreshed.error}")
-
-    pos_mode = st.radio(
-        "How do you want to set the amount?",
-        ["Custom amount", "Pull from a Dashboard deal"],
-        horizontal=True,
-    )
-
-    pos_description, pos_amount, pos_deal_index = "", 0.0, None
-
-    if pos_mode == "Custom amount":
-        pc1, pc2 = st.columns(2)
-        with pc1:
-            pos_description = st.text_input("What are they buying?", key="pos_custom_desc")
-        with pc2:
-            pos_amount = st.number_input("Sale amount ($)", min_value=0.0, step=1.0, format="%.2f", key="pos_custom_amount")
+    if not st.session_state.get("user_is_admin"):
+        st.info("Point-of-Sale is for Cooper River Trading Co. admins only — it charges real customers and shows the shop's full sales history, not something a beta tester account should see or touch.")
     else:
-        sellable = df[df["Status"] != "Sold"].reset_index()  # keep original df index in a column for lookup
-        if sellable.empty:
-            st.info("No unsold deals in the Dashboard yet — add one first, or use Custom amount above.")
-        else:
-            options = {f'{r["Item"]} — ${r["Est. Resale Value"]:,.2f} ({r["Platform"]})': r["index"] for _, r in sellable.iterrows()}
-            choice = st.selectbox("Which deal is this?", list(options.keys()))
-            pos_deal_index = options[choice]
-            chosen_row = df.loc[pos_deal_index]
-            pos_description = st.text_input("Description", value=chosen_row["Item"], key="pos_deal_desc")
-            pos_amount = st.number_input(
-                "Sale amount ($)", min_value=0.0, step=1.0, format="%.2f",
-                value=float(chosen_row["Est. Resale Value"]), key="pos_deal_amount",
-            )
+        if "sales_log_loaded" not in st.session_state:
+            with st.spinner("Loading pending checkouts..."):
+                sales_result = load_table("sales_log", shared=True)
+            st.session_state.sales_log = sales_result.payload if (sales_result.success and sales_result.payload) else []
+            st.session_state.sales_log_loaded = True
 
-    pos_email = st.text_input("Customer email (optional — for their receipt)", key="pos_email")
+        def persist_sales_log():
+            """Pending checkouts used to live only in st.session_state, so a page
+            refresh silently lost them even though the Stripe session was still
+            valid. Persisting through the same backend as Deals/Inventory fixes
+            that, and lets the standalone webhook service (stripe_webhook_server.py)
+            reconcile a sale automatically without this tab even being open.
 
-    if st.button("💳 Generate Checkout Link", use_container_width=True, type="primary"):
-        if not pos_description.strip() or pos_amount <= 0:
-            st.warning("Add a description and an amount greater than $0.")
-        else:
-            result = create_pos_checkout(pos_amount, pos_description, pos_email)
-            if result.success:
-                st.session_state.sales_log.append({
-                    "Invoice #": result.invoice_id,
-                    "session_id": result.session_id,
-                    "description": pos_description,
-                    "amount": pos_amount,
-                    "deal_index": pos_deal_index,
-                    "checkout_url": result.checkout_url,
-                    "Status": "Awaiting Payment",
-                })
-                persist_sales_log()
-                st.success(f"Checkout link ready ({result.invoice_id}) — hand off the device, or copy the link below.")
+            shared=True always targets the fixed "admin_shared" row (matching
+            pos.py's SALES_LOG_OWNER_KEY and webhook_store.py's OWNER_KEY) —
+            POS is one shared cash register for the business, not per-tester
+            data. Without it, a non-admin login's checkouts would land under
+            their own private row, where the webhook service could never find
+            them to reconcile."""
+            save_table(pd.DataFrame(st.session_state.sales_log), "sales_log", shared=True)
+
+        if st.button("🔄 Refresh (picks up webhook-confirmed payments)", use_container_width=False):
+            refreshed = load_table("sales_log", shared=True)
+            if refreshed.success:
+                st.session_state.sales_log = refreshed.payload or []
+                st.rerun()
             else:
-                st.error(result.error)
+                st.warning(f"Couldn't refresh: {refreshed.error}")
 
-    pending = [tx for tx in st.session_state.sales_log if tx.get("Status") != "Paid (Card)"]
-    if pending:
-        st.markdown("---")
-        st.markdown("##### Pending checkouts")
-        st.caption(
-            "Click Check Status after the customer pays, or hit Refresh above if the Stripe webhook "
-            "service (see DEPLOY.md) already confirmed it automatically — works whether they paid on "
-            "this device or their own."
+        pos_mode = st.radio(
+            "How do you want to set the amount?",
+            ["Custom amount", "Pull from a Dashboard deal"],
+            horizontal=True,
         )
 
-        changed = False
-        for tx in pending:
-            with st.container():
-                c1, c2, c3 = st.columns([3, 1, 1])
-                with c1:
-                    st.markdown(f"**{tx['description']}** — ${tx['amount']:,.2f}")
-                    st.caption(f"{tx.get('Invoice #', '')} · {tx['checkout_url']}")
-                with c2:
-                    st.link_button("Open", tx["checkout_url"], use_container_width=True)
-                with c3:
-                    check_clicked = st.button("✅ Check Status", key=f"check_{tx['session_id']}", use_container_width=True)
+        pos_description, pos_amount, pos_deal_index = "", 0.0, None
 
-                if check_clicked:
-                    if check_payment_status(tx["session_id"]):
-                        st.success(f"Paid! ${tx['amount']:,.2f} confirmed.")
-                        tx["Status"] = "Paid (Card)"
-                        changed = True
-                        if tx["deal_index"] is not None and tx["deal_index"] in st.session_state.deals.index:
-                            st.session_state.deals.loc[tx["deal_index"], "Status"] = "Sold"
-                            st.session_state.deals.loc[tx["deal_index"], "Est. Resale Value"] = tx["amount"]
-                            persist()
-                    else:
-                        st.info("Not paid yet — try again once the customer confirms.")
-        if changed:
-            persist_sales_log()
-            st.rerun()
+        if pos_mode == "Custom amount":
+            pc1, pc2 = st.columns(2)
+            with pc1:
+                pos_description = st.text_input("What are they buying?", key="pos_custom_desc")
+            with pc2:
+                pos_amount = st.number_input("Sale amount ($)", min_value=0.0, step=1.0, format="%.2f", key="pos_custom_amount")
+        else:
+            sellable = df[df["Status"] != "Sold"].reset_index()  # keep original df index in a column for lookup
+            if sellable.empty:
+                st.info("No unsold deals in the Dashboard yet — add one first, or use Custom amount above.")
+            else:
+                options = {f'{r["Item"]} — ${r["Est. Resale Value"]:,.2f} ({r["Platform"]})': r["index"] for _, r in sellable.iterrows()}
+                choice = st.selectbox("Which deal is this?", list(options.keys()))
+                pos_deal_index = options[choice]
+                chosen_row = df.loc[pos_deal_index]
+                pos_description = st.text_input("Description", value=chosen_row["Item"], key="pos_deal_desc")
+                pos_amount = st.number_input(
+                    "Sale amount ($)", min_value=0.0, step=1.0, format="%.2f",
+                    value=float(chosen_row["Est. Resale Value"]), key="pos_deal_amount",
+                )
+
+        pos_email = st.text_input("Customer email (optional — for their receipt)", key="pos_email")
+
+        if st.button("💳 Generate Checkout Link", use_container_width=True, type="primary"):
+            if not pos_description.strip() or pos_amount <= 0:
+                st.warning("Add a description and an amount greater than $0.")
+            else:
+                result = create_pos_checkout(pos_amount, pos_description, pos_email)
+                if result.success:
+                    st.session_state.sales_log.append({
+                        "Invoice #": result.invoice_id,
+                        "session_id": result.session_id,
+                        "description": pos_description,
+                        "amount": pos_amount,
+                        "deal_index": pos_deal_index,
+                        "checkout_url": result.checkout_url,
+                        "Status": "Awaiting Payment",
+                    })
+                    persist_sales_log()
+                    st.success(f"Checkout link ready ({result.invoice_id}) — hand off the device, or copy the link below.")
+                else:
+                    st.error(result.error)
+
+        pending = [tx for tx in st.session_state.sales_log if tx.get("Status") != "Paid (Card)"]
+        if pending:
+            st.markdown("---")
+            st.markdown("##### Pending checkouts")
+            st.caption(
+                "Click Check Status after the customer pays, or hit Refresh above if the Stripe webhook "
+                "service (see DEPLOY.md) already confirmed it automatically — works whether they paid on "
+                "this device or their own."
+            )
+
+            changed = False
+            for tx in pending:
+                with st.container():
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    with c1:
+                        st.markdown(f"**{tx['description']}** — ${tx['amount']:,.2f}")
+                        st.caption(f"{tx.get('Invoice #', '')} · {tx['checkout_url']}")
+                    with c2:
+                        st.link_button("Open", tx["checkout_url"], use_container_width=True)
+                    with c3:
+                        check_clicked = st.button("✅ Check Status", key=f"check_{tx['session_id']}", use_container_width=True)
+
+                    if check_clicked:
+                        if check_payment_status(tx["session_id"]):
+                            st.success(f"Paid! ${tx['amount']:,.2f} confirmed.")
+                            tx["Status"] = "Paid (Card)"
+                            changed = True
+                            if tx["deal_index"] is not None and tx["deal_index"] in st.session_state.deals.index:
+                                st.session_state.deals.loc[tx["deal_index"], "Status"] = "Sold"
+                                st.session_state.deals.loc[tx["deal_index"], "Est. Resale Value"] = tx["amount"]
+                                persist()
+                        else:
+                            st.info("Not paid yet — try again once the customer confirms.")
+            if changed:
+                persist_sales_log()
+                st.rerun()
 
 st.markdown("---")
 st.caption("Appraze · Cooper River Trading Co. · built for CTBids / eBay / HiBid / FB Marketplace / Mercari / Chairish / Etsy sourcing")
