@@ -38,8 +38,15 @@ from billing import verify_checkout_session, payment_link_url
 from drive_scan import scan_invoice_folder, mark_files_processed
 from pos import create_pos_checkout, check_payment_status
 import mail
-from comps import Comp, evaluate_with_comps
-from comps_adapters import CsvCompsAdapter, EbayAuthError, EbayBrowseAdapter, is_ebay_configured
+from comps import Comp, summarize_comps, evaluate_with_comps
+from comps_adapters import (
+    CsvCompsAdapter,
+    EbayAuthError,
+    EbayBrowseAdapter,
+    EbayInsightsNotApprovedError,
+    EbayMarketplaceInsightsAdapter,
+    is_ebay_configured,
+)
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -1281,6 +1288,68 @@ with tab_ai:
         if ai_result.get("notes"):
             st.info(ai_result["notes"])
 
+        st.markdown("##### 📊 Real eBay Comps")
+        if not is_ebay_configured():
+            st.caption("Not configured — set `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` in Streamlit secrets to pull real eBay data here instead of relying on the AI's estimate alone.")
+        else:
+            cq1, cq2 = st.columns([3, 1])
+            with cq1:
+                comp_query = st.text_input(
+                    "Search eBay for", value=ai_result.get("item_name", ""), key="ai_comp_query",
+                    label_visibility="collapsed", placeholder="Search terms for eBay comps",
+                )
+            with cq2:
+                pull_clicked = st.button("Pull Comps", key="ai_pull_comps", use_container_width=True)
+
+            if pull_clicked and comp_query.strip():
+                with st.spinner("Checking eBay..."):
+                    sold_mode = False
+                    comps_found = []
+                    fetch_error = None
+                    try:
+                        comps_found = EbayMarketplaceInsightsAdapter().fetch_comps(comp_query, limit=20)
+                        sold_mode = True
+                    except EbayInsightsNotApprovedError:
+                        # Expected on almost every account - eBay's Marketplace
+                        # Insights API is a Limited Release most individual
+                        # developers never get approved for (see comps_adapters.py).
+                        # Fall back to active listings rather than failing.
+                        try:
+                            comps_found = EbayBrowseAdapter().fetch_comps(comp_query, limit=20)
+                            sold_mode = False
+                        except Exception as e:
+                            fetch_error = str(e)
+                    except EbayAuthError as e:
+                        fetch_error = str(e)
+                    except Exception as e:
+                        fetch_error = f"eBay search failed: {e}"
+                    st.session_state["ai_comps_result"] = {"comps": comps_found, "sold_mode": sold_mode, "error": fetch_error, "query": comp_query}
+
+            comps_result = st.session_state.get("ai_comps_result")
+            if comps_result:
+                if comps_result["error"]:
+                    st.error(comps_result["error"])
+                elif not comps_result["comps"]:
+                    st.info(f"No eBay results for \"{comps_result['query']}\" — try different/fewer keywords.")
+                else:
+                    comps_summary = summarize_comps(comps_result["comps"])
+                    if comps_result["sold_mode"]:
+                        st.success(f"✅ {comps_summary.sold_count} confirmed SOLD comp(s) from eBay (last 90 days).")
+                    else:
+                        st.warning(f"⚠️ Showing {len(comps_result['comps'])} ACTIVE listing(s) — asking prices, not confirmed sold prices. Marketplace Insights (real sold data) isn't approved for this app yet.")
+                    cc1, cc2, cc3 = st.columns(3)
+                    with cc1:
+                        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Median (eBay)</div>
+                            <div class="kpi-value">${comps_summary.median:,.2f}</div></div>""", unsafe_allow_html=True)
+                    with cc2:
+                        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Range</div>
+                            <div class="kpi-value">${comps_summary.low:,.0f}–${comps_summary.high:,.0f}</div></div>""", unsafe_allow_html=True)
+                    with cc3:
+                        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Listings Found</div>
+                            <div class="kpi-value">{comps_summary.count}</div></div>""", unsafe_allow_html=True)
+                    st.caption("This is separate, independent evidence from the AI's estimate above — a real median from actual eBay listings, not another AI guess. If the two disagree by a lot, trust this number over the AI's.")
+
+        st.markdown("---")
         est_low = float(ai_result.get("estimated_low", 0) or 0)
         est_high = float(ai_result.get("estimated_high", 0) or 0)
         est_mid = (est_low + est_high) / 2

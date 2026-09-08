@@ -13,7 +13,16 @@ from unittest import mock
 import pandas as pd
 
 from comps import ACTIVE, SOLD, Comp
-from comps_adapters import CsvCompsAdapter, EbayAuthError, EbayBrowseAdapter, ManualCompsAdapter, is_ebay_configured
+from comps_adapters import (
+    CsvCompsAdapter,
+    EbayAuthError,
+    EbayBrowseAdapter,
+    EbayInsightsNotApprovedError,
+    EbayMarketplaceInsightsAdapter,
+    ManualCompsAdapter,
+    is_ebay_configured,
+    is_marketplace_insights_configured,
+)
 
 
 class TestManualCompsAdapter(unittest.TestCase):
@@ -78,7 +87,7 @@ class TestEbayBrowseAdapter(unittest.TestCase):
         # Reset the module-level token cache between tests so mocked
         # secrets/responses don't leak across test cases.
         import comps_adapters
-        comps_adapters._token_cache = {"access_token": None, "expires_at": 0}
+        comps_adapters._token_cache = {}
 
     @mock.patch("comps_adapters.st")
     def test_raises_ebay_auth_error_when_not_configured(self, mock_st):
@@ -145,6 +154,151 @@ class TestEbayBrowseAdapter(unittest.TestCase):
         self.assertEqual(comps, [])
         mock_requests.post.assert_not_called()
         mock_requests.get.assert_not_called()
+
+
+class TestEbayMarketplaceInsightsAdapter(unittest.TestCase):
+    def setUp(self):
+        import comps_adapters
+        comps_adapters._token_cache = {}
+        comps_adapters._insights_approval_cache = {"approved": None}
+
+    def _mock_token_response(self, mock_requests):
+        token_response = mock.Mock()
+        token_response.json.return_value = {"access_token": "fake_insights_token", "expires_in": 7200}
+        token_response.raise_for_status.return_value = None
+        mock_requests.post.return_value = token_response
+
+    @mock.patch("comps_adapters.st")
+    def test_raises_ebay_auth_error_when_not_configured(self, mock_st):
+        mock_st.secrets.get.return_value = None
+        adapter = EbayMarketplaceInsightsAdapter()
+        with self.assertRaises(EbayAuthError):
+            adapter.fetch_comps("14k gold ring")
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_empty_query_returns_no_comps_without_a_network_call(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        adapter = EbayMarketplaceInsightsAdapter()
+        comps = adapter.fetch_comps("   ")
+        self.assertEqual(comps, [])
+        mock_requests.post.assert_not_called()
+        mock_requests.get.assert_not_called()
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_fetch_comps_parses_sold_items(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        self._mock_token_response(mock_requests)
+
+        search_response = mock.Mock()
+        search_response.status_code = 200
+        search_response.json.return_value = {
+            "itemSales": [
+                {
+                    "title": "14k Gold Chain 22in",
+                    "lastSoldPrice": {"value": "255.00", "currency": "USD"},
+                    "lastSoldDate": "2026-08-01T00:00:00Z",
+                    "condition": "Pre-owned",
+                    "itemWebUrl": "https://ebay.com/item/1",
+                },
+                {"title": "Bad row with no sold price", "lastSoldPrice": {}},
+            ]
+        }
+        search_response.raise_for_status.return_value = None
+        mock_requests.get.return_value = search_response
+
+        adapter = EbayMarketplaceInsightsAdapter()
+        comps = adapter.fetch_comps("14k gold chain")
+
+        self.assertEqual(len(comps), 1)
+        self.assertEqual(comps[0].price, 255.0)
+        self.assertEqual(comps[0].listing_type, SOLD)  # real sold evidence, unlike Browse
+        self.assertEqual(comps[0].source, "eBay (sold)")
+        self.assertEqual(comps[0].listing_date, "2026-08-01T00:00:00Z")
+
+        # Confirms it requested the insights scope, not the plain Browse scope.
+        import comps_adapters
+        token_call_kwargs = mock_requests.post.call_args.kwargs
+        self.assertEqual(token_call_kwargs["data"]["scope"], comps_adapters._INSIGHTS_SCOPE)
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_unapproved_app_raises_specific_error(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        self._mock_token_response(mock_requests)
+
+        denied_response = mock.Mock()
+        denied_response.status_code = 403
+        denied_response.headers = {"content-type": "application/json"}
+        denied_response.json.return_value = {
+            "errors": [{"errorId": 1100, "domain": "ACCESS", "category": "REQUEST", "message": "Access denied"}]
+        }
+        mock_requests.get.return_value = denied_response
+
+        adapter = EbayMarketplaceInsightsAdapter()
+        with self.assertRaises(EbayInsightsNotApprovedError):
+            adapter.fetch_comps("14k gold chain")
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_other_403_is_not_mistaken_for_unapproved(self, mock_st, mock_requests):
+        """A 403 for some other reason (bad token, revoked key, etc.) should
+        surface as a normal HTTP error, not get misreported as "not approved
+        yet" - those need different fixes and shouldn't be conflated."""
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        self._mock_token_response(mock_requests)
+
+        import requests as real_requests
+
+        other_403 = mock.Mock()
+        other_403.status_code = 403
+        other_403.headers = {"content-type": "application/json"}
+        other_403.json.return_value = {"errors": [{"errorId": 2001, "message": "Some other problem"}]}
+        other_403.raise_for_status.side_effect = real_requests.exceptions.HTTPError("403 Forbidden")
+        mock_requests.get.return_value = other_403
+        mock_requests.exceptions = real_requests.exceptions
+
+        adapter = EbayMarketplaceInsightsAdapter()
+        with self.assertRaises(real_requests.exceptions.HTTPError):
+            adapter.fetch_comps("14k gold chain")
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_is_marketplace_insights_configured_false_when_not_approved(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        self._mock_token_response(mock_requests)
+
+        denied_response = mock.Mock()
+        denied_response.status_code = 403
+        denied_response.headers = {"content-type": "application/json"}
+        denied_response.json.return_value = {"errors": [{"errorId": 1100}]}
+        mock_requests.get.return_value = denied_response
+
+        self.assertFalse(is_marketplace_insights_configured())
+        # Cached - a second call shouldn't hit the network again.
+        call_count_before = mock_requests.get.call_count
+        self.assertFalse(is_marketplace_insights_configured())
+        self.assertEqual(mock_requests.get.call_count, call_count_before)
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_is_marketplace_insights_configured_true_when_approved(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        self._mock_token_response(mock_requests)
+
+        ok_response = mock.Mock()
+        ok_response.status_code = 200
+        ok_response.raise_for_status.return_value = None
+        ok_response.json.return_value = {"itemSales": []}
+        mock_requests.get.return_value = ok_response
+
+        self.assertTrue(is_marketplace_insights_configured())
+
+    @mock.patch("comps_adapters.st")
+    def test_is_marketplace_insights_configured_false_without_secrets(self, mock_st):
+        mock_st.secrets.get.return_value = None
+        self.assertFalse(is_marketplace_insights_configured())
 
 
 if __name__ == "__main__":
