@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voice Job Log</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f4;
+    --surface: #ffffff;
+    --text: #1c1917;
+    --muted: #78716c;
+    --border: #e7e5e4;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --danger: #dc2626;
+    --record: #dc2626;
+    --record-active: #ef4444;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121110;
+      --surface: #1c1a19;
+      --text: #f2f0ef;
+      --muted: #a8a29e;
+      --border: #33302e;
+      --accent: #3b82f6;
+      --accent-text: #ffffff;
+      --danger: #f87171;
+      --record: #ef4444;
+      --record-active: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding-bottom: 3rem;
+  }
+  header {
+    padding: 1.25rem 1rem 0.75rem;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.3rem;
+    margin: 0 0 0.75rem;
+  }
+  main {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0 1rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+  input[type="text"], textarea {
+    width: 100%;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 0.7rem;
+    font-size: 1rem;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 4.5rem; }
+  .job-input { margin-bottom: 1rem; }
+  .record-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+  #recordBtn {
+    flex-shrink: 0;
+    width: 4rem;
+    height: 4rem;
+    border-radius: 50%;
+    border: none;
+    background: var(--record);
+    color: #fff;
+    font-size: 1.6rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+  }
+  #recordBtn:active { transform: scale(0.95); }
+  #recordBtn.recording {
+    background: var(--record-active);
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.5); }
+    70% { box-shadow: 0 0 0 14px rgba(239,68,68,0); }
+    100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+  }
+  #recordStatus {
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  #liveTranscript {
+    min-height: 1.4rem;
+    font-style: italic;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+    word-break: break-word;
+  }
+  .manual-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .btn {
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 8px;
+    padding: 0.55rem 1rem;
+    font-size: 0.9rem;
+  }
+  .btn.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn.danger {
+    background: transparent;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .toolbar {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .toolbar input[type="text"] { flex: 1; min-width: 8rem; }
+  .entry {
+    border-bottom: 1px solid var(--border);
+    padding: 0.85rem 0;
+  }
+  .entry:last-child { border-bottom: none; }
+  .entry-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+  }
+  .entry-time {
+    font-size: 0.78rem;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .job-badge {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 0.72rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    margin-bottom: 0.3rem;
+  }
+  .entry-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+  .entry-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.4rem;
+  }
+  .entry-actions button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 0.8rem;
+    padding: 0;
+    text-decoration: underline;
+  }
+  .entry-actions button.danger { color: var(--danger); }
+  .empty-state {
+    color: var(--muted);
+    text-align: center;
+    padding: 2rem 0;
+    font-size: 0.9rem;
+  }
+  .unsupported-note {
+    font-size: 0.85rem;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+  footer {
+    max-width: 640px;
+    margin: 1.5rem auto 0;
+    padding: 0 1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎙️ Voice Job Log</h1>
+</header>
+
+<main>
+  <div class="card">
+    <div class="job-input">
+      <label for="jobName">Current job (tags every note below until you change it)</label>
+      <input type="text" id="jobName" placeholder="e.g. 42 Oak St — roof repair">
+    </div>
+
+    <div id="unsupportedNote" class="unsupported-note" hidden>
+      Voice recognition isn't supported in this browser. Type your note below instead.
+    </div>
+
+    <div class="record-row">
+      <button id="recordBtn" title="Record a voice note">🎤</button>
+      <div>
+        <div id="recordStatus">Tap the mic and start talking.</div>
+      </div>
+    </div>
+    <div id="liveTranscript"></div>
+
+    <div class="manual-row">
+      <label for="manualText">Or type a note</label>
+      <textarea id="manualText" placeholder="Type a job note..."></textarea>
+      <button class="btn secondary" id="addManualBtn" style="align-self: flex-start;">Add note</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <input type="text" id="searchBox" placeholder="Search notes or jobs...">
+  </div>
+
+  <div class="card" id="entriesCard">
+    <div id="entriesList"></div>
+    <div id="emptyState" class="empty-state" hidden>No job notes yet. Record or type your first one above.</div>
+  </div>
+</main>
+
+<footer>
+  <button class="btn secondary" id="exportCsvBtn">Export CSV</button>
+  <button class="btn secondary" id="exportJsonBtn">Export JSON</button>
+  <button class="btn danger" id="clearAllBtn">Clear all</button>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORAGE_KEY = "voiceJobLog.entries";
+  var JOB_KEY = "voiceJobLog.currentJob";
+
+  var entriesList = document.getElementById("entriesList");
+  var emptyState = document.getElementById("emptyState");
+  var jobNameInput = document.getElementById("jobName");
+  var searchBox = document.getElementById("searchBox");
+  var recordBtn = document.getElementById("recordBtn");
+  var recordStatus = document.getElementById("recordStatus");
+  var liveTranscript = document.getElementById("liveTranscript");
+  var manualText = document.getElementById("manualText");
+  var addManualBtn = document.getElementById("addManualBtn");
+  var unsupportedNote = document.getElementById("unsupportedNote");
+
+  function loadEntries() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveEntries(entries) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    } catch (e) {
+      alert("Couldn't save — your browser's local storage may be full or disabled.");
+    }
+  }
+
+  var entries = loadEntries();
+
+  try {
+    jobNameInput.value = localStorage.getItem(JOB_KEY) || "";
+  } catch (e) {}
+
+  jobNameInput.addEventListener("input", function () {
+    try {
+      localStorage.setItem(JOB_KEY, jobNameInput.value);
+    } catch (e) {}
+  });
+
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function addEntry(text) {
+    text = text.trim();
+    if (!text) return;
+    entries.unshift({
+      id: uid(),
+      time: Date.now(),
+      job: jobNameInput.value.trim(),
+      text: text
+    });
+    saveEntries(entries);
+    render();
+  }
+
+  function deleteEntry(id) {
+    if (!confirm("Delete this note?")) return;
+    entries = entries.filter(function (e) { return e.id !== id; });
+    saveEntries(entries);
+    render();
+  }
+
+  function updateEntry(id, newText) {
+    var e = entries.find(function (e) { return e.id === id; });
+    if (e) {
+      e.text = newText.trim();
+      saveEntries(entries);
+    }
+    render();
+  }
+
+  function formatTime(ts) {
+    var d = new Date(ts);
+    return d.toLocaleString(undefined, {
+      month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit"
+    });
+  }
+
+  function escapeHtml(s) {
+    var div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function render() {
+    var query = searchBox.value.trim().toLowerCase();
+    var filtered = entries.filter(function (e) {
+      if (!query) return true;
+      return (e.text + " " + e.job).toLowerCase().indexOf(query) !== -1;
+    });
+
+    entriesList.innerHTML = "";
+    emptyState.hidden = filtered.length !== 0;
+
+    filtered.forEach(function (entry) {
+      var div = document.createElement("div");
+      div.className = "entry";
+
+      var meta = document.createElement("div");
+      meta.className = "entry-meta";
+
+      var left = document.createElement("div");
+      if (entry.job) {
+        var badge = document.createElement("span");
+        badge.className = "job-badge";
+        badge.textContent = entry.job;
+        left.appendChild(badge);
+      }
+
+      var time = document.createElement("span");
+      time.className = "entry-time";
+      time.textContent = formatTime(entry.time);
+
+      meta.appendChild(left);
+      meta.appendChild(time);
+
+      var textEl = document.createElement("div");
+      textEl.className = "entry-text";
+      textEl.textContent = entry.text;
+
+      var actions = document.createElement("div");
+      actions.className = "entry-actions";
+
+      var editBtn = document.createElement("button");
+      editBtn.textContent = "Edit";
+      editBtn.addEventListener("click", function () {
+        startEdit(div, entry, textEl);
+      });
+
+      var delBtn = document.createElement("button");
+      delBtn.className = "danger";
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", function () {
+        deleteEntry(entry.id);
+      });
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
+      div.appendChild(meta);
+      div.appendChild(textEl);
+      div.appendChild(actions);
+      entriesList.appendChild(div);
+    });
+  }
+
+  function startEdit(container, entry, textEl) {
+    var textarea = document.createElement("textarea");
+    textarea.value = entry.text;
+    textEl.replaceWith(textarea);
+    textarea.focus();
+
+    var actions = container.querySelector(".entry-actions");
+    actions.innerHTML = "";
+
+    var saveBtn = document.createElement("button");
+    saveBtn.textContent = "Save";
+    saveBtn.addEventListener("click", function () {
+      updateEntry(entry.id, textarea.value);
+    });
+
+    var cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", render);
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(cancelBtn);
+  }
+
+  searchBox.addEventListener("input", render);
+
+  addManualBtn.addEventListener("click", function () {
+    addEntry(manualText.value);
+    manualText.value = "";
+  });
+  manualText.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      addManualBtn.click();
+    }
+  });
+
+  // --- Voice recording ---
+  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recognizer = null;
+  var recording = false;
+  var finalTranscript = "";
+
+  if (!SpeechRecognition) {
+    recordBtn.disabled = true;
+    recordStatus.textContent = "Voice recording unavailable.";
+    unsupportedNote.hidden = false;
+  } else {
+    recognizer = new SpeechRecognition();
+    recognizer.continuous = true;
+    recognizer.interimResults = true;
+    recognizer.lang = navigator.language || "en-US";
+
+    recognizer.onresult = function (event) {
+      var interim = "";
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        var chunk = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += chunk + " ";
+        } else {
+          interim += chunk;
+        }
+      }
+      liveTranscript.textContent = (finalTranscript + interim).trim();
+    };
+
+    recognizer.onerror = function (event) {
+      recordStatus.textContent = "Mic error: " + event.error + ". Tap to try again.";
+      stopRecording(false);
+    };
+
+    recognizer.onend = function () {
+      if (recording) {
+        // Some browsers auto-stop after a pause; restart seamlessly if user hasn't stopped it.
+        try { recognizer.start(); } catch (e) {}
+      }
+    };
+
+    recordBtn.addEventListener("click", function () {
+      if (recording) {
+        stopRecording(true);
+      } else {
+        startRecording();
+      }
+    });
+  }
+
+  function startRecording() {
+    finalTranscript = "";
+    liveTranscript.textContent = "";
+    recording = true;
+    recordBtn.classList.add("recording");
+    recordBtn.textContent = "⏹️";
+    recordStatus.textContent = "Listening... tap again to stop and save.";
+    try {
+      recognizer.start();
+    } catch (e) {
+      // start() throws if already started; ignore
+    }
+  }
+
+  function stopRecording(save) {
+    recording = false;
+    recordBtn.classList.remove("recording");
+    recordBtn.textContent = "🎤";
+    recordStatus.textContent = "Tap the mic and start talking.";
+    try { recognizer.stop(); } catch (e) {}
+    if (save && finalTranscript.trim()) {
+      addEntry(finalTranscript.trim());
+    }
+    liveTranscript.textContent = "";
+    finalTranscript = "";
+  }
+
+  // --- Export ---
+  function downloadBlob(filename, content, type) {
+    var blob = new Blob([content], { type: type });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function csvEscape(s) {
+    s = String(s == null ? "" : s);
+    if (/[",\n]/.test(s)) {
+      s = '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  document.getElementById("exportCsvBtn").addEventListener("click", function () {
+    var rows = [["timestamp", "job", "note"]];
+    entries.forEach(function (e) {
+      rows.push([new Date(e.time).toISOString(), e.job, e.text]);
+    });
+    var csv = rows.map(function (r) { return r.map(csvEscape).join(","); }).join("\n");
+    downloadBlob("job-log.csv", csv, "text/csv");
+  });
+
+  document.getElementById("exportJsonBtn").addEventListener("click", function () {
+    downloadBlob("job-log.json", JSON.stringify(entries, null, 2), "application/json");
+  });
+
+  document.getElementById("clearAllBtn").addEventListener("click", function () {
+    if (!entries.length) return;
+    if (!confirm("Delete all " + entries.length + " job notes? This can't be undone (export first if you want a backup).")) return;
+    entries = [];
+    saveEntries(entries);
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

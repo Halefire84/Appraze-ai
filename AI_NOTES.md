@@ -33,7 +33,15 @@ see below), `mail.py` / `mail_parse.py` (read-only Gmail IMAP for
 supplier invoices), `drive_scan.py` (Google Drive invoice scanning),
 `verdict_engine.py`. 162 tests in `tests/`, all passing.
 
-Recent work (Claude, this session): a no-login Demo Mode for in-person
+Recent work (Claude, this session): added `voice-job-log/`, a completely
+standalone dead-simple voice-note job log (single static HTML file, no
+backend, no build step — browser `SpeechRecognition` API + `localStorage`).
+It's unrelated to the Appraze deal-tracking app and intentionally has zero
+dependency on `app.py`/`finance.py`/etc.; it's its own product living in
+this repo per the branch this work was requested on. See
+`voice-job-log/README.md`.
+
+Earlier work (Claude): a no-login Demo Mode for in-person
 pitching, AI Analyzer now drafts ready-to-post marketplace listings (not
 just a price estimate), real eBay sold-comps lookup wired into the AI
 Analyzer tab, and a fix moving every Apps Script HTTP call from GET to
