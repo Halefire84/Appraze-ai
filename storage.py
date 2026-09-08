@@ -55,9 +55,16 @@ def save_table(df: pd.DataFrame, table: str = "deals", shared: bool = False) -> 
     server-side — saving one never touches another."""
     try:
         payload = df.to_json(orient="records", date_format="iso")
-        resp = requests.get(
+        # POST, not GET - a GET here put the full table payload in the URL
+        # query string, which has a length ceiling most servers/proxies
+        # enforce (a few thousand characters). A table with enough rows or
+        # long Notes fields would silently fail to save once it crossed
+        # that line - moving the payload into the POST body removes the
+        # limit entirely, since AppsScript_Code.gs's doPost reads
+        # e.parameter the same way doGet does.
+        resp = requests.post(
             _apps_script_url(),
-            params={
+            data={
                 "token": _token(),
                 "action": "save_data",
                 "table": table,
@@ -75,9 +82,12 @@ def save_table(df: pd.DataFrame, table: str = "deals", shared: bool = False) -> 
 
 def load_table(table: str = "deals", shared: bool = False) -> StorageResult:
     try:
-        resp = requests.get(
+        # POST, same reasoning as save_table above - keeps the auth token
+        # out of the URL (and therefore out of access/proxy logs), even
+        # though this particular request's own payload is small.
+        resp = requests.post(
             _apps_script_url(),
-            params={
+            data={
                 "token": _token(),
                 "action": "load_data",
                 "table": table,

@@ -50,9 +50,11 @@ def load_sales_log() -> WebhookStoreResult:
     if not url or not token:
         return WebhookStoreResult(False, error="APPS_SCRIPT_URL/APPS_SCRIPT_TOKEN not set in this service's environment.")
     try:
-        resp = requests.get(
+        # POST, not GET - keeps the auth token out of the URL/access logs,
+        # same reasoning as storage.py's save_table/load_table.
+        resp = requests.post(
             url,
-            params={
+            data={
                 "token": token,
                 "action": "load_data",
                 "table": SALES_LOG_TABLE,
@@ -76,9 +78,13 @@ def save_sales_log(rows: list) -> WebhookStoreResult:
     if not url or not token:
         return WebhookStoreResult(False, error="APPS_SCRIPT_URL/APPS_SCRIPT_TOKEN not set in this service's environment.")
     try:
-        resp = requests.get(
+        # POST, not GET - the sales log only ever grows (every sale, never
+        # truncated), so a GET here was the most likely of all the Apps
+        # Script calls in this codebase to eventually exceed a URL length
+        # limit and silently stop saving.
+        resp = requests.post(
             url,
-            params={
+            data={
                 "token": token,
                 "action": "save_data",
                 "table": SALES_LOG_TABLE,
@@ -114,9 +120,9 @@ def update_sales_log_status(invoice_id: str, new_status: str) -> WebhookStoreRes
     if not url or not token:
         return WebhookStoreResult(False, error="APPS_SCRIPT_URL/APPS_SCRIPT_TOKEN not set in this service's environment.")
     try:
-        resp = requests.get(
+        resp = requests.post(
             url,
-            params={
+            data={
                 "token": token,
                 "action": "update_sales_log_status",
                 "invoice_id": invoice_id,
