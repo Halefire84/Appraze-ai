@@ -310,6 +310,10 @@ def render_demo_mode():
     with top_r:
         if st.button("← Exit Demo", use_container_width=True):
             st.session_state.demo_mode = False
+            # Clear ?demo=... too - otherwise a visitor who arrived via the
+            # direct demo link would get bounced right back into Demo Mode
+            # on the very next rerun, since the query param never went away.
+            st.query_params.clear()
             st.rerun()
 
     st.markdown("#### 1. Add an item")
@@ -393,7 +397,9 @@ def render_demo_mode():
         )
 
 
-if st.session_state.get("demo_mode"):
+demo_link_visited = st.query_params.get("demo") is not None
+if st.session_state.get("demo_mode") or demo_link_visited:
+    st.session_state.demo_mode = True
     render_demo_mode()
     st.stop()
 
