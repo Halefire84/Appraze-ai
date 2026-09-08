@@ -33,13 +33,54 @@ see below), `mail.py` / `mail_parse.py` (read-only Gmail IMAP for
 supplier invoices), `drive_scan.py` (Google Drive invoice scanning),
 `verdict_engine.py`. 162 tests in `tests/`, all passing.
 
-Recent work (Claude, this session): added `voice-job-log/`, a completely
-standalone dead-simple voice-note job log (single static HTML file, no
-backend, no build step — browser `SpeechRecognition` API + `localStorage`).
-It's unrelated to the Appraze deal-tracking app and intentionally has zero
-dependency on `app.py`/`finance.py`/etc.; it's its own product living in
-this repo per the branch this work was requested on. See
-`voice-job-log/README.md`.
+Recent work (Claude, this session): the owner's real ask turned out to be
+record-keeping gaps in the production app, not the standalone
+`voice-job-log/` prototype mentioned below. Added to `app.py`:
+- Inventory now has `Sale Channel`/`Sale Date` columns (backfilled for
+  existing saved rows via `ensure_inventory_sale_columns()`), editable
+  directly or through a new guided form.
+- POS Checkout tab: a "Record a sale made elsewhere" section for anything
+  that didn't run through Stripe — eBay, Facebook Marketplace, Mercari,
+  cash — since the tab previously only supported card charges. Marks the
+  Inventory item Sold with the real channel/price/date.
+- New Reports tab: monthly/yearly gross sales, cost basis, fees, and net
+  profit rolled up from Inventory Sold rows + Stripe POS payments, broken
+  down by sale channel, with CSV export (monthly summary + full
+  transaction detail) for handing to an accountant or tax software.
+  Explicitly not tax advice — only tracks item-level cost/price/fees, not
+  mileage/supplies/other business expenses.
+
+Still outstanding from that same conversation, waiting on the owner's
+answer to a feasibility question before building: auto-generating a
+complete listing from a photo already exists (AI Analyzer drafts
+copy-paste-ready eBay/Poshmark/Mercari/Facebook text) but the owner wants
+actual automated cross-posting, not just drafts, ideally to eBay +
+2 Facebook accounts + Mercari + future marketplaces. eBay has a real Sell
+API for this (feasible, needs the owner to set up an eBay Developer app
+with listing-write scope — bigger lift than the existing read-only
+Browse/Insights keys). Facebook Marketplace and Mercari have **no**
+public API for posting a personal listing — the only way to automate
+posting there is browser automation against their Terms of Service, which
+is the exact same category of risk this file already documents Claude
+declining for `web_scraper.py` below (account-ban risk, ToS exposure).
+Don't build FB/Mercari auto-posting without the owner explicitly accepting
+that risk in writing somewhere in the conversation history — default to
+keeping those two as copy-paste drafts.
+
+Also from an earlier ask in this same session, unrelated to Appraze: a
+`voice-job-log/` folder exists in this branch (a static-HTML voice-note
+job log prototype) that the owner wants kept as a *separate* product, not
+part of this repo — Claude offered to strip it back out once a dedicated
+GitHub repo existed for it, but that repo was never created before the
+owner's attention moved to the Appraze asks above, so the folder is still
+sitting here. The real version was rebuilt as a proper Next.js +
+Postgres + Whisper app (multi-tenant SaaS shape) in a local checkout
+outside this repo, not yet pushed anywhere. The owner then said they
+actually want it kept private (personal/business use, not sold or
+app-store-distributed) — so it may not need the multi-tenant/billing
+scaffolding it was given; confirm with the owner before continuing that
+thread, and remember to remove `voice-job-log/` from this repo once it
+has its own home.
 
 Earlier work (Claude): a no-login Demo Mode for in-person
 pitching, AI Analyzer now drafts ready-to-post marketplace listings (not

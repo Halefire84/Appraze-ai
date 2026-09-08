@@ -496,6 +496,7 @@ if "editor_key" not in st.session_state:
     st.session_state.editor_key = 0
 
 INVENTORY_STATUSES = ["Buy", "Track", "List", "Sold"]
+SALE_CHANNELS = ["eBay", "Facebook Marketplace", "Mercari", "Cash", "Card/Stripe (POS)", "Other"]
 
 if "inventory_loaded" not in st.session_state:
     with st.spinner("Loading your saved inventory..."):
@@ -511,12 +512,26 @@ if "inventory_loaded" not in st.session_state:
                 "Platform Fee %": DEFAULT_INVENTORY_FEE_PCT,
                 "Status": "List",
                 "Sale Price": 0.0,
+                "Sale Channel": "",
+                "Sale Date": None,
                 "Notes": "Sample row — edit or delete me",
             }
         ])
     if not inv_result.success and inv_result.error:
         st.sidebar.warning(f"Couldn't load saved inventory: {inv_result.error}. Starting fresh.")
     st.session_state.inventory_loaded = True
+
+
+def ensure_inventory_sale_columns():
+    """Inventory rows saved before Sale Channel/Sale Date existed won't have
+    them — back them in with safe defaults so old data doesn't break the
+    editor or get silently excluded from Reports."""
+    for col, default in (("Sale Channel", ""), ("Sale Date", None)):
+        if col not in st.session_state.inventory.columns:
+            st.session_state.inventory[col] = default
+
+
+ensure_inventory_sale_columns()
 
 if "inventory_editor_key" not in st.session_state:
     st.session_state.inventory_editor_key = 0
@@ -550,6 +565,11 @@ def recalc_inventory(df: pd.DataFrame) -> pd.DataFrame:
     df["List Price"] = pd.to_numeric(df["List Price"], errors="coerce").fillna(0)
     df["Platform Fee %"] = pd.to_numeric(df["Platform Fee %"], errors="coerce").fillna(DEFAULT_INVENTORY_FEE_PCT)
     df["Sale Price"] = pd.to_numeric(df.get("Sale Price", 0), errors="coerce").fillna(0)
+    if "Sale Channel" not in df.columns:
+        df["Sale Channel"] = ""
+    df["Sale Channel"] = df["Sale Channel"].fillna("")
+    if "Sale Date" not in df.columns:
+        df["Sale Date"] = None
 
     gross, net, margin, health, realized = [], [], [], [], []
     for _, row in df.iterrows():
@@ -735,8 +755,8 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS
 # --------------------------------------------------------------------------
-tab_dash, tab_inventory, tab_calc, tab_melt, tab_comps, tab_ai, tab_invoice, tab_mail, tab_pos = st.tabs(
-    ["📊  Deal Dashboard", "📦  Inventory", "🧮  Profit Calculator", "⚖️  Melt Calculator", "📈  Market Comps", "🤖  AI Analyzer", "📨  Invoice Import", "✉️  Mail", "💳  POS Checkout"]
+tab_dash, tab_inventory, tab_calc, tab_melt, tab_comps, tab_ai, tab_invoice, tab_mail, tab_pos, tab_reports = st.tabs(
+    ["📊  Deal Dashboard", "📦  Inventory", "🧮  Profit Calculator", "⚖️  Melt Calculator", "📈  Market Comps", "🤖  AI Analyzer", "📨  Invoice Import", "✉️  Mail", "💳  POS Checkout", "📅  Reports"]
 )
 
 # ============================================================================
@@ -862,6 +882,8 @@ with tab_inventory:
             "Sale Price": st.column_config.NumberColumn(format="$%.2f", help="Fill in once actually sold — used for Realized Net Profit."),
             "Platform Fee %": st.column_config.NumberColumn(format="%.1f%%"),
             "Status": st.column_config.SelectboxColumn(options=INVENTORY_STATUSES, help="Buy -> Track -> List -> Sold lifecycle"),
+            "Sale Channel": st.column_config.SelectboxColumn(options=[""] + SALE_CHANNELS, help="Where it actually sold — feeds the Reports tab. Use the guided form in POS Checkout instead of typing this by hand when you can."),
+            "Sale Date": st.column_config.DateColumn(help="When it actually sold — required for it to show up in a monthly/yearly report."),
         },
         key=f"inventory_editor_{st.session_state.inventory_editor_key}",
     )
@@ -1774,6 +1796,7 @@ with tab_pos:
                         "deal_index": pos_deal_index,
                         "checkout_url": result.checkout_url,
                         "Status": "Awaiting Payment",
+                        "Date": date.today().isoformat(),
                     })
                     persist_sales_log()
                     st.success(f"Checkout link ready ({result.invoice_id}) — hand off the device, or copy the link below.")
@@ -1816,6 +1839,213 @@ with tab_pos:
             if changed:
                 persist_sales_log()
                 st.rerun()
+
+        st.markdown("---")
+        st.markdown("##### 📦 Record a sale made elsewhere")
+        st.caption(
+            "For items sold on eBay, Facebook Marketplace, Mercari, or for cash — anything that didn't run "
+            "through the Stripe checkout above. Marks the item Sold in Inventory with the real channel and "
+            "price, so your profit records and the Reports tab stay accurate no matter where something sold."
+        )
+
+        unsold_inv = st.session_state.inventory[st.session_state.inventory["Status"] != "Sold"].reset_index()
+        if unsold_inv.empty:
+            st.info("No unsold inventory items to record a sale against — add one in the Inventory tab first.")
+        else:
+            options = {f'{r["Item Name"]} (List ${r["List Price"]:,.2f})': r["index"] for _, r in unsold_inv.iterrows()}
+            sale_choice = st.selectbox("Which item sold?", list(options.keys()), key="outside_sale_item")
+            sale_index = options[sale_choice]
+            chosen_item = st.session_state.inventory.loc[sale_index]
+
+            oc1, oc2, oc3 = st.columns(3)
+            with oc1:
+                sale_channel = st.selectbox("Sold where?", SALE_CHANNELS, key="outside_sale_channel")
+            with oc2:
+                sale_price = st.number_input(
+                    "Actual sale price ($)", min_value=0.0, step=1.0, format="%.2f",
+                    value=float(chosen_item["List Price"]), key="outside_sale_price",
+                )
+            with oc3:
+                sale_date_val = st.date_input("Date sold", value=date.today(), key="outside_sale_date")
+
+            sale_fee_pct = st.number_input(
+                "Platform fee % for this sale (adjust if it's different from the item's usual fee)",
+                min_value=0.0, max_value=100.0, step=0.5,
+                value=float(chosen_item.get("Platform Fee %", DEFAULT_INVENTORY_FEE_PCT) or DEFAULT_INVENTORY_FEE_PCT),
+                key="outside_sale_fee_pct",
+            )
+
+            if st.button("✅ Record This Sale", key="record_outside_sale", use_container_width=True, type="primary"):
+                st.session_state.inventory.loc[sale_index, "Status"] = "Sold"
+                st.session_state.inventory.loc[sale_index, "Sale Price"] = sale_price
+                st.session_state.inventory.loc[sale_index, "Sale Channel"] = sale_channel
+                st.session_state.inventory.loc[sale_index, "Sale Date"] = sale_date_val
+                st.session_state.inventory.loc[sale_index, "Platform Fee %"] = sale_fee_pct
+                persist_inventory()
+                st.success(f"Recorded: {chosen_item['Item Name']} sold on {sale_channel} for ${sale_price:,.2f}.")
+                st.rerun()
+
+# ============================================================================
+# TAB — REPORTS (monthly/yearly income summary for taxes/bookkeeping)
+# ============================================================================
+with tab_reports:
+    st.markdown("#### Reports")
+    st.caption(
+        "Every sale you've recorded — through Inventory's Sale Channel/Sale Date fields or the "
+        "'Record a sale made elsewhere' form in POS Checkout — rolled up by month and year. "
+        "Built for handing to an accountant or importing into tax software, not as tax advice itself: "
+        "it only knows about item cost basis, sale price, and platform fees. Other business expenses "
+        "(mileage, supplies, booth fees, etc.) aren't tracked here and need to be added separately "
+        "before you file."
+    )
+
+    def _build_transactions() -> pd.DataFrame:
+        """Unify Inventory sales (any channel, including ones recorded via the
+        POS 'sale made elsewhere' form) with Stripe POS sales into one
+        line-item ledger. These two sources never overlap: a Stripe POS sale
+        against a Dashboard deal only ever touches st.session_state.deals,
+        never Inventory."""
+        rows = []
+
+        inv = recalc_inventory(st.session_state.inventory)
+        sold = inv[(inv["Status"] == "Sold") & inv["Sale Date"].notna() & (inv["Sale Price"] > 0)]
+        for _, r in sold.iterrows():
+            sale_date = r["Sale Date"]
+            if hasattr(sale_date, "isoformat"):
+                sale_date = sale_date.isoformat()
+            rows.append({
+                "Date": str(sale_date)[:10],
+                "Item": r["Item Name"],
+                "Channel": r["Sale Channel"] or "Unspecified",
+                "Revenue": float(r["Sale Price"]),
+                "Cost Basis": float(r["Cost Basis"]),
+                "Fees": float(r["Sale Price"]) * float(r["Platform Fee %"]) / 100.0,
+                "Net Profit": float(r["Realized Net Profit"]) if pd.notna(r["Realized Net Profit"]) else 0.0,
+            })
+
+        for tx in st.session_state.get("sales_log", []):
+            if tx.get("Status") != "Paid (Card)":
+                continue
+            tx_date = tx.get("Date")
+            if not tx_date:
+                continue
+            cost_basis = 0.0
+            deal_idx = tx.get("deal_index")
+            if deal_idx is not None and deal_idx in st.session_state.deals.index:
+                cost_basis = float(st.session_state.deals.loc[deal_idx, "Cost"] or 0)
+            revenue = float(tx.get("amount", 0) or 0)
+            rows.append({
+                "Date": str(tx_date)[:10],
+                "Item": tx.get("description", ""),
+                "Channel": "Card/Stripe (POS)",
+                "Revenue": revenue,
+                "Cost Basis": cost_basis,
+                "Fees": 0.0,
+                "Net Profit": revenue - cost_basis,
+            })
+
+        if not rows:
+            return pd.DataFrame(columns=["Date", "Item", "Channel", "Revenue", "Cost Basis", "Fees", "Net Profit"])
+
+        out = pd.DataFrame(rows)
+        out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+        out = out.dropna(subset=["Date"]).sort_values("Date", ascending=False)
+        return out
+
+    transactions = _build_transactions()
+
+    if transactions.empty:
+        st.info(
+            "No completed sales with a recorded date yet. Sell something and record it — via Inventory's "
+            "Sale Channel/Sale Date columns or the POS Checkout 'Record a sale made elsewhere' form — and "
+            "it'll show up here."
+        )
+    else:
+        years_available = sorted(transactions["Date"].dt.year.unique().tolist(), reverse=True)
+        selected_year = st.selectbox("Year", years_available, index=0)
+
+        year_tx = transactions[transactions["Date"].dt.year == selected_year]
+
+        r1, r2, r3, r4 = st.columns(4)
+        with r1:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Gross Sales ({selected_year})</div>
+                <div class="kpi-value">${year_tx['Revenue'].sum():,.2f}</div></div>""", unsafe_allow_html=True)
+        with r2:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Cost of Goods Sold</div>
+                <div class="kpi-value">${year_tx['Cost Basis'].sum():,.2f}</div></div>""", unsafe_allow_html=True)
+        with r3:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Platform Fees</div>
+                <div class="kpi-value">${year_tx['Fees'].sum():,.2f}</div></div>""", unsafe_allow_html=True)
+        with r4:
+            st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Net Profit</div>
+                <div class="kpi-value">${year_tx['Net Profit'].sum():,.2f}</div></div>""", unsafe_allow_html=True)
+
+        st.write("")
+        st.markdown("##### Monthly breakdown")
+        monthly = (
+            year_tx.assign(Month=year_tx["Date"].dt.strftime("%Y-%m"))
+            .groupby("Month", as_index=False)
+            .agg(**{
+                "Gross Sales": ("Revenue", "sum"),
+                "Cost Basis": ("Cost Basis", "sum"),
+                "Fees": ("Fees", "sum"),
+                "Net Profit": ("Net Profit", "sum"),
+                "Items Sold": ("Item", "count"),
+            })
+            .sort_values("Month")
+        )
+        st.dataframe(
+            monthly,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Gross Sales": st.column_config.NumberColumn(format="$%.2f"),
+                "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
+                "Fees": st.column_config.NumberColumn(format="$%.2f"),
+                "Net Profit": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
+
+        st.markdown("##### By sale channel")
+        by_channel = (
+            year_tx.groupby("Channel", as_index=False)
+            .agg(**{
+                "Gross Sales": ("Revenue", "sum"),
+                "Net Profit": ("Net Profit", "sum"),
+                "Items Sold": ("Item", "count"),
+            })
+            .sort_values("Gross Sales", ascending=False)
+        )
+        st.dataframe(
+            by_channel,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Gross Sales": st.column_config.NumberColumn(format="$%.2f"),
+                "Net Profit": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
+
+        st.markdown("##### Export")
+        exp1, exp2 = st.columns(2)
+        with exp1:
+            st.download_button(
+                f"⬇️ Download {selected_year} monthly summary (CSV)",
+                data=monthly.to_csv(index=False).encode("utf-8"),
+                file_name=f"appraze-monthly-summary-{selected_year}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        with exp2:
+            all_time_csv = transactions.sort_values("Date").to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "⬇️ Download all-time transaction detail (CSV)",
+                data=all_time_csv,
+                file_name="appraze-all-transactions.csv",
+                mime="text/csv",
+                use_container_width=True,
+                help="Every recorded sale, all years, one row each — the detail behind the monthly summary. This is the one to hand to an accountant or import into tax software.",
+            )
 
 st.markdown("---")
 st.caption("Appraze · Cooper River Trading Co. · built for CTBids / eBay / HiBid / FB Marketplace / Mercari / Chairish / Etsy sourcing")

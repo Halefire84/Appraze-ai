@@ -34,7 +34,7 @@ syntax.
 
 - `app.py` — the Streamlit UI and production entry point (all tabs: Deal
   Dashboard, Inventory, Profit Calculator, Melt Calculator, Market Comps,
-  AI Analyzer, Invoice Import, Mail, POS Checkout)
+  AI Analyzer, Invoice Import, Mail, POS Checkout, Reports)
 - `finance.py` — pure profit/margin/melt/tax math, the single source of
   truth for every dollar figure shown in the app; unit-tested, no
   Streamlit/pandas dependency
@@ -56,7 +56,18 @@ syntax.
 - `billing.py` — verifies Stripe Payment Link checkout sessions (subscriber
   paywall)
 - `pos.py` — creates one-off Stripe Checkout Sessions for point-of-sale
-  charges, tagged with an invoice ID the webhook service reconciles later
+  charges, tagged with an invoice ID the webhook service reconciles later.
+  The POS Checkout tab also has a "Record a sale made elsewhere" form for
+  anything that didn't run through Stripe (eBay, Facebook Marketplace,
+  Mercari, cash) — it marks the Inventory item Sold with the real channel,
+  price, and date, which is what the Reports tab is built on
+- Reports tab (in `app.py`, no separate module) — rolls every recorded sale
+  (Inventory items marked Sold with a Sale Channel/Sale Date, plus Stripe
+  POS payments) into monthly/yearly gross sales, cost basis, fees, and net
+  profit, broken down by sale channel, with CSV export for handing to an
+  accountant or importing into tax software. Not tax advice — it only
+  knows about item cost/price/fees, not mileage, supplies, or other
+  business expenses
 - `drive_scan.py` — scans a named Google Drive folder for new invoice
   files via the same Apps Script backend
 - `stripe_webhooks.py` — pure, unit-tested Stripe webhook signature
