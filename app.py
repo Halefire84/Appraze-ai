@@ -206,6 +206,197 @@ DARK_CSS = """
 """
 st.markdown(DARK_CSS, unsafe_allow_html=True)
 
+# --------------------------------------------------------------------------
+# DEMO MODE — a self-contained, no-login walkthrough for pitching the app to
+# a stranger on the spot (a shop owner, a hotel guest, whoever). Deliberately
+# isolated from everything else in this file:
+#   - Never calls render_login_gate(), storage.py, or auth.py — no real
+#     account, nothing persisted, nothing that could touch a real business's
+#     data even by accident.
+#   - The "Charge Card" button never calls Stripe — a real POS sale needs a
+#     configured STRIPE_SECRET_KEY and sends the customer to a Stripe-hosted
+#     page, which is the wrong thing to demo live on a stranger's/your own
+#     phone in a few seconds. This simulates approval instantly instead.
+#   - The AI step calls the real Anthropic API when ANTHROPIC_API_KEY is
+#     configured (a real "wow" moment beats a canned one), but falls back to
+#     a canned example on any failure — a demo must never visibly break
+#     mid-pitch just because a hotel's wifi is bad.
+# All state lives under demo_-prefixed session_state keys so it can never
+# collide with the real app's "deals"/"inventory" state.
+# --------------------------------------------------------------------------
+DEMO_INVENTORY_SEED = [
+    {"Item Name": "Vintage Coach Leather Handbag", "Cost Basis": 18.00, "List Price": 85.00, "Status": "Available", "Notes": "Estate sale find"},
+    {"Item Name": "Air Jordan 1s, Size 10", "Cost Basis": 25.00, "List Price": 120.00, "Status": "Available", "Notes": "Thrift store"},
+    {"Item Name": "KitchenAid Stand Mixer", "Cost Basis": 40.00, "List Price": 150.00, "Status": "Sold", "Notes": "Garage sale"},
+]
+
+DEMO_AI_FALLBACK = {
+    "item_name": "Vintage Pyrex Mixing Bowl Set",
+    "category": "Collectibles",
+    "estimated_low": 35,
+    "estimated_high": 65,
+    "confidence": "medium",
+    "notes": "Sample result — the live version identifies your actual photo/description instead.",
+}
+
+
+def _demo_ai_suggest(description: str, photo) -> dict:
+    """Same call shape as tab_ai's call_claude_vision below, kept as its own
+    small copy so demo mode has zero dependency on the rest of this file and
+    can't be broken by later changes to the real Analyzer tab. Always
+    returns a usable dict — never raises — so the demo can't crash on stage."""
+    try:
+        api_key = st.secrets.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            return dict(DEMO_AI_FALLBACK)
+
+        content = []
+        if photo is not None:
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": photo.type or "image/jpeg",
+                    "data": base64.b64encode(photo.getvalue()).decode("utf-8"),
+                },
+            })
+        content.append({
+            "type": "text",
+            "text": (
+                "You are an expert resale appraiser demoing this tool live. Identify this item and "
+                "estimate its realistic resale value range. Respond with ONLY a raw JSON object, no "
+                "markdown fences, in exactly this shape: "
+                '{"item_name": "...", "category": "...", "estimated_low": 0, "estimated_high": 0, '
+                '"confidence": "low|medium|high", "notes": "one short sentence"}\n\n'
+                f"Context from the seller: {description.strip() if description.strip() else '(none provided)'}"
+            ),
+        })
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={"model": "claude-sonnet-5", "max_tokens": 300, "messages": [{"role": "user", "content": content}]},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        text = "\n".join(b["text"] for b in resp.json().get("content", []) if b.get("type") == "text")
+        text = text.strip().replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(text)
+        return {**DEMO_AI_FALLBACK, **parsed}
+    except Exception:
+        return dict(DEMO_AI_FALLBACK)
+
+
+def _seed_demo_state():
+    if "demo_inventory" not in st.session_state:
+        st.session_state.demo_inventory = pd.DataFrame(DEMO_INVENTORY_SEED)
+    if "demo_invoices" not in st.session_state:
+        st.session_state.demo_invoices = []
+
+
+def render_demo_mode():
+    _seed_demo_state()
+
+    top_l, top_r = st.columns([4, 1])
+    with top_l:
+        st.markdown("## 🪙 Appraze — Live Demo")
+        st.caption("🎬 Sample data only · no real charges · nothing is saved anywhere")
+    with top_r:
+        if st.button("← Exit Demo", use_container_width=True):
+            st.session_state.demo_mode = False
+            st.rerun()
+
+    st.markdown("#### 1. Add an item")
+    with st.form("demo_add_item", clear_on_submit=True):
+        dcol1, dcol2 = st.columns([2, 1])
+        with dcol1:
+            desc = st.text_input("Describe the item", placeholder="e.g. Vintage Pyrex mixing bowl set, minor wear")
+        with dcol2:
+            photo = st.file_uploader("Or a photo", type=["png", "jpg", "jpeg"], key="demo_photo")
+        go = st.form_submit_button("✨ Suggest a price with AI", use_container_width=True)
+
+    if go:
+        if not desc.strip() and photo is None:
+            st.warning("Add a photo or a short description first.")
+        else:
+            with st.spinner("Analyzing..."):
+                result = _demo_ai_suggest(desc, photo)
+            st.session_state.demo_last_ai = result
+
+    ai_result = st.session_state.get("demo_last_ai")
+    if ai_result:
+        suggested_price = round((float(ai_result.get("estimated_low", 0) or 0) + float(ai_result.get("estimated_high", 0) or 0)) / 2, 2)
+        st.success(f"**{ai_result.get('item_name', 'Item')}** — suggested list price **${suggested_price:,.2f}** ({ai_result.get('confidence', 'medium')} confidence)")
+        if ai_result.get("notes"):
+            st.caption(ai_result["notes"])
+        if st.button("➕ Add to Inventory", key="demo_add_to_inv"):
+            new_row = pd.DataFrame([{
+                "Item Name": ai_result.get("item_name", "New Item"), "Cost Basis": 0.0,
+                "List Price": suggested_price, "Status": "Available", "Notes": "Added via AI Analyzer",
+            }])
+            st.session_state.demo_inventory = pd.concat([st.session_state.demo_inventory, new_row], ignore_index=True)
+            st.session_state.demo_last_ai = None
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### 2. Inventory")
+    st.dataframe(
+        st.session_state.demo_inventory,
+        use_container_width=True,
+        column_config={
+            "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
+            "List Price": st.column_config.NumberColumn(format="$%.2f"),
+        },
+    )
+
+    st.markdown("---")
+    st.markdown("#### 3. Ring up a sale")
+    available = st.session_state.demo_inventory[st.session_state.demo_inventory["Status"] == "Available"]
+    if len(available) == 0:
+        st.info("No available items — add one above.")
+    else:
+        pcol1, pcol2, pcol3 = st.columns([2, 1, 1])
+        with pcol1:
+            choice = st.selectbox("Item", available["Item Name"].tolist(), key="demo_pos_choice")
+        row = available[available["Item Name"] == choice].iloc[0]
+        with pcol2:
+            sale_price = st.number_input("Price ($)", value=float(row["List Price"]), min_value=0.0, step=1.0, key="demo_pos_price")
+        with pcol3:
+            st.write("")
+            st.write("")
+            charge_clicked = st.button("💳 Charge Card", type="primary", use_container_width=True, key="demo_charge")
+
+        if charge_clicked:
+            idx = st.session_state.demo_inventory[st.session_state.demo_inventory["Item Name"] == choice].index[0]
+            st.session_state.demo_inventory.loc[idx, "Status"] = "Sold"
+            invoice_id = f"DEMO-{len(st.session_state.demo_invoices) + 1:03d}"
+            st.session_state.demo_invoices.append({
+                "Invoice #": invoice_id, "Item": choice, "Total": sale_price,
+                "Time": datetime.now().strftime("%I:%M %p"),
+            })
+            st.success(f"✅ Payment approved — Invoice {invoice_id}. Inventory updated automatically.")
+            st.rerun()
+
+    if st.session_state.demo_invoices:
+        st.markdown("---")
+        st.markdown("#### Invoices")
+        st.dataframe(
+            pd.DataFrame(st.session_state.demo_invoices),
+            use_container_width=True,
+            column_config={"Total": st.column_config.NumberColumn(format="$%.2f")},
+        )
+
+
+if st.session_state.get("demo_mode"):
+    render_demo_mode()
+    st.stop()
+
+if not st.session_state.get("authenticated"):
+    _, demo_col = st.columns([3, 1])
+    with demo_col:
+        if st.button("🎬 Try Live Demo", use_container_width=True, help="No signup needed — sample data only"):
+            st.session_state.demo_mode = True
+            st.rerun()
+
 if not render_login_gate():
     st.stop()
 
