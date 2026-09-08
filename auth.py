@@ -47,9 +47,13 @@ def _token() -> str:
 
 def signup(username: str, password: str, display_name: str = "", admin_code: str = "") -> AuthResult:
     try:
-        resp = requests.get(
+        # POST, not GET - AppsScript_Code.gs's doPost reads e.parameter the
+        # same way doGet does, but a GET here would put the auth token and
+        # password hash in the URL, where they'd land in server access logs,
+        # any proxy in between, and browser history.
+        resp = requests.post(
             _apps_script_url(),
-            params={
+            data={
                 "token": _token(),
                 "action": "signup",
                 "username": username,
@@ -70,9 +74,9 @@ def signup(username: str, password: str, display_name: str = "", admin_code: str
 
 def login(username: str, password: str) -> AuthResult:
     try:
-        resp = requests.get(
+        resp = requests.post(
             _apps_script_url(),
-            params={
+            data={
                 "token": _token(),
                 "action": "login",
                 "username": username,
@@ -93,9 +97,9 @@ def mark_paid(username: str) -> bool:
     """Called once a Stripe Checkout Session is verified as paid — persists it
     so the person doesn't have to pay again on their next login."""
     try:
-        resp = requests.get(
+        resp = requests.post(
             _apps_script_url(),
-            params={"token": _token(), "action": "set_paid", "username": username},
+            data={"token": _token(), "action": "set_paid", "username": username},
             timeout=15,
         )
         resp.raise_for_status()

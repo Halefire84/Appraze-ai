@@ -28,9 +28,11 @@ class ScanResult:
 def scan_invoice_folder(folder_name: str) -> ScanResult:
     """Returns any not-yet-processed image/PDF files sitting in the named Drive folder."""
     try:
-        resp = requests.get(
+        # POST, not GET - keeps the auth token out of the URL/access logs,
+        # same reasoning as auth.py and storage.py.
+        resp = requests.post(
             _apps_script_url(),
-            params={"token": _token(), "action": "scan_folder", "folder_name": folder_name},
+            data={"token": _token(), "action": "scan_folder", "folder_name": folder_name},
             timeout=30,  # Drive + base64 encoding of several files can take a moment
         )
         resp.raise_for_status()
@@ -48,9 +50,9 @@ def mark_files_processed(file_ids: List[str], file_names: List[str]) -> bool:
     if not file_ids:
         return True
     try:
-        resp = requests.get(
+        resp = requests.post(
             _apps_script_url(),
-            params={
+            data={
                 "token": _token(),
                 "action": "mark_processed",
                 "file_ids": ",".join(file_ids),
