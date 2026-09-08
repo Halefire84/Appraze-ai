@@ -1016,14 +1016,24 @@ with tab_ai:
             })
 
         prompt_text = (
-            "You are an expert resale/estate-sale appraiser. Identify this item and estimate its "
-            "REALISTIC current resale value range (not retail/replacement value) based on recent "
-            "comparable sold listings you're aware of. Be conservative — CRTC would rather underestimate "
-            "than overestimate.\n\n"
+            "You are an expert resale/estate-sale appraiser AND a marketplace listing copywriter. "
+            "Identify this item and estimate its REALISTIC current resale value range (not "
+            "retail/replacement value) based on recent comparable sold listings you're aware of. "
+            "Be conservative — CRTC would rather underestimate than overestimate. Then draft a "
+            "ready-to-post listing for eBay, Poshmark, Mercari, and Facebook Marketplace — each "
+            "platform's title and description should match how sellers actually write on that "
+            "platform (eBay: keyword-rich, structured, under 80 characters; Poshmark/Mercari: "
+            "casual, under 60 characters; Facebook Marketplace: brief and local-sale toned). Each "
+            "description should be 2-4 sentences, honest about condition, and ready to paste in "
+            "with no editing needed.\n\n"
             f"Additional context from the seller: {desc if desc.strip() else '(none provided)'}\n\n"
             "Respond with ONLY a raw JSON object, no markdown fences, no preamble, in exactly this shape:\n"
             '{"item_name": "...", "category": "...", "estimated_low": 0, "estimated_high": 0, '
-            '"confidence": "low|medium|high", "notes": "1-2 sentences on identifying features or risk factors"}'
+            '"confidence": "low|medium|high", "notes": "1-2 sentences on identifying features or risk factors", '
+            '"listing_drafts": {"ebay": {"title": "...", "description": "..."}, '
+            '"poshmark": {"title": "...", "description": "..."}, '
+            '"mercari": {"title": "...", "description": "..."}, '
+            '"facebook": {"title": "...", "description": "..."}}}'
         )
         content.append({"type": "text", "text": prompt_text})
 
@@ -1036,10 +1046,13 @@ with tab_ai:
             },
             json={
                 "model": "claude-sonnet-5",
-                "max_tokens": 500,
+                # Was 500 - too tight once listing drafts for four platforms were
+                # added on top of the identification/value fields; that combined
+                # response routinely got cut off mid-JSON at the old limit.
+                "max_tokens": 1400,
                 "messages": [{"role": "user", "content": content}],
             },
-            timeout=30,
+            timeout=45,
         )
         resp.raise_for_status()
         data = resp.json()
@@ -1122,6 +1135,25 @@ with tab_ai:
                 st.markdown("""<div class="kpi-card"><div class="kpi-label">Est. Profit</div>
                     <div class="kpi-value" style="color:#8b96a5;">Enter cost above</div></div>""", unsafe_allow_html=True)
             st.caption(f"Enter your cost/planned bid above to get a verdict — or bid up to the ${floor_cost:,.2f} floor cost to guarantee at least a Buy-tier deal.")
+
+        listing_drafts = ai_result.get("listing_drafts")
+        if isinstance(listing_drafts, dict) and listing_drafts:
+            st.markdown("---")
+            st.markdown("##### 📋 Ready-to-post listings")
+            st.caption("Drafted from the same analysis above — click the copy icon in a box, then paste straight into that marketplace's app.")
+            platform_labels = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "facebook": "Facebook Marketplace"}
+            draft_tabs = st.tabs([platform_labels.get(k, k.title()) for k in listing_drafts.keys()])
+            for draft_tab, (plat_key, draft) in zip(draft_tabs, listing_drafts.items()):
+                with draft_tab:
+                    if not isinstance(draft, dict) or not (draft.get("title") or draft.get("description")):
+                        st.caption("No draft returned for this platform — try analyzing again.")
+                        continue
+                    if draft.get("title"):
+                        st.caption("Title")
+                        st.code(draft["title"], language=None)
+                    if draft.get("description"):
+                        st.caption("Description")
+                        st.code(draft["description"], language=None)
 
 # ============================================================================
 # TAB 5 — INVOICE IMPORT
