@@ -1,0 +1,58 @@
+name: CRTC Continuous Hunt
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run off the top of the hour to reduce GitHub scheduling contention.
+    - cron: "7,22,37,52 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+      EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run last-chance Holy Grail hunt
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from ebay_holy_grail import scan_ebay_last_chance
+
+          result = scan_ebay_last_chance(limit_per_query=25, hours=24, min_score=50)
+          Path("crtc_hunt_result.json").write_text(
+              json.dumps(result, default=lambda o: getattr(o, "__dict__", str(o)), indent=2),
+              encoding="utf-8",
+          )
+          print("selected_ceiling=", result.get("selected_ceiling"))
+          print("opportunities=", len(result.get("opportunities", [])))
+          print("errors=", len(result.get("errors", [])))
+          for candidate in result.get("opportunities", [])[:10]:
+              listing = candidate.listing
+              print(candidate.tier, candidate.score, listing.get("price"), listing.get("title"))
+          PY
+
+      - name: Upload hunt result
+        uses: actions/upload-artifact@v4
+        with:
+          name: crtc-hunt-${{ github.run_number }}
+          path: crtc_hunt_result.json
+          retention-days: 14
