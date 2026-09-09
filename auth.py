@@ -1,19 +1,8 @@
 """
-Cooper River Trading Co. — CRTC Auth Module
-------------------------------------------------
-Authentication for the CRTC resale intelligence app.
+Appraze authentication helpers.
 
-Production model:
-- One shared Admin login for the owners (you + Ashley).
-- Admin credentials come from Streamlit secrets, never source control.
-- Admin sessions map to the existing shared `admin_shared` workspace.
-- Public/demo users can use the existing isolated demo mode without
-  touching real account data.
-- Optional tester signup/login remains available for future paid users.
-
-Passwords are SHA-256 hashed client-side before ever leaving the app for
-Apps Script authentication. The production Admin password is compared
-against a SHA-256 hash stored in Streamlit secrets.
+Authentication establishes a server-derived tenant context for the public SaaS.
+The tenant id is never selected by a browser-supplied workspace value.
 """
 
 import hashlib
@@ -21,6 +10,8 @@ from dataclasses import dataclass
 
 import requests
 import streamlit as st
+
+from tenant_context import tenant_from_session
 
 
 @dataclass
@@ -52,54 +43,76 @@ def _token() -> str:
 
 
 def _admin_credentials_configured() -> bool:
-    """Return True when the dedicated shared Admin login is configured.
-
-    Required secrets:
-      CRTC_ADMIN_USERNAME
-      CRTC_ADMIN_PASSWORD_HASH
-
-    CRTC_ADMIN_PASSWORD_HASH must be SHA-256 of the desired password.
-    Keeping the hash in deployment secrets means the password is never
-    committed to GitHub. A setup helper is documented in AUTH_SETUP.md.
-    """
     username = str(st.secrets.get("CRTC_ADMIN_USERNAME", "")).strip()
     password_hash = str(st.secrets.get("CRTC_ADMIN_PASSWORD_HASH", "")).strip().lower()
     return bool(username and len(password_hash) == 64)
 
 
 def _admin_login(username: str, password: str) -> AuthResult | None:
-    """Authenticate the single shared owner/admin account locally.
-
-    Returning None means the dedicated Admin account isn't configured, so
-    the normal Apps Script tester-account login should be attempted.
-    """
     if not _admin_credentials_configured():
         return None
-
     configured_username = str(st.secrets.get("CRTC_ADMIN_USERNAME", "")).strip().lower()
     configured_hash = str(st.secrets.get("CRTC_ADMIN_PASSWORD_HASH", "")).strip().lower()
-    supplied_username = str(username).strip().lower()
-
-    if supplied_username != configured_username:
+    if str(username).strip().lower() != configured_username:
         return None
     if _hash_password(password) != configured_hash:
         return AuthResult(False, error="incorrect password")
+    return AuthResult(True, "Appraze Admin", True, True, configured_username)
 
-    return AuthResult(
-        True,
-        display_name="CRTC Admin",
-        is_admin=True,
-        is_paid=True,
-        username=configured_username,
-    )
+
+def set_authenticated_session(result: AuthResult, *, is_demo: bool = False) -> None:
+    """Set trusted authentication fields and derive the tenant server-side."""
+    st.session_state.authenticated = True
+    st.session_state.user_display_name = result.display_name
+    st.session_state.user_is_admin = result.is_admin
+    st.session_state.user_is_paid = result.is_paid
+    st.session_state.username = result.username
+    st.session_state.user_is_demo = is_demo
+
+    context = tenant_from_session(st.session_state)
+    if context is None:
+        raise RuntimeError("Authenticated session could not establish tenant context.")
+    st.session_state.tenant_id = context.tenant_id
+    st.session_state.user_role = context.role
+
+
+def current_tenant():
+    """Return the server-derived tenant for the current authenticated session."""
+    return tenant_from_session(st.session_state)
+
+
+def login(username: str, password: str) -> AuthResult:
+    admin_result = _admin_login(username, password)
+    if admin_result is not None:
+        return admin_result
+    try:
+        resp = requests.post(
+            _apps_script_url(),
+            data={
+                "token": _token(),
+                "action": "login",
+                "username": username,
+                "password_hash": _hash_password(password),
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("success"):
+            return AuthResult(
+                True,
+                data.get("display_name", username),
+                data.get("is_admin", False),
+                data.get("is_paid", False),
+                data.get("username", username.lower()),
+            )
+        return AuthResult(False, error=data.get("error", "login failed"))
+    except Exception as e:
+        return AuthResult(False, error=f"connection error: {e}")
 
 
 def signup(username: str, password: str, display_name: str = "", admin_code: str = "") -> AuthResult:
     try:
-        # POST, not GET - AppsScript_Code.gs's doPost reads e.parameter the
-        # same way doGet does, but a GET here would put the auth token and
-        # password hash in the URL, where they'd land in server access logs,
-        # any proxy in between, and browser history.
         resp = requests.post(
             _apps_script_url(),
             data={
@@ -115,43 +128,19 @@ def signup(username: str, password: str, display_name: str = "", admin_code: str
         resp.raise_for_status()
         data = resp.json()
         if data.get("success"):
-            return AuthResult(True, data.get("display_name", username), data.get("is_admin", False), data.get("is_paid", False), username=data.get("username", username.lower()))
+            return AuthResult(
+                True,
+                data.get("display_name", username),
+                data.get("is_admin", False),
+                data.get("is_paid", False),
+                data.get("username", username.lower()),
+            )
         return AuthResult(False, error=data.get("error", "signup failed"))
     except Exception as e:
         return AuthResult(False, error=f"connection error: {e}")
 
 
-def login(username: str, password: str) -> AuthResult:
-    # Owner/admin login is intentionally checked first and does not depend on
-    # the Google Sheet being reachable. This gives the two owners one simple
-    # shared login while keeping the existing tester/paid-user system intact.
-    admin_result = _admin_login(username, password)
-    if admin_result is not None:
-        return admin_result
-
-    try:
-        resp = requests.post(
-            _apps_script_url(),
-            data={
-                "token": _token(),
-                "action": "login",
-                "username": username,
-                "password_hash": _hash_password(password),
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("success"):
-            return AuthResult(True, data.get("display_name", username), data.get("is_admin", False), data.get("is_paid", False), username=data.get("username", username.lower()))
-        return AuthResult(False, error=data.get("error", "login failed"))
-    except Exception as e:
-        return AuthResult(False, error=f"connection error: {e}")
-
-
 def mark_paid(username: str) -> bool:
-    """Called once a Stripe Checkout Session is verified as paid — persists it
-    so the person doesn't have to pay again on their next login."""
     try:
         resp = requests.post(
             _apps_script_url(),
@@ -165,17 +154,19 @@ def mark_paid(username: str) -> bool:
 
 
 def render_login_gate() -> bool:
-    """
-    Renders a login/signup form. Returns True if the current session is
-    authenticated (and sets st.session_state.user_display_name / user_is_admin),
-    False otherwise — caller should st.stop() when this returns False.
-    """
     if st.session_state.get("authenticated"):
+        # Re-derive on every page execution so stale/mutated workspace values
+        # cannot silently become an authorization boundary.
+        context = current_tenant()
+        if context is None:
+            st.session_state.authenticated = False
+            return False
+        st.session_state.tenant_id = context.tenant_id
+        st.session_state.user_role = context.role
         return True
 
-    st.markdown("## 🪙 CRTC")
-    st.caption("Cooper River Trading Co. — private workspace")
-
+    st.markdown("## 🪙 Appraze")
+    st.caption("Sign in to your private Appraze workspace")
     tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
 
     with tab_login:
@@ -189,27 +180,19 @@ def render_login_gate() -> bool:
                 else:
                     result = login(u, p)
                     if result.success:
-                        st.session_state.authenticated = True
-                        st.session_state.user_display_name = result.display_name
-                        st.session_state.user_is_admin = result.is_admin
-                        st.session_state.user_is_paid = result.is_paid
-                        st.session_state.username = result.username
+                        set_authenticated_session(result)
                         st.rerun()
                     else:
                         st.error(result.error)
 
     with tab_signup:
-        st.caption("Tester accounts are optional. The two owners use the shared Admin login.")
+        st.caption("Create your own private customer workspace.")
         with st.form("signup_form"):
             new_display = st.text_input("Your name", key="signup_display")
             new_u = st.text_input("Choose a username", key="signup_username")
             new_p = st.text_input("Choose a password", type="password", key="signup_password")
             new_p2 = st.text_input("Confirm password", type="password", key="signup_password2")
-            admin_code = st.text_input(
-                "Admin invite code (leave blank unless you have one)",
-                type="password",
-                key="signup_admin_code",
-            )
+            admin_code = st.text_input("Admin invite code (optional)", type="password", key="signup_admin_code")
             submitted = st.form_submit_button("Create Account", use_container_width=True)
             if submitted:
                 if not new_u or not new_p:
@@ -221,14 +204,8 @@ def render_login_gate() -> bool:
                 else:
                     result = signup(new_u, new_p, new_display, admin_code)
                     if result.success:
-                        st.session_state.authenticated = True
-                        st.session_state.user_display_name = result.display_name
-                        st.session_state.user_is_admin = result.is_admin
-                        st.session_state.user_is_paid = result.is_paid
-                        st.session_state.username = result.username
-                        st.success(f"Welcome, {result.display_name}!")
+                        set_authenticated_session(result)
                         st.rerun()
                     else:
                         st.error(result.error)
-
     return False
