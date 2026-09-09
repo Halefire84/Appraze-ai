@@ -1,13 +1,19 @@
 """
-Cooper River Trading Co. — Appraze Auth Module
+Cooper River Trading Co. — CRTC Auth Module
 ------------------------------------------------
-Talks to the Apps Script Web App backend (see AppsScript_Code.gs) for
-tester signup/login. No Google service account or API key involved —
-just a token-protected HTTP endpoint hitting a "Users" tab on the
-existing Google Sheet.
+Authentication for the CRTC resale intelligence app.
 
-Passwords are SHA-256 hashed client-side before ever leaving the app;
-the Sheet only ever stores the hash, never plaintext.
+Production model:
+- One shared Admin login for the owners (you + Ashley).
+- Admin credentials come from Streamlit secrets, never source control.
+- Admin sessions map to the existing shared `admin_shared` workspace.
+- Public/demo users can use the existing isolated demo mode without
+  touching real account data.
+- Optional tester signup/login remains available for future paid users.
+
+Passwords are SHA-256 hashed client-side before ever leaving the app for
+Apps Script authentication. The production Admin password is compared
+against a SHA-256 hash stored in Streamlit secrets.
 """
 
 import hashlib
@@ -45,6 +51,49 @@ def _token() -> str:
     return token
 
 
+def _admin_credentials_configured() -> bool:
+    """Return True when the dedicated shared Admin login is configured.
+
+    Required secrets:
+      CRTC_ADMIN_USERNAME
+      CRTC_ADMIN_PASSWORD_HASH
+
+    CRTC_ADMIN_PASSWORD_HASH must be SHA-256 of the desired password.
+    Keeping the hash in deployment secrets means the password is never
+    committed to GitHub. A setup helper is documented in AUTH_SETUP.md.
+    """
+    username = str(st.secrets.get("CRTC_ADMIN_USERNAME", "")).strip()
+    password_hash = str(st.secrets.get("CRTC_ADMIN_PASSWORD_HASH", "")).strip().lower()
+    return bool(username and len(password_hash) == 64)
+
+
+def _admin_login(username: str, password: str) -> AuthResult | None:
+    """Authenticate the single shared owner/admin account locally.
+
+    Returning None means the dedicated Admin account isn't configured, so
+    the normal Apps Script tester-account login should be attempted.
+    """
+    if not _admin_credentials_configured():
+        return None
+
+    configured_username = str(st.secrets.get("CRTC_ADMIN_USERNAME", "")).strip().lower()
+    configured_hash = str(st.secrets.get("CRTC_ADMIN_PASSWORD_HASH", "")).strip().lower()
+    supplied_username = str(username).strip().lower()
+
+    if supplied_username != configured_username:
+        return None
+    if _hash_password(password) != configured_hash:
+        return AuthResult(False, error="incorrect password")
+
+    return AuthResult(
+        True,
+        display_name="CRTC Admin",
+        is_admin=True,
+        is_paid=True,
+        username=configured_username,
+    )
+
+
 def signup(username: str, password: str, display_name: str = "", admin_code: str = "") -> AuthResult:
     try:
         # POST, not GET - AppsScript_Code.gs's doPost reads e.parameter the
@@ -73,6 +122,13 @@ def signup(username: str, password: str, display_name: str = "", admin_code: str
 
 
 def login(username: str, password: str) -> AuthResult:
+    # Owner/admin login is intentionally checked first and does not depend on
+    # the Google Sheet being reachable. This gives the two owners one simple
+    # shared login while keeping the existing tester/paid-user system intact.
+    admin_result = _admin_login(username, password)
+    if admin_result is not None:
+        return admin_result
+
     try:
         resp = requests.post(
             _apps_script_url(),
@@ -117,8 +173,8 @@ def render_login_gate() -> bool:
     if st.session_state.get("authenticated"):
         return True
 
-    st.markdown("## 🪙 Appraze")
-    st.caption("Cooper River Trading Co. — beta access")
+    st.markdown("## 🪙 CRTC")
+    st.caption("Cooper River Trading Co. — private workspace")
 
     tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
 
@@ -143,7 +199,7 @@ def render_login_gate() -> bool:
                         st.error(result.error)
 
     with tab_signup:
-        st.caption("Pick your own username and password — no admin needed to set you up.")
+        st.caption("Tester accounts are optional. The two owners use the shared Admin login.")
         with st.form("signup_form"):
             new_display = st.text_input("Your name", key="signup_display")
             new_u = st.text_input("Choose a username", key="signup_username")
