@@ -3,7 +3,7 @@ from auction_radar import rank_auction_catalog, summarize_auction_scan
 
 def _records():
     return [
-        {"lot_id": "A1", "title": "Rolex Submariner rolex", "price": 500, "url": "https://example.test/a1"},
+        {"lot_id": "A1", "title": "vintange gold ring", "price": 500, "url": "https://example.test/a1"},
         {"lot_id": "A2", "title": "ordinary item", "price": 1000, "url": "https://example.test/a2"},
     ]
 

@@ -34,6 +34,6 @@ def test_shopgoodwill_record_reaches_canonical_review_without_comps():
 
 def test_hibid_record_reaches_canonical_borderline_decision():
     candidate = rank_auction_catalog("hibid", _record("hibid"), min_score=0)[0]
-    evidence = enrich_auction_opportunities([candidate], {0: [_comp(80), _comp(100), _comp(120)]})
+    evidence = enrich_auction_opportunities([candidate], {0: [_comp(60), _comp(70), _comp(80)]})
     result = evidence[0]["result"]
     assert result["decision"] == "BORDERLINE"
