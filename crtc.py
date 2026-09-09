@@ -14,6 +14,8 @@ from listing_store import upsert_listing, transition_listing, mark_item_sold
 from storage import load_table, save_table
 
 st.set_page_config(page_title="CRTC — Cross-List", page_icon="🛒", layout="wide")
+from auth import require_auth
+require_auth()
 
 MARKETPLACES = ["eBay", "Etsy", "Facebook Marketplace", "Mercari", "Poshmark", "Depop"]
 TITLE_LIMITS = {"eBay": 80, "Etsy": 140, "Facebook Marketplace": 100, "Mercari": 80, "Poshmark": 80, "Depop": 65}

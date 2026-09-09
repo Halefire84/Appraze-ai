@@ -4,6 +4,8 @@ import streamlit as st
 from acquisition_hunter import PROFILES, estimate_max_bid, score_acquisition
 
 st.set_page_config(page_title="CRTC — Liquidation & Surplus", page_icon="📦", layout="wide")
+from auth import require_auth
+require_auth()
 
 st.title("📦 CRTC Liquidation & Surplus")
 st.caption("Government surplus • computers • phones • Amazon/retail returns • pallets • IT liquidation")

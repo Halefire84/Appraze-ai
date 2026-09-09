@@ -7,6 +7,8 @@ from listing_bridge import build_master_listing
 from storage import load_table, save_table
 
 st.set_page_config(page_title="CRTC — Flip Ledger", page_icon="📊", layout="wide")
+from auth import require_auth
+require_auth()
 st.title("📊 CRTC Flip Ledger")
 st.caption("BUY → PURCHASED → LISTED → SOLD → REALIZED PROFIT")
 

@@ -13,6 +13,8 @@ from opportunity_sources import enrich_ebay_opportunities, scan_ebay, source_sca
 from source_registry import default_source_registry
 
 st.set_page_config(page_title="CRTC — Holy Grail Finder", page_icon="🔥", layout="wide")
+from auth import require_auth
+require_auth()
 st.title("🔥 CRTC Holy Grail Finder")
 st.caption("Find the listings other buyers missed — then verify the opportunity before you buy.")
 st.markdown("**FIND → IDENTIFY → VALUE → DECIDE** · Radar finds the lead; evidence makes the decision.")

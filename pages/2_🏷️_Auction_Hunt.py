@@ -14,6 +14,8 @@ SOURCES = {
 }
 
 st.set_page_config(page_title="CRTC — Auction Hunt", page_icon="🏷️", layout="wide")
+from auth import require_auth
+require_auth()
 st.title("🏷️ CRTC Auction Hunt")
 st.caption("Import a permitted auction catalog/export, then verify the strongest leads with market evidence.")
 st.markdown("**SOURCE → NORMALIZE → RADAR → VALUE → ALL-IN COST → DECIDE**")

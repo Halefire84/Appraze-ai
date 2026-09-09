@@ -17,6 +17,7 @@ against a SHA-256 hash stored in Streamlit secrets.
 """
 
 import hashlib
+import hmac
 from dataclasses import dataclass
 
 import requests
@@ -35,6 +36,22 @@ class AuthResult:
 
 def _hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def _secret(key: str, default: str = "") -> str:
+    """Read one Streamlit secret, failing safe to `default` for ANY error --
+    not just a missing key, but a deployment with no secrets store at all.
+    st.secrets.get(key, default) does NOT protect against that second case:
+    Secrets.get() only falls back to `default` on a missing *key* inside an
+    existing store; when the store itself doesn't exist yet (a fresh deploy
+    before any secret is set), the underlying access raises
+    StreamlitSecretNotFoundError instead of returning. Every credential
+    check in this file goes through here so "no secrets configured yet"
+    means "treat as not configured", never an unhandled crash."""
+    try:
+        return str(st.secrets.get(key, default))
+    except Exception:
+        return default
 
 
 def _apps_script_url() -> str:
@@ -62,8 +79,8 @@ def _admin_credentials_configured() -> bool:
     Keeping the hash in deployment secrets means the password is never
     committed to GitHub. A setup helper is documented in AUTH_SETUP.md.
     """
-    username = str(st.secrets.get("CRTC_ADMIN_USERNAME", "")).strip()
-    password_hash = str(st.secrets.get("CRTC_ADMIN_PASSWORD_HASH", "")).strip().lower()
+    username = _secret("CRTC_ADMIN_USERNAME").strip()
+    password_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
     return bool(username and len(password_hash) == 64)
 
 
@@ -76,13 +93,13 @@ def _admin_login(username: str, password: str) -> AuthResult | None:
     if not _admin_credentials_configured():
         return None
 
-    configured_username = str(st.secrets.get("CRTC_ADMIN_USERNAME", "")).strip().lower()
-    configured_hash = str(st.secrets.get("CRTC_ADMIN_PASSWORD_HASH", "")).strip().lower()
+    configured_username = _secret("CRTC_ADMIN_USERNAME").strip().lower()
+    configured_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
     supplied_username = str(username).strip().lower()
 
     if supplied_username != configured_username:
         return None
-    if _hash_password(password) != configured_hash:
+    if not hmac.compare_digest(_hash_password(password), configured_hash):
         return AuthResult(False, error="incorrect password")
 
     return AuthResult(
@@ -232,3 +249,73 @@ def render_login_gate() -> bool:
                         st.error(result.error)
 
     return False
+
+
+def logout() -> None:
+    """Clear every session key an authenticated session sets. The one place
+    both app.py's sidebar and any future page should call to sign out, so
+    logout can never leave a stale key behind for a page that checks it."""
+    for key in ("authenticated", "user_display_name", "user_is_admin", "user_is_paid", "username"):
+        st.session_state.pop(key, None)
+
+
+def require_auth() -> None:
+    """
+    The one authentication gate every production Streamlit page calls,
+    right after st.set_page_config(), as its first line of real work:
+
+        from auth import require_auth
+        require_auth()
+
+    This is deliberately NOT "check app.py's login and trust pages inherit
+    it" -- Streamlit's pages/ directory makes every page independently
+    reachable by its own URL without app.py's script ever running, so each
+    page must enforce this for itself. require_auth() st.stop()s outright
+    on any unauthenticated path (not configured, wrong credentials, no
+    attempt yet) rather than returning a bool for the caller to check --
+    a page that forgets an `if not require_auth(): st.stop()` check would
+    silently render protected content, which is exactly the bug this
+    exists to close everywhere at once.
+
+    Reuses the existing single shared-Admin credential model (hashed
+    CRTC_ADMIN_USERNAME / CRTC_ADMIN_PASSWORD_HASH secrets, see
+    AUTH_SETUP.md) rather than a new auth system, and rather than the
+    Apps-Script tester/signup path below -- this keeps the app the simple
+    single-workspace Admin tool it's meant to be, not a multi-tenant
+    product. If the Admin secrets aren't configured yet, this fails
+    SAFE: no login form is even rendered (nothing to guess against), and
+    there is no default/fallback password that ever grants access.
+    """
+    if st.session_state.get("authenticated"):
+        return
+
+    st.markdown("## 🪙 CRTC")
+    st.caption("Cooper River Trading Co. — sign in to continue")
+
+    if not _admin_credentials_configured():
+        st.error(
+            "Admin login is not configured for this deployment. Set "
+            "CRTC_ADMIN_USERNAME and CRTC_ADMIN_PASSWORD_HASH in Streamlit "
+            "Secrets before this app can be used — see AUTH_SETUP.md."
+        )
+        st.stop()
+
+    with st.form("crtc_admin_login_form"):
+        username = st.text_input("Username", key="crtc_login_username")
+        password = st.text_input("Password", type="password", key="crtc_login_password")
+        submitted = st.form_submit_button("Sign in", use_container_width=True)
+        if submitted:
+            if not username or not password:
+                st.warning("Enter both a username and password.")
+            else:
+                result = _admin_login(username, password)
+                if result is not None and result.success:
+                    st.session_state.authenticated = True
+                    st.session_state.user_display_name = result.display_name
+                    st.session_state.user_is_admin = result.is_admin
+                    st.session_state.username = result.username
+                    st.rerun()
+                else:
+                    st.error("Incorrect username or password.")
+
+    st.stop()

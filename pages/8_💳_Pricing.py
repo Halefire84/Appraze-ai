@@ -3,6 +3,8 @@ import streamlit as st
 from subscription_plans import PLANS
 
 st.set_page_config(page_title="CRTC Pricing", page_icon="💳", layout="wide")
+from auth import require_auth
+require_auth()
 
 st.title("💳 CRTC Pricing")
 st.caption("Pay for opportunity intelligence — not another spreadsheet.")

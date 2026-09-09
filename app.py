@@ -12,7 +12,6 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 import io
-import secrets
 import base64
 import json
 import urllib.request
@@ -22,6 +21,7 @@ from finance import (
     compute_verdict, deal_roi, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
 )
+from auth import require_auth, logout
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -111,52 +111,16 @@ st.markdown(DARK_CSS, unsafe_allow_html=True)
 # --------------------------------------------------------------------------
 # LOGIN GATE
 # --------------------------------------------------------------------------
-# Single-user login. This template gets customized per customer, so there's
-# just one password gate here rather than multiple named accounts.
-#
-# The password lives in Streamlit's Secrets manager (Settings -> Secrets on
-# Streamlit Community Cloud), never hardcoded here. Set this secret:
-#   APP_PASSWORD = "whatever you pick"
-# If it isn't set yet, the app falls back to a placeholder so it still runs
-# on first deploy - set the real one in Secrets before sharing the link.
+# One shared Admin login, backed by auth.py's existing hashed-credential
+# model (CRTC_ADMIN_USERNAME / CRTC_ADMIN_PASSWORD_HASH secrets -- see
+# AUTH_SETUP.md). require_auth() is the same gate every page under pages/
+# calls independently, since Streamlit does not run this script before a
+# direct page navigation. There is no fallback/default password: if the
+# Admin secrets aren't configured, require_auth() refuses to render a
+# login form at all rather than accepting a guessable placeholder.
+require_auth()
 
 WORKSPACE = "business"
-
-def _get_password() -> str:
-    try:
-        return st.secrets.get("APP_PASSWORD", "changeme")
-    except Exception:
-        return "changeme"
-
-def login_screen():
-    st.markdown(
-        """
-        <div style="max-width:380px;margin:80px auto 0 auto;text-align:center;">
-            <div style="font-size:2rem;font-weight:800;color:#f7f9fc;">🪙 Appraze</div>
-            <div style="color:#8b96a5;margin-top:4px;">Sign in to continue</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    col1, col2, col3 = st.columns([1, 1.4, 1])
-    with col2:
-        st.write("")
-        pwd = st.text_input("Password", type="password", key="login_pwd")
-        expected = _get_password()
-
-        if st.button("Sign in", use_container_width=True):
-            if secrets.compare_digest(pwd, expected):
-                st.session_state.authed = True
-                st.rerun()
-            else:
-                st.error("Wrong password. Set or find the current one under Settings \u2192 Secrets \u2192 APP_PASSWORD.")
-
-if "authed" not in st.session_state:
-    st.session_state.authed = False
-
-if not st.session_state.authed:
-    login_screen()
-    st.stop()
 
 DISPLAY_NAME = "Owner"
 
@@ -217,7 +181,7 @@ with st.sidebar:
     st.markdown("### 🪙 Appraze")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
-        st.session_state.authed = False
+        logout()
         st.rerun()
 
     st.markdown("---")

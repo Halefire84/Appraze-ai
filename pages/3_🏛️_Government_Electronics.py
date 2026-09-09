@@ -7,6 +7,8 @@ from opportunity_sources import scan_ebay
 from source_profiles import get_hunt_profile
 
 st.set_page_config(page_title="CRTC — Government Electronics", page_icon="🏛️", layout="wide")
+from auth import require_auth
+require_auth()
 
 st.title("🏛️ Government, Liquidation & Electronics Hunt")
 st.caption("Find computers, phones, tablets and surplus where the information is incomplete — then calculate the real maximum bid.")

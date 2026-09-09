@@ -10,6 +10,8 @@ from source_registry import default_source_registry
 from source_search import public_search_url
 
 st.set_page_config(page_title="CRTC — Opportunity Radar", page_icon="🔎", layout="wide")
+from auth import require_auth
+require_auth()
 st.title("🔎 CRTC Opportunity Radar")
 st.caption("Find overlooked value, rank the leads, verify the economics, and save the ones worth hunting.")
 
