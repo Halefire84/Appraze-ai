@@ -35,6 +35,9 @@ def _tier(score: float) -> str:
 def score_listing(raw_listing: Dict[str, Any]) -> OpportunityCandidate:
     """Normalize and score a raw listing using the canonical Radar contract."""
     listing = normalize_listing(raw_listing)
+    # Keep the historical alias used by exports/tests while `url` remains the
+    # canonical normalized field for new code.
+    listing["source_url"] = listing.get("url", "")
     result = analyze_listing(listing)
     score = float(result.opportunity_score)
     return OpportunityCandidate(
