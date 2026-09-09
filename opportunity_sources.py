@@ -2,9 +2,16 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from comps_adapters import EbayAuthError, EbayBrowseAdapter, is_ebay_configured
+from comps_adapters import (
+    EbayBrowseAdapter,
+    EbayMarketplaceInsightsAdapter,
+    EbayInsightsNotApprovedError,
+    is_ebay_configured,
+    is_marketplace_insights_configured,
+)
 from holy_grail_pipeline import OpportunityCandidate, rank_opportunities
 from listing_normalizer import normalize_listing
+from valuation_bridge import value_candidate
 
 
 @dataclass(frozen=True)
@@ -41,10 +48,49 @@ def scan_ebay_active(query: str, *, limit: int = 25, min_score: float = 25.0) ->
     return SourceScan("eBay", query, len(normalized), rank_opportunities(normalized, min_score=min_score))
 
 
+def enrich_ebay_opportunities(opportunities: List[OpportunityCandidate], *, limit: int = 10, comps_limit: int = 12) -> Dict[int, Dict[str, Any]]:
+    """Attach real market evidence to the highest-ranked Radar leads.
+
+    Sold evidence is used when eBay Marketplace Insights is approved. When
+    it is not approved, CRTC falls back to official active-listing comps and
+    keeps their confidence low. No sold prices are fabricated or inferred.
+    """
+    evidence: Dict[int, Dict[str, Any]] = {}
+    selected = opportunities[:max(0, int(limit))]
+    use_sold = is_marketplace_insights_configured()
+    sold_adapter = EbayMarketplaceInsightsAdapter() if use_sold else None
+    active_adapter = EbayBrowseAdapter()
+
+    for index, candidate in enumerate(selected):
+        title = str(candidate.listing.get("title") or "").strip()
+        if not title:
+            evidence[index] = {"result": value_candidate(candidate, []), "evidence_type": "none", "count": 0}
+            continue
+        try:
+            if sold_adapter is not None:
+                comps = sold_adapter.fetch_comps(title, limit=comps_limit)
+                evidence_type = "sold"
+            else:
+                comps = active_adapter.fetch_comps(title, limit=comps_limit)
+                evidence_type = "active"
+        except EbayInsightsNotApprovedError:
+            comps = active_adapter.fetch_comps(title, limit=comps_limit)
+            evidence_type = "active"
+        result = value_candidate(candidate, comps)
+        evidence[index] = {
+            "result": result,
+            "evidence_type": evidence_type if comps else "none",
+            "count": len(comps),
+            "sold_count": sum(1 for comp in comps if comp.listing_type == "sold"),
+            "active_count": sum(1 for comp in comps if comp.listing_type == "active"),
+        }
+    return evidence
+
+
 def source_scan_status() -> Dict[str, Dict[str, Any]]:
     """Return source readiness without making a network request."""
     return {"ebay": {
         "key": "ebay", "name": "eBay",
         "status": "ready" if is_ebay_configured() else "needs_credentials",
-        "evidence": "active",
+        "evidence": "sold+active" if is_marketplace_insights_configured() else "active",
     }}
