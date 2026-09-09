@@ -1,4 +1,4 @@
-"""Appraze Opportunity Radar — marketplace listing triage."""
+"""CRTC Holy Grail Finder — primary opportunity-intelligence workflow."""
 
 import pandas as pd
 import streamlit as st
@@ -6,58 +6,139 @@ import streamlit as st
 from comps_adapters import EbayAuthError
 from opportunity_radar import analyze_listing, rank_listings
 from opportunity_sources import scan_ebay
+from source_registry import default_source_registry
 
-st.set_page_config(page_title="Appraze — Opportunity Radar", page_icon="🔎", layout="wide")
+st.set_page_config(page_title="CRTC — Holy Grail Finder", page_icon="🏆", layout="wide")
 
-st.title("🔎 Opportunity Radar")
-st.caption("Find listings that deserve a second look before other buyers notice them.")
-
-st.info(
-    "Radar signals are leads, not proof of value. Always verify authenticity, condition, "
-    "sold comps, shipping, and category before buying."
+# ---------------------------------------------------------------------------
+# CRTC HERO
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <div style="padding:10px 0 4px 0">
+      <div style="font-size:2.25rem;font-weight:800;letter-spacing:-.03em">🏆 Holy Grail Finder</div>
+      <div style="font-size:1.02rem;color:#8b96a5;margin-top:4px">
+        Find the listings other buyers miss — then decide what they are really worth.
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-with st.expander("🚨 Scan eBay for hidden opportunities", expanded=True):
+h1, h2, h3 = st.columns(3)
+with h1:
+    st.metric("FIND", "Hidden deals", "typos + miscategories")
+with h2:
+    st.metric("VALUE", "Evidence first", "active ≠ sold")
+with h3:
+    st.metric("DECIDE", "0–100 Radar", "ranked opportunity")
+
+st.info(
+    "**CRTC does not simply search for expensive items.** It looks for weak titles, spelling errors, "
+    "category mismatches, value gaps, and other signals that can hide a good buy. "
+    "A Radar score is a lead — always verify authenticity, condition, sold comps, shipping, and fees."
+)
+
+# ---------------------------------------------------------------------------
+# SOURCE COVERAGE
+# ---------------------------------------------------------------------------
+registry = default_source_registry()
+all_sources = registry.all()
+enabled_sources = registry.enabled()
+
+with st.expander("🌎 Source coverage", expanded=False):
+    st.caption(
+        "CRTC keeps a broad source map, but automation is enabled only where a legitimate API, "
+        "feed, export, public catalog, or user-provided route exists. No anti-bot bypassing."
+    )
+    cols = st.columns(4)
+    for i, source in enumerate(all_sources):
+        with cols[i % 4]:
+            status = "🟢 Automated" if source in enabled_sources else "⚪ Ready for adapter"
+            st.write(f"**{source.name}**")
+            st.caption(status)
+
+# ---------------------------------------------------------------------------
+# PRIMARY SCAN
+# ---------------------------------------------------------------------------
+st.markdown("## 🔎 Scan for hidden opportunities")
+st.caption("Start with eBay's official API today. The same normalized Radar pipeline is ready for additional permitted sources.")
+
+with st.container(border=True):
     e1, e2, e3 = st.columns([3, 1, 1])
     with e1:
-        ebay_query = st.text_input("Search terms", placeholder="e.g. sterling silver watch")
+        ebay_query = st.text_input(
+            "What are you hunting?",
+            placeholder="e.g. Rolex, sterling silver, vintage tools, Martin guitar",
+            help="Use the terms a normal buyer might search. CRTC scores what the seller actually wrote.",
+        )
     with e2:
         ebay_limit = st.number_input("Listings", min_value=5, max_value=50, value=25, step=5)
     with e3:
-        ebay_min_score = st.number_input("Minimum score", min_value=0.0, max_value=100.0, value=25.0, step=5.0)
+        ebay_min_score = st.number_input("Minimum Radar", min_value=0.0, max_value=100.0, value=25.0, step=5.0)
 
-    if st.button("Scan eBay", type="primary", use_container_width=True):
-        try:
-            with st.spinner("Searching eBay and ranking opportunities…"):
-                scan = scan_ebay(ebay_query, limit=int(ebay_limit), min_score=float(ebay_min_score))
-            st.session_state["ebay_scan"] = scan
-        except EbayAuthError:
-            st.error("eBay is not configured yet. Add EBAY_CLIENT_ID and EBAY_CLIENT_SECRET to Streamlit secrets.")
-        except Exception as exc:
-            st.error(f"eBay scan failed: {exc}")
+    if st.button("🚀 FIND HIDDEN DEALS", type="primary", use_container_width=True):
+        if not ebay_query.strip():
+            st.warning("Enter something to hunt for first.")
+        else:
+            try:
+                with st.spinner("Searching eBay → normalizing listings → looking for hidden signals…"):
+                    scan = scan_ebay(ebay_query, limit=int(ebay_limit), min_score=float(ebay_min_score))
+                st.session_state["ebay_scan"] = scan
+            except EbayAuthError:
+                st.error("eBay is not configured yet. Add EBAY_CLIENT_ID and EBAY_CLIENT_SECRET to Streamlit secrets.")
+            except Exception as exc:
+                st.error(f"eBay scan failed: {exc}")
 
+# ---------------------------------------------------------------------------
+# RESULTS
+# ---------------------------------------------------------------------------
 if "ebay_scan" in st.session_state:
     scan = st.session_state["ebay_scan"]
-    st.markdown(f"### {scan.source} results for `{scan.query}`")
-    st.caption(f"Fetched {scan.fetched} active listings. Asking prices are not sold prices.")
-    if not scan.opportunities:
-        st.info("No listings met the selected opportunity threshold.")
-    for candidate in scan.opportunities:
-        label = f"{candidate.tier} · {candidate.score:.0f}/100"
-        with st.expander(f"{label} — {candidate.listing.get('title', 'Untitled listing')}"):
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Asking", f"${candidate.listing.get('price', 0):,.2f}" if candidate.listing.get('price') is not None else "—")
-            c2.metric("Radar", f"{candidate.score:.0f}/100")
-            c3.metric("Signals", str(len(candidate.signals)))
-            if candidate.listing.get("url"):
-                st.link_button("Open listing", candidate.listing["url"])
-            if candidate.signals:
-                for signal in candidate.signals:
-                    st.write(f"**{signal['severity'].upper()} · +{signal['score']:.0f}** — {signal['message']}")
-            else:
-                st.write("No strong anomaly signals detected.")
+    st.markdown(f"## 🎯 {scan.source} hunt: `{scan.query}`")
+    st.caption(f"{scan.fetched} active listings examined · asking prices only · sold prices are never represented as active evidence")
 
-with st.expander("Add a listing manually", expanded=True):
+    if not scan.opportunities:
+        st.info("No listings met the selected Radar threshold. Try a broader search or lower the minimum score.")
+    else:
+        for candidate in scan.opportunities:
+            score = candidate.score
+            if score >= 95:
+                badge = "🏆 HOLY GRAIL"
+            elif score >= 85:
+                badge = "🔥 EXTREME OPPORTUNITY"
+            elif score >= 70:
+                badge = "🟢 STRONG BUY LEAD"
+            elif score >= 50:
+                badge = "🟡 INVESTIGATE"
+            else:
+                badge = "🔎 WATCH"
+
+            title = candidate.listing.get("title", "Untitled listing")
+            with st.container(border=True):
+                st.markdown(f"### {badge} · {score:.0f}/100")
+                st.markdown(f"**{title}**")
+                c1, c2, c3, c4 = st.columns(4)
+                price = candidate.listing.get("price")
+                c1.metric("Asking", f"${price:,.2f}" if price is not None else "—")
+                c2.metric("Radar", f"{score:.0f}/100")
+                c3.metric("Signals", str(len(candidate.signals)))
+                c4.metric("Review", "YES" if candidate.review else "—")
+
+                if candidate.listing.get("url"):
+                    st.link_button("Open listing", candidate.listing["url"])
+
+                if candidate.signals:
+                    st.markdown("**Why CRTC flagged it**")
+                    for signal in candidate.signals:
+                        st.write(f"**{signal['severity'].upper()} · +{signal['score']:.0f}** — {signal['message']}")
+                else:
+                    st.caption("No individual anomaly signals were returned for this candidate.")
+
+# ---------------------------------------------------------------------------
+# MANUAL LISTING ANALYSIS
+# ---------------------------------------------------------------------------
+with st.expander("🧪 Analyze a listing you found anywhere", expanded=False):
     c1, c2 = st.columns([2, 1])
     with c1:
         title = st.text_input("Title", placeholder="e.g. vinta ge 14k gold chain")
@@ -88,8 +169,8 @@ if "radar_last" in st.session_state:
         st.success(f"🔥 EXTREME OPPORTUNITY — {score:.0f}/100")
     elif score >= 70:
         st.success(f"🟢 STRONG BUY LEAD — {score:.0f}/100")
-    elif score >= 40:
-        st.warning(f"🟡 WORTH REVIEW — {score:.0f}/100")
+    elif score >= 50:
+        st.warning(f"🟡 INVESTIGATE — {score:.0f}/100")
     elif score >= 25:
         st.info(f"🔎 REVIEW — {score:.0f}/100")
     else:
@@ -102,8 +183,11 @@ if "radar_last" in st.session_state:
     else:
         st.write("No strong anomaly signals detected.")
 
+# ---------------------------------------------------------------------------
+# BATCH IMPORT
+# ---------------------------------------------------------------------------
 st.markdown("---")
-st.markdown("#### Batch scan")
+st.markdown("## 📥 Batch scan")
 st.caption("Upload a CSV with columns such as title, description, category, price, and estimated_value.")
 
 uploaded = st.file_uploader("Listing CSV", type=["csv"])
@@ -126,3 +210,5 @@ if uploaded:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     except Exception as exc:
         st.error(f"Could not scan this CSV: {exc}")
+
+st.caption("CRTC · Cooper River Trading Co. · FIND → IDENTIFY → VALUE → DECIDE → BUY → TRACK → LIST → SELL → MEASURE")
