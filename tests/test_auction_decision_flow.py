@@ -2,11 +2,11 @@ from auction_radar import enrich_auction_opportunities, rank_auction_catalog
 from comps import Comp
 
 
-def _record(source):
+def _record(source, price=50):
     return [{
         "lot_id": "LOT-1",
         "title": "Vintage watch",
-        "price": 50,
+        "price": price,
         "buyer_premium": 10,
         "shipping": 5,
         "url": "https://example.test/lot-1",
@@ -33,7 +33,7 @@ def test_shopgoodwill_record_reaches_canonical_review_without_comps():
 
 
 def test_hibid_record_reaches_canonical_borderline_decision():
-    candidate = rank_auction_catalog("hibid", _record("hibid"), min_score=0)[0]
+    candidate = rank_auction_catalog("hibid", _record("hibid", price=65), min_score=0)[0]
     evidence = enrich_auction_opportunities([candidate], {0: [_comp(80), _comp(100), _comp(120)]})
     result = evidence[0]["result"]
     assert result["decision"] == "BORDERLINE"
