@@ -21,6 +21,7 @@ class NormalizedListing:
     description: str = ""
     category: str = ""
     price: Optional[float] = None
+    quantity: Optional[float] = None
     auction_end: Optional[str] = None
     seller: str = ""
     location: str = ""
@@ -90,6 +91,10 @@ def _expected_keywords(category: str, title: str, description: str) -> tuple:
         "musical instruments": ("guitar", "violin", "piano", "instrument", "amp", "drum"),
         "tools": ("tool", "drill", "saw", "welder", "compressor", "mower"),
         "cameras": ("camera", "lens", "nikon", "canon", "leica", "sony"),
+        "electronics": ("electronics", "computer", "laptop", "desktop", "monitor", "receiver", "stereo", "audio", "speaker", "console", "tablet", "phone", "printer"),
+        "computers": ("computer", "laptop", "desktop", "macbook", "thinkpad", "surface", "server", "workstation"),
+        "video games": ("game", "gaming", "console", "playstation", "xbox", "nintendo", "switch"),
+        "industrial": ("industrial", "machine", "pump", "motor", "generator", "compressor", "cnc", "lathe", "equipment"),
     }
     for label, keywords in groups.items():
         if label in value:
@@ -98,13 +103,7 @@ def _expected_keywords(category: str, title: str, description: str) -> tuple:
 
 
 def normalize_listing(record: Mapping[str, Any], *, source: str = "") -> Dict[str, Any]:
-    """Normalize a source record into the CRTC common listing schema.
-
-    Common aliases such as ``name``/``title``, ``asking_price``/``price`` and
-    ``source_url``/``url`` are accepted so adapters remain small. Unknown
-    fields are intentionally ignored rather than leaking source-specific
-    assumptions into the Radar contract.
-    """
+    """Normalize a source record into the CRTC common listing schema."""
     resolved_source = _text(source or _first(record, ("source", "marketplace", "site")))
     title = _text(_first(record, ("title", "name", "listing_title", "item_title")))
     description = _text(_first(record, ("description", "details", "item_description", "short_description")))
@@ -125,6 +124,7 @@ def normalize_listing(record: Mapping[str, Any], *, source: str = "") -> Dict[st
         description=description,
         category=category,
         price=_number(_first(record, ("price", "asking_price", "current_bid", "current_price", "amount"), None)),
+        quantity=_number(_first(record, ("quantity", "qty", "units", "unit_count", "count", "item_count"), None)),
         auction_end=_text(_first(record, ("auction_end", "end_time", "itemEndDate", "ends_at"), None)) or None,
         seller=_text(_first(record, ("seller", "seller_name", "auctioneer"))),
         location=_text(_first(record, ("location", "item_location", "pickup_location"))),
