@@ -7,6 +7,7 @@ belongs to source adapters; this module never scrapes or bypasses controls.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
+from crtc_opportunity import build_opportunity
 from listing_normalizer import normalize_listing
 from opportunity_radar import analyze_listing
 
@@ -35,8 +36,6 @@ def _tier(score: float) -> str:
 def score_listing(raw_listing: Dict[str, Any]) -> OpportunityCandidate:
     """Normalize and score a raw listing using the canonical Radar contract."""
     listing = normalize_listing(raw_listing)
-    # Keep the historical alias used by exports/tests while `url` remains the
-    # canonical normalized field for new code.
     listing["source_url"] = listing.get("url", "")
     result = analyze_listing(listing)
     score = float(result.opportunity_score)
@@ -46,12 +45,8 @@ def score_listing(raw_listing: Dict[str, Any]) -> OpportunityCandidate:
         review=bool(result.review_required),
         tier=_tier(score),
         signals=[
-            {
-                "code": signal.code,
-                "severity": signal.severity,
-                "score": signal.score,
-                "message": signal.message,
-            }
+            {"code": signal.code, "severity": signal.severity,
+             "score": signal.score, "message": signal.message}
             for signal in result.signals
         ],
     )
@@ -69,16 +64,19 @@ def rank_opportunities(
     )
 
 
+def opportunity_result(candidate: OpportunityCandidate, **kwargs: Any) -> Dict[str, Any]:
+    """Return the dedicated CRTC result contract for UI/API consumers."""
+    result = build_opportunity(candidate, **kwargs).to_dict()
+    result["signals"] = candidate.signals
+    return result
+
+
 def opportunity_summary(candidate: OpportunityCandidate) -> Dict[str, Any]:
-    """Return a UI/API-safe summary for cards, exports, and future dashboards."""
-    return {
-        "source": candidate.listing.get("source"),
-        "title": candidate.listing.get("title"),
-        "url": candidate.listing.get("source_url") or candidate.listing.get("url"),
-        "price": candidate.listing.get("price"),
-        "estimated_value": candidate.listing.get("estimated_value"),
-        "score": candidate.score,
-        "tier": candidate.tier,
-        "review_required": candidate.review,
-        "signals": candidate.signals,
-    }
+    """Backward-compatible summary for cards, exports, and dashboards."""
+    result = opportunity_result(candidate)
+    result["price"] = result["asking_price"]
+    result["estimated_value"] = result["market_value"]
+    result["score"] = result["radar_score"]
+    result["tier"] = result["radar_tier"]
+    result["review_required"] = candidate.review
+    return result
