@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from flip_ledger import build_flip_record, update_flip
+from listing_bridge import build_master_listing
 from storage import load_table, save_table
 
 st.set_page_config(page_title="CRTC — Flip Ledger", page_icon="📊", layout="wide")
@@ -48,11 +49,10 @@ with st.container(border=True):
             cost_basis = st.number_input("Cost basis", min_value=0.0, value=0.0, step=1.0)
         with c2:
             list_price = st.number_input("List price", min_value=0.0, value=0.0, step=5.0)
-            status = st.selectbox("Status", ["PURCHASED", "LISTED", "SOLD", "PASSED"])
             sale_price = st.number_input("Sale price", min_value=0.0, value=0.0, step=5.0)
         submitted = st.form_submit_button("ADD FLIP", type="primary", use_container_width=True)
     if submitted:
-        record = build_flip_record({"item_name": item_name, "source": source, "cost_basis": cost_basis}, status=status)
+        record = build_flip_record({"item_name": item_name, "source": source, "cost_basis": cost_basis}, status="PURCHASED")
         record = update_flip(record, list_price=list_price, sale_price=sale_price)
         ledger.append(record)
         st.session_state["crtc_flip_ledger"] = ledger
@@ -77,7 +77,13 @@ if ledger:
                 st.caption(f"{record.get('source', '')} · {record.get('source_listing_id', '')} · Cost basis ${float(record.get('cost_basis', 0) or 0):,.2f}")
             with right:
                 current = record.get("status", "PURCHASED")
-                new_status = st.selectbox("Status", ["PURCHASED", "LISTED", "SOLD", "PASSED"], index=["PURCHASED", "LISTED", "SOLD", "PASSED"].index(current), key=f"status_{i}")
+                allowed = {
+                    "PURCHASED": ["PURCHASED", "LISTED", "PASSED"],
+                    "LISTED": ["LISTED", "SOLD", "PASSED"],
+                    "SOLD": ["SOLD"],
+                    "PASSED": ["PASSED"],
+                }.get(current, [current])
+                new_status = st.selectbox("Status", allowed, index=0, key=f"status_{i}")
             c1, c2, c3, c4 = st.columns(4)
             list_price = c1.number_input("List price", min_value=0.0, value=float(record.get("list_price", 0) or 0), step=5.0, key=f"list_{i}")
             sale_price = c2.number_input("Sale price", min_value=0.0, value=float(record.get("sale_price", 0) or 0), step=5.0, key=f"sale_{i}")
@@ -90,11 +96,27 @@ if ledger:
                 p2.metric("Realized profit", f"${preview['profit']:,.2f}")
                 p3.metric("ROI", "∞" if preview['roi_pct'] == float('inf') else f"{preview['roi_pct']:.1f}%")
             if st.button("SAVE CHANGES", key=f"save_{i}", use_container_width=True):
-                ledger[i] = update_flip(record, status=new_status, list_price=list_price, sale_price=sale_price, platform_fee_pct=fee_pct, shipping_out=ship_out)
-                st.session_state["crtc_flip_ledger"] = ledger
-                result = save_table(pd.DataFrame(ledger), "flip_ledger")
-                st.session_state["crtc_flip_storage_message"] = "Ledger saved." if result.success else f"Updated locally; save failed: {result.error}"
-                st.rerun()
+                try:
+                    updated = update_flip(record, status=new_status, list_price=list_price, sale_price=sale_price, platform_fee_pct=fee_pct, shipping_out=ship_out)
+                    if new_status == "LISTED" and record.get("status") != "LISTED":
+                        master = build_master_listing(updated)
+                        st.session_state["crtc_master_listing"] = master
+                        master_result = save_table(pd.DataFrame([master]), "listing_masters")
+                        if not master_result.success:
+                            st.session_state["crtc_flip_storage_message"] = f"Flip updated; master listing queued locally because save failed: {master_result.error}"
+                    ledger[i] = updated
+                    st.session_state["crtc_flip_ledger"] = ledger
+                    result = save_table(pd.DataFrame(ledger), "flip_ledger")
+                    if result.success:
+                        if new_status == "LISTED" and record.get("status") != "LISTED":
+                            st.session_state["crtc_flip_storage_message"] = "Flip marked LISTED and master listing sent to Cross-List."
+                        else:
+                            st.session_state["crtc_flip_storage_message"] = "Ledger saved."
+                    else:
+                        st.session_state["crtc_flip_storage_message"] = f"Updated locally; save failed: {result.error}"
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
     st.markdown("### 📋 Ledger export")
     st.download_button("Export CSV", pd.DataFrame(ledger).to_csv(index=False), "crtc-flip-ledger.csv", "text/csv", use_container_width=True)
