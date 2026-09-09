@@ -34,3 +34,33 @@ def test_value_gap_can_surface_opportunity():
     })
     assert result.opportunity_score >= 25
     assert result.review_required
+
+
+def test_bulk_lot_is_flagged_even_without_a_category():
+    result = analyze_listing({
+        "title": "Lot of assorted laptops",
+        "description": "Untested warehouse liquidation, 25 units.",
+        "price": 150,
+    })
+    assert any(signal.code == "bulk_quantity" for signal in result.signals)
+    assert any(signal.code == "liquidation_lot" for signal in result.signals)
+    assert result.review_required
+
+
+def test_brand_hidden_in_description_is_flagged():
+    result = analyze_listing({
+        "title": "Old stereo receiver",
+        "description": "Marantz model 2270, powers on. Estate sale.",
+        "price": 40,
+    })
+    assert any(signal.code == "brand_hidden_in_description" for signal in result.signals)
+    assert any(signal.code == "model_number_hidden" for signal in result.signals)
+
+
+def test_precious_material_marker_is_supported_beyond_gold():
+    result = analyze_listing({
+        "title": "Old silver bracelet",
+        "description": "Marked 925 sterling, estate piece.",
+        "price": 20,
+    })
+    assert any(signal.code == "precious_material_present" for signal in result.signals)
