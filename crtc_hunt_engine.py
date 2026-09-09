@@ -25,6 +25,7 @@ def analyze_listing(listing: Dict[str, Any], profile_key: str = "modern_computer
 
     holy = score_listing(normalized)
     acquisition = score_acquisition(normalized, profile_key)
+    signal_dicts = holy.signals
 
     combined = round((float(holy.score) * 0.55) + (float(acquisition["score"]) * 0.45), 1)
     if combined >= 85:
@@ -41,8 +42,8 @@ def analyze_listing(listing: Dict[str, Any], profile_key: str = "modern_computer
         "holy_grail": {
             "score": holy.score,
             "tier": holy.tier,
-            "signals": [s.code for s in holy.signals],
-            "reasons": [s.message for s in holy.signals],
+            "signals": [s["code"] for s in signal_dicts],
+            "reasons": [s["message"] for s in signal_dicts],
         },
         "acquisition": acquisition,
         "combined_score": combined,
