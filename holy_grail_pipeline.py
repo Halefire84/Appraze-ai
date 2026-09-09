@@ -5,10 +5,10 @@ optionally enriched with existing market-comps evidence. Network acquisition
 belongs to source adapters; this module never scrapes or bypasses controls.
 """
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from listing_normalizer import normalize_listing
-from opportunity_radar import analyze_listing
+from opportunity_result import build_opportunity_result
 
 
 @dataclass
@@ -18,6 +18,8 @@ class OpportunityCandidate:
     review: bool
     tier: str
     signals: List[Dict[str, Any]] = field(default_factory=list)
+    verdict: Optional[str] = None
+    max_buy_price: Optional[float] = None
 
 
 def _tier(score: float) -> str:
@@ -38,7 +40,8 @@ def score_listing(raw_listing: Dict[str, Any]) -> OpportunityCandidate:
     # Keep the historical alias used by exports/tests while `url` remains the
     # canonical normalized field for new code.
     listing["source_url"] = listing.get("url", "")
-    result = analyze_listing(listing)
+    opportunity = build_opportunity_result(listing)
+    result = opportunity.radar
     score = float(result.opportunity_score)
     return OpportunityCandidate(
         listing=listing,
@@ -54,6 +57,8 @@ def score_listing(raw_listing: Dict[str, Any]) -> OpportunityCandidate:
             }
             for signal in result.signals
         ],
+        verdict=opportunity.verdict,
+        max_buy_price=opportunity.max_buy_price,
     )
 
 
@@ -81,4 +86,6 @@ def opportunity_summary(candidate: OpportunityCandidate) -> Dict[str, Any]:
         "tier": candidate.tier,
         "review_required": candidate.review,
         "signals": candidate.signals,
+        "verdict": candidate.verdict,
+        "max_buy_price": candidate.max_buy_price,
     }

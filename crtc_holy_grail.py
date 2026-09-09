@@ -104,13 +104,18 @@ if scan is not None:
                 "Asking": listing.get("price"),
                 "Title": listing.get("title", "Untitled"),
                 "Condition": listing.get("condition", ""),
+                "Verdict": item.verdict or "—",
+                "Max buy": item.max_buy_price,
                 "Why it surfaced": "; ".join(signal["message"] for signal in item.signals),
             })
         st.dataframe(
             pd.DataFrame(rows),
             use_container_width=True,
             hide_index=True,
-            column_config={"Asking": st.column_config.NumberColumn(format="$%.2f")},
+            column_config={
+                "Asking": st.column_config.NumberColumn(format="$%.2f"),
+                "Max buy": st.column_config.NumberColumn(format="$%.2f"),
+            },
         )
 
         st.markdown("### 🎯 Top opportunities")
@@ -123,6 +128,13 @@ if scan is not None:
                     st.markdown(f"**{listing.get('title', 'Untitled')}**")
                     price = float(listing.get("price") or 0)
                     st.write(f"**Asking price:** ${price:,.2f}  ·  **CRTC Radar:** {item.score:.0f}/100")
+                    if item.verdict:
+                        st.write(f"**CRTC verdict:** {item.verdict}" + (
+                            f"  ·  **Max buy price:** ${item.max_buy_price:,.2f}" if item.max_buy_price is not None else ""
+                        ))
+                        st.caption("Verdict is computed by finance.py from asking price vs. estimated value — never from the Radar score alone.")
+                    elif item.max_buy_price is not None:
+                        st.write(f"**Max buy price:** ${item.max_buy_price:,.2f}")
                     if item.signals:
                         st.markdown("**Why CRTC surfaced it:**")
                         for signal in item.signals:
