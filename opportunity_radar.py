@@ -66,7 +66,7 @@ def detect_typos(title: str, description: str = "") -> List[RadarSignal]:
     found: List[RadarSignal] = []
     for typo, correction in _COMMON_TYPOS.items():
         if re.search(rf"\b{re.escape(typo)}\b", text):
-            found.append(RadarSignal("title_description_typo", "high", 24, f"Possible spelling error: '{typo}' → '{correction}'."))
+            found.append(RadarSignal("title_description_typo", "high", 25, f"Possible spelling error: '{typo}' → '{correction}'."))
     return found
 
 
