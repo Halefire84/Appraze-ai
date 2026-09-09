@@ -10,7 +10,8 @@ def test_auction_without_premium_stays_review():
 def test_auction_buy_uses_all_in_target():
     result = build_deal_workspace({"source": "HiBid", "price": 50, "buyer_premium": 20, "shipping": 10}, 100, "HIGH")
     assert result["decision"] == "BUY"
-    assert result["max_bid"] == 75.0
+    assert result["max_bid"] == 50.0
+    assert result["all_in"]["all_in_cost"] == 70.0
 
 
 def test_missing_market_value_stays_review():
