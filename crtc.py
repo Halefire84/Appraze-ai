@@ -74,8 +74,8 @@ def publish_mock(draft: Dict) -> Dict:
         ),
     }
 
-if "master" not in st.session_state:
-    st.session_state.master = MasterItem(
+if "master_item" not in st.session_state:
+    st.session_state.master_item = MasterItem(
         sku="CRTC-000001",
         title="Vintage Martin Acoustic-Electric Guitar",
         description=(
@@ -104,9 +104,9 @@ left, right = st.columns([1.25, 1])
 
 with left:
     st.subheader("Master Listing")
-    m = st.session_state.master
+    m = st.session_state.master_item
 
-    with st.form("master"):
+    with st.form("master_listing_form"):
         sku = st.text_input("SKU", m.sku)
         title = st.text_input("Title", m.title)
         description = st.text_area("Description", m.description, height=130)
@@ -138,14 +138,14 @@ with left:
         )
 
     if save:
-        st.session_state.master = MasterItem(
+        st.session_state.master_item = MasterItem(
             sku, title, description, category, price,
             cost, quantity, condition, m.photos
         )
         st.session_state.drafts = {}
         st.success("Master item saved. Marketplace drafts regenerated from this master.")
 
-    m = st.session_state.master
+    m = st.session_state.master_item
     profit = m.price - m.cost
     margin = (profit / m.price * 100) if m.price else 0
 
@@ -170,7 +170,7 @@ with right:
         use_container_width=True,
     ):
         st.session_state.drafts = {
-            name: adapt_item(st.session_state.master, name)
+            name: adapt_item(st.session_state.master_item, name)
             for name in selected
         }
         st.success(
@@ -251,13 +251,13 @@ q1, q2, q3 = st.columns(3)
 with q1:
     if st.button("↻ Sync Quantity", use_container_width=True):
         st.toast(
-            f"Master quantity is {st.session_state.master.quantity}. "
+            f"Master quantity is {st.session_state.master_item.quantity}. "
             "Prototype sync complete."
         )
 
 with q2:
     payload = {
-        "master": asdict(st.session_state.master),
+        "master": asdict(st.session_state.master_item),
         "marketplace_drafts": st.session_state.drafts,
     }
     st.download_button(
@@ -272,7 +272,7 @@ with q3:
     if st.button("Mark Item Sold", use_container_width=True):
         for draft in st.session_state.drafts.values():
             draft["status"] = "SOLD / DEACTIVATE"
-        st.session_state.master.quantity = 0
+        st.session_state.master_item.quantity = 0
         st.success(
             "Master inventory marked sold. All marketplace drafts are "
             "flagged for deactivation."
