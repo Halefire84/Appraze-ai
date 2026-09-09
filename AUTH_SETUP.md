@@ -1,6 +1,6 @@
 # CRTC Authentication Setup
 
-CRTC uses two access paths:
+CRTC uses three access paths:
 
 1. **Shared Admin** — one owner login used by both owners. Admin data is stored in the existing shared `admin_shared` workspace.
 2. **Demo** — public, no-signup sample mode. Demo data is isolated from real accounts and is never persisted to the real workspace.
@@ -15,18 +15,18 @@ CRTC_ADMIN_USERNAME = "admin"
 CRTC_ADMIN_PASSWORD_HASH = "<SHA-256 hash of your chosen password>"
 ```
 
-For the requested initial password `Changeme`, the SHA-256 hash is:
+For the requested initial password `Changeme`, the correct SHA-256 hash is:
 
-`f2f2f0e1f7e3b8e0e9f4d9e4a6b8c7f0f8b0f8f8d3b1c2d2a3f4b5c6d7e8f9a0`
+`9370287b2e0de984e2a3b46a2f5841f2fd843a376a7a014f2598ac85ebac232b`
 
-**Important:** that example hash is intentionally not treated as a production credential. Before deployment, generate the SHA-256 hash from the exact password you want and replace the placeholder. The production password should be changed immediately after the first successful deployment.
+**Important:** `Changeme` is a temporary bootstrap password, not a production password. Change it before public launch. Never commit the plaintext password or the hash to source control.
 
-### Android-friendly way to generate the hash
+### Android-friendly way to generate a new hash
 
 If you have Python/Termux available:
 
 ```bash
-python -c "import hashlib; print(hashlib.sha256(b'Changeme').hexdigest())"
+python -c "import hashlib; print(hashlib.sha256(b'YOUR_NEW_PASSWORD').hexdigest())"
 ```
 
 Then put the resulting value in your Streamlit secrets.
