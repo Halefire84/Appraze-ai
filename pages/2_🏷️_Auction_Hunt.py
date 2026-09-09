@@ -1,11 +1,11 @@
-"""CRTC Auction Hunt — import permitted auction catalogs and score the best leads."""
+"""CRTC Auction Hunt — import permitted auction catalogs and verify leads."""
 import json
 
 import pandas as pd
 import streamlit as st
 
-from auction_radar import rank_auction_catalog
-from auction_valuation import value_auction_opportunities
+from auction_radar import enrich_auction_opportunities, rank_auction_catalog
+from comps import Comp
 
 SOURCES = {
     "CTBids / Estate Auctions": "ctbids",
@@ -15,13 +15,19 @@ SOURCES = {
 
 st.set_page_config(page_title="CRTC — Auction Hunt", page_icon="🏷️", layout="wide")
 st.title("🏷️ CRTC Auction Hunt")
-st.caption("Import a permitted auction catalog/export, then let the same CRTC Radar find the strongest leads.")
+st.caption("Import a permitted auction catalog/export, then verify the strongest leads with market evidence.")
 st.markdown("**SOURCE → NORMALIZE → RADAR → VALUE → ALL-IN COST → DECIDE**")
 
 with st.container(border=True):
     source_name = st.selectbox("Auction source", list(SOURCES))
     min_score = st.number_input("Minimum Radar score", min_value=0, max_value=95, value=25, step=5)
     uploaded = st.file_uploader("Upload CSV or JSON catalog/export", type=["csv", "json"])
+    st.markdown("#### Market evidence for the selected auction leads")
+    st.caption("Enter comparable prices from permitted/manual research. CRTC will not turn asking prices into sold evidence.")
+    comp1 = st.number_input("Comparable 1 — sold price", min_value=0.0, value=0.0, step=10.0)
+    comp2 = st.number_input("Comparable 2 — sold price", min_value=0.0, value=0.0, step=10.0)
+    comp3 = st.number_input("Comparable 3 — sold price", min_value=0.0, value=0.0, step=10.0)
+    comp_active = st.number_input("Optional active asking-price comp", min_value=0.0, value=0.0, step=10.0)
     scan_clicked = st.button("🔥 SCAN AUCTION CATALOG", type="primary", use_container_width=True)
 
 if scan_clicked:
@@ -37,8 +43,14 @@ if scan_clicked:
                 records = payload if isinstance(payload, list) else payload.get("records", [])
             if not isinstance(records, list):
                 raise ValueError("Catalog must contain a list of records.")
+
             opportunities = rank_auction_catalog(SOURCES[source_name], records, min_score=float(min_score))
-            evidence = value_auction_opportunities(opportunities, limit=10, comps_limit=12)
+            comps = [Comp(price=value, source="Manual", listing_type="sold") for value in (comp1, comp2, comp3) if value > 0]
+            if comp_active > 0:
+                comps.append(Comp(price=comp_active, source="Manual", listing_type="active"))
+            comps_by_index = {index: comps for index in range(min(len(opportunities), 10))}
+            evidence = enrich_auction_opportunities(opportunities[:10], comps_by_index)
+
             st.session_state["crtc_auction_opportunities"] = opportunities
             st.session_state["crtc_auction_evidence"] = evidence
             st.session_state["crtc_auction_source"] = source_name
@@ -62,7 +74,7 @@ if opportunities:
             "Bid": result["asking_price"] if result else candidate.listing.get("price"),
             "All-in cost": cost.get("all_in_cost"),
             "Market value": result["market_value"] if result else None,
-            "Max bid": meta.get("max_bid"),
+            "Max buy": result["max_buy_price"] if result else None,
             "Confidence": result["market_confidence"] if result else "UNKNOWN",
             "Source": candidate.listing.get("source", source_name),
             "Lot ID": candidate.listing.get("source_listing_id", ""),
@@ -73,7 +85,7 @@ if opportunities:
                      "Bid": st.column_config.NumberColumn(format="$%.2f"),
                      "All-in cost": st.column_config.NumberColumn(format="$%.2f"),
                      "Market value": st.column_config.NumberColumn(format="$%.2f"),
-                     "Max bid": st.column_config.NumberColumn(format="$%.2f"),
+                     "Max buy": st.column_config.NumberColumn(format="$%.2f"),
                  })
 
     st.markdown("### 🎯 Best auction opportunities")
@@ -98,9 +110,9 @@ if opportunities:
                 st.write(f"**All-in at current bid:** ${cost['all_in_cost']:,.2f} · **Buyer premium:** {premium_text} · **Shipping:** {shipping_text}")
 
             if result and result["market_value"] is not None:
-                max_bid = meta.get("max_bid")
-                max_bid_text = f"${max_bid:,.2f}" if max_bid is not None else "UNKNOWN"
-                st.write(f"**Market value:** ${result['market_value']:,.2f} · **70% max bid:** {max_bid_text}")
+                max_buy = result.get("max_buy_price")
+                max_buy_text = f"${max_buy:,.2f}" if max_buy is not None else "UNKNOWN"
+                st.write(f"**Market value:** ${result['market_value']:,.2f} · **70% max buy:** {max_buy_text}")
                 st.write(f"**Confidence:** {result['market_confidence']} · **Evidence:** {meta.get('sold_count', 0)} sold / {meta.get('active_count', 0)} active")
                 if result["decision"] == "BUY":
                     st.success(f"CRTC: **BUY** — {result['reason']}")
