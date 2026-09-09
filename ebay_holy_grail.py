@@ -36,7 +36,14 @@ def _fetch(query: str, limit: int) -> List[Dict[str, object]]:
     response = requests.get(
         SEARCH_URL,
         headers={"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
-        params={"q": query, "limit": min(max(int(limit), 1), 200), "sort": "endingSoonest", "filter": "price:[0..150]"},
+        params={
+            "q": query,
+            "limit": min(max(int(limit), 1), 200),
+            "sort": "endingSoonest",
+            # CRTC's primary hunt is auction-first. Fixed-price listings are
+            # useful for comps, but they should not dilute the last-chance hunt.
+            "filter": "price:[0..150],priceCurrency:USD,buyingOptions:{AUCTION}",
+        },
         timeout=25,
     )
     response.raise_for_status()
@@ -81,6 +88,8 @@ def scan_ebay_last_chance(
                     "price": price_value, "auction_end": end_dt.isoformat(),
                     "condition": item.get("condition", ""),
                     "location": ((item.get("itemLocation") or {}).get("city") or ""),
+                    "bid_count": item.get("bidCount"),
+                    "buying_options": item.get("buyingOptions", []),
                 }
         except Exception as exc:
             errors.append(f"{query}: {exc}")
