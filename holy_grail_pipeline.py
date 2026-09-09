@@ -5,7 +5,7 @@ optionally enriched with existing market-comps evidence. Network acquisition
 belongs to source adapters; this module never scrapes or bypasses controls.
 """
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from listing_normalizer import normalize_listing
 from opportunity_radar import analyze_listing
@@ -33,18 +33,49 @@ def _tier(score: float) -> str:
 
 
 def score_listing(raw_listing: Dict[str, Any]) -> OpportunityCandidate:
+    """Normalize and score a raw listing using the canonical Radar contract."""
     listing = normalize_listing(raw_listing)
     result = analyze_listing(listing)
-    score = float(result.score)
+    score = float(result.opportunity_score)
     return OpportunityCandidate(
         listing=listing,
         score=score,
-        review=bool(result.review),
+        review=bool(result.review_required),
         tier=_tier(score),
-        signals=[{"kind": s.kind, "message": s.message, "weight": s.weight} for s in result.signals],
+        signals=[
+            {
+                "code": signal.code,
+                "severity": signal.severity,
+                "score": signal.score,
+                "message": signal.message,
+            }
+            for signal in result.signals
+        ],
     )
 
 
-def rank_opportunities(raw_listings: List[Dict[str, Any]], min_score: float = 25.0) -> List[OpportunityCandidate]:
+def rank_opportunities(
+    raw_listings: List[Dict[str, Any]], min_score: float = 25.0
+) -> List[OpportunityCandidate]:
+    """Return qualifying opportunities in descending Radar score order."""
     candidates = [score_listing(item) for item in raw_listings]
-    return sorted((c for c in candidates if c.score >= min_score), key=lambda c: c.score, reverse=True)
+    return sorted(
+        (candidate for candidate in candidates if candidate.score >= min_score),
+        key=lambda candidate: candidate.score,
+        reverse=True,
+    )
+
+
+def opportunity_summary(candidate: OpportunityCandidate) -> Dict[str, Any]:
+    """Return a UI/API-safe summary for cards, exports, and future dashboards."""
+    return {
+        "source": candidate.listing.get("source"),
+        "title": candidate.listing.get("title"),
+        "url": candidate.listing.get("source_url") or candidate.listing.get("url"),
+        "price": candidate.listing.get("price"),
+        "estimated_value": candidate.listing.get("estimated_value"),
+        "score": candidate.score,
+        "tier": candidate.tier,
+        "review_required": candidate.review,
+        "signals": candidate.signals,
+    }
