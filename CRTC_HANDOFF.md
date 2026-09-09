@@ -1,7 +1,7 @@
 # CRTC — Project Handoff Point
 
-**Canonical repository:** Halefire84/Appraze-ai
-**Product direction:** CRTC (Cooper River Trading Co.)
+**Canonical repository:** Halefire84/Appraze-ai  
+**Product direction:** CRTC (Cooper River Trading Co.)  
 **Last handoff:** 2026-09-09
 
 ## Current state
@@ -26,15 +26,99 @@ Holy-grail opportunity signals include:
 - unusually low asking price versus credible market evidence
 - combinations of multiple weak signals that make a listing worth human review
 
+## Holy Grail multi-source discovery
+CRTC should NOT depend on one marketplace. Build the acquisition layer as a pluggable source registry so new legitimate sources can be added without changing the Radar/scoring engine.
+
+### Priority source groups
+1. **Core resale marketplaces / auction platforms**
+   - eBay
+   - HiBid
+   - Proxibid
+   - LiveAuctioneers
+   - Invaluable
+   - AuctionZip / auctioneer discovery
+   - Everything But The House (EBTH)
+   - MaxSold
+   - CTBids / Estate Auctions
+   - ShopGoodwill / Goodwill auctions
+
+2. **Government, municipal, police and institutional surplus**
+   - GSA Auctions
+   - GovDeals
+   - Public Surplus
+   - GovPlanet
+   - PropertyRoom
+   - Municibid
+   - Purple Wave
+   - state/local government surplus portals
+   - police/seized-property auctions
+   - school, university, airport, hospital and other institutional surplus auctions
+
+3. **Local and regional auction houses**
+   - independent online-only estate auctions
+   - estate-liquidation companies
+   - bankruptcy and business-liquidation auctions
+   - industrial/equipment auctions
+   - farm and construction auctions
+   - storage-unit / abandoned-property auctions where legally accessible
+   - local auctioneer catalogs and directories
+
+4. **Specialty opportunity sources to evaluate**
+   - storage/locker auction platforms
+   - retail returns/liquidation marketplaces
+   - commercial liquidation platforms
+   - jewelry/watch/coin specialty auctions
+   - vintage/collectibles specialty auctions
+   - regional charity/thrift auctions
+
+### Source discovery rule
+The source list is intentionally expandable. CRTC should maintain a source registry with fields such as:
+- source name
+- source type/category
+- geographic coverage
+- acquisition method (official API, permitted feed/export, public catalog, user-provided data, etc.)
+- active/sold evidence capability
+- category coverage
+- source URL
+- rate/usage limits
+- terms/compliance notes
+- enabled/disabled status
+
+CRTC should periodically identify additional legitimate auction platforms and regional sources that are likely to contain resale opportunities, then add them through adapters rather than hard-coding source-specific logic into the Radar.
+
+Do not treat an aggregator as the authoritative source when the original auction listing is available. Preserve the original auction URL and source identity so the user can verify the lot and bid directly.
+
+## Holy Grail detection across sources
+Every source should be transformed into a common listing schema before scoring. The normalized record should preserve, when available:
+- source and source listing ID
+- original URL
+- title
+- description
+- category
+- asking/current bid price
+- auction end time
+- seller/auctioneer identity
+- location and pickup/shipping information
+- buyer premium and known fees
+- images/image URLs when permitted
+- condition
+- lot number
+- estimated value / market evidence
+
+Radar should then look for the same anomaly classes across every source: typos, weak metadata, title/description contradictions, category errors, suspiciously low prices, incomplete brand/model identifiers, and combinations of weak signals. It should also learn source-specific patterns without changing the core scoring contract.
+
 ## Next implementation target
 Connect the Opportunity Radar to the existing legitimate marketplace acquisition layer, beginning with eBay Browse API results. Preserve source URLs and listing metadata, normalize records into the Radar schema, score/rank them, and present the highest-priority candidates.
+
+Then add the multi-source adapter/registry architecture, prioritizing CTBids/Estate Auctions, ShopGoodwill, HiBid, and other sources where legitimate acquisition is available. Add sources incrementally and test each adapter with mocked data rather than relying on live-network tests.
 
 Then connect promising candidates to the existing valuation/comps and CRTC verdict workflow.
 
 ## Guardrails
 - Do not build anti-bot bypasses or evasion tooling.
-- Prefer official APIs, permitted feeds, exports, and user-supplied data.
-- Radar scores are leads, not proof. Authenticity, condition, sold comps, fees, shipping, and category must be verified before a purchase decision.
+- Prefer official APIs, permitted feeds, exports, public catalogs where permitted, and user-supplied data.
+- Respect each source's terms, robots/access controls, rate limits, authentication requirements, and licensing restrictions.
+- Radar scores are leads, not proof. Authenticity, condition, sold comps, fees, shipping, pickup costs, and category must be verified before a purchase decision.
 - Preserve the existing application architecture and tests.
 - Avoid duplicating the valuation/verdict engines when existing modules can be reused.
 
