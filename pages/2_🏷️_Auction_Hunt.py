@@ -30,7 +30,8 @@ if scan_clicked:
     else:
         try:
             if uploaded.name.lower().endswith(".csv"):
-                records = pd.read_csv(uploaded).where(pd.notna(pd.read_csv(uploaded)), None).to_dict("records")
+                frame = pd.read_csv(uploaded)
+                records = frame.where(pd.notna(frame), None).to_dict("records")
             else:
                 payload = json.load(uploaded)
                 records = payload if isinstance(payload, list) else payload.get("records", [])
@@ -79,15 +80,22 @@ if opportunities:
             st.markdown(f"### #{rank} · {candidate.tier}")
             st.write(f"**{candidate.listing.get('title') or 'Untitled'}**")
             asking = candidate.listing.get("price")
-            st.write(f"**Asking:** ${float(asking):,.2f} · **Radar:** {candidate.score:.0f}/100 · **Lot:** {candidate.listing.get('source_listing_id', '')}") if asking is not None else st.write(f"**Radar:** {candidate.score:.0f}/100 · **Lot:** {candidate.listing.get('source_listing_id', '')}")
+            if asking is not None:
+                st.write(f"**Asking:** ${float(asking):,.2f} · **Radar:** {candidate.score:.0f}/100 · **Lot:** {candidate.listing.get('source_listing_id', '')}")
+            else:
+                st.write(f"**Radar:** {candidate.score:.0f}/100 · **Lot:** {candidate.listing.get('source_listing_id', '')}")
             if result and result["market_value"] is not None:
                 st.write(f"**Market value:** ${result['market_value']:,.2f} · **Max buy:** ${result['max_buy_price']:,.2f}")
                 st.write(f"**Confidence:** {result['market_confidence']} · **Evidence:** {meta.get('sold_count', 0)} sold / {meta.get('active_count', 0)} active")
-                st.success(f"CRTC: **{result['decision']}** — {result['reason']}") if result["decision"] == "BUY" else st.info(f"CRTC: **{result['decision']}** — {result['reason']}")
+                if result["decision"] == "BUY":
+                    st.success(f"CRTC: **{result['decision']}** — {result['reason']}")
+                else:
+                    st.info(f"CRTC: **{result['decision']}** — {result['reason']}")
             else:
                 st.warning("REVIEW — no usable market-value evidence yet.")
-            if candidate.listing.get("source_url") or candidate.listing.get("url"):
-                st.link_button("Open original auction lot", candidate.listing.get("source_url") or candidate.listing.get("url"), use_container_width=False)
+            url = candidate.listing.get("source_url") or candidate.listing.get("url")
+            if url:
+                st.link_button("Open original auction lot", url)
             for signal in candidate.signals[:5]:
                 st.caption(f"• {signal['message']}")
 else:
