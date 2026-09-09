@@ -92,5 +92,5 @@ def source_scan_status() -> Dict[str, Dict[str, Any]]:
     return {"ebay": {
         "key": "ebay", "name": "eBay",
         "status": "ready" if is_ebay_configured() else "needs_credentials",
-        "evidence": "sold+active" if is_marketplace_insights_configured() else "active",
+        "evidence": "active (sold API approval checked during scan)",
     }}
