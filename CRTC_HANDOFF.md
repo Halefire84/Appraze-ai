@@ -11,6 +11,10 @@
 - Streamlit page exists at `pages/1_🔎_Opportunity_Radar.py`.
 - Existing eBay Browse API adapter can retrieve active listings through the official API.
 - Existing comps architecture distinguishes active asking prices from sold/completed-sale evidence.
+- New `listing_normalizer.py` converts source-specific records into the common CRTC listing schema.
+- New `tests/test_listing_normalizer.py` covers alias handling, metadata preservation, and batch normalization.
+- New `source_registry.py` contains the expandable legitimate-source registry, with eBay currently the only automated source enabled by default.
+- New `tests/test_source_registry.py` covers registry behavior and safe source onboarding.
 
 ## Product vision
 CRTC is the resale opportunity-intelligence system inside the existing Appraze codebase.
@@ -108,11 +112,11 @@ Every source should be transformed into a common listing schema before scoring. 
 Radar should then look for the same anomaly classes across every source: typos, weak metadata, title/description contradictions, category errors, suspiciously low prices, incomplete brand/model identifiers, and combinations of weak signals. It should also learn source-specific patterns without changing the core scoring contract.
 
 ## Next implementation target
-Connect the Opportunity Radar to the existing legitimate marketplace acquisition layer, beginning with eBay Browse API results. Preserve source URLs and listing metadata, normalize records into the Radar schema, score/rank them, and present the highest-priority candidates.
-
-Then add the multi-source adapter/registry architecture, prioritizing CTBids/Estate Auctions, ShopGoodwill, HiBid, and other sources where legitimate acquisition is available. Add sources incrementally and test each adapter with mocked data rather than relying on live-network tests.
-
-Then connect promising candidates to the existing valuation/comps and CRTC verdict workflow.
+1. Connect the existing eBay Browse acquisition to `listing_normalizer.py`, preserving the richer listing fields instead of reducing everything immediately to `Comp` objects.
+2. Feed normalized eBay records into Opportunity Radar and rank the live candidates while preserving original listing URLs.
+3. Add a dedicated CRTC opportunity result model/UI that separates Radar lead score from market-value confidence and eventual BUY/PASS.
+4. Add source adapters incrementally, prioritizing CTBids/Estate Auctions, ShopGoodwill, HiBid, and other sources where legitimate acquisition is available.
+5. Connect promising candidates to the existing valuation/comps and CRTC verdict workflow.
 
 ## Guardrails
 - Do not build anti-bot bypasses or evasion tooling.
@@ -126,4 +130,4 @@ Then connect promising candidates to the existing valuation/comps and CRTC verdi
 Use **CRTC** as the product-facing name going forward. The GitHub repository name may remain `Appraze-ai` until a deliberate repository rename is made. Do not rename files or break imports merely for branding.
 
 ## Handoff instruction
-If context/usage runs out, resume from this document. First inspect the current repository state and recent commits, then continue with the "Next implementation target" above. Do not rebuild prior work.
+If context/usage runs out, resume from this document. First inspect the current repository state and recent commits, then continue with the numbered "Next implementation target" above. Do not rebuild prior work.
