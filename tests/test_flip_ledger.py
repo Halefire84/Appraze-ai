@@ -31,7 +31,8 @@ def test_intake_becomes_canonical_flip():
 
 def test_sold_update_calculates_realized_profit():
     record = build_flip_record({"item_name": "Camera", "cost_basis": 75})
-    sold = update_flip(record, status="SOLD", sale_price=150, platform_fee_pct=13, shipping_out=10)
+    listed = update_flip(record, status="LISTED", list_price=150)
+    sold = update_flip(listed, status="SOLD", sale_price=150, platform_fee_pct=13, shipping_out=10)
     assert sold["profit"] == 45.5
     assert sold["status"] == "SOLD"
 
@@ -40,6 +41,26 @@ def test_invalid_status_is_rejected():
     record = build_flip_record({"item_name": "Camera", "cost_basis": 75})
     try:
         update_flip(record, status="WHATEVER")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_lifecycle_rejects_skipping_purchase_to_sold():
+    record = build_flip_record({"item_name": "Camera", "cost_basis": 75})
+    try:
+        update_flip(record, status="SOLD", sale_price=150)
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_terminal_sold_cannot_be_reopened():
+    record = build_flip_record({"item_name": "Camera", "cost_basis": 75})
+    listed = update_flip(record, status="LISTED", list_price=150)
+    sold = update_flip(listed, status="SOLD", sale_price=150)
+    try:
+        update_flip(sold, status="PURCHASED")
         assert False, "expected ValueError"
     except ValueError:
         pass
