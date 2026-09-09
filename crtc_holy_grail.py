@@ -6,8 +6,7 @@ recommendation only when market-value evidence is available.
 import pandas as pd
 import streamlit as st
 
-from holy_grail_pipeline import opportunity_result
-from opportunity_sources import scan_ebay, source_scan_status
+from opportunity_sources import enrich_ebay_opportunities, scan_ebay, source_scan_status
 from source_registry import default_source_registry
 
 st.set_page_config(page_title="CRTC — Holy Grail Finder", page_icon="🔥", layout="wide")
@@ -33,12 +32,16 @@ if scan_clicked:
         st.warning("eBay is not configured yet. Add EBAY_CLIENT_ID and EBAY_CLIENT_SECRET to deployment secrets.")
     else:
         try:
-            with st.spinner("Scanning active eBay listings and looking for overlooked opportunities…"):
-                st.session_state["crtc_holy_grail_scan"] = scan_ebay(query, limit=int(limit), min_score=float(min_score))
+            with st.spinner("Scanning eBay and building market evidence for the strongest leads…"):
+                scan = scan_ebay(query, limit=int(limit), min_score=float(min_score))
+                evidence = enrich_ebay_opportunities(scan.opportunities, limit=10, comps_limit=12)
+                st.session_state["crtc_holy_grail_scan"] = scan
+                st.session_state["crtc_holy_grail_evidence"] = evidence
         except Exception as exc:
             st.error(f"The market scan failed: {exc}")
 
 scan = st.session_state.get("crtc_holy_grail_scan")
+evidence = st.session_state.get("crtc_holy_grail_evidence", {})
 
 with st.expander("🌎 CRTC source coverage", expanded=False):
     registry = default_source_registry()
@@ -55,14 +58,23 @@ with st.expander("🌎 CRTC source coverage", expanded=False):
 if scan is not None:
     opportunities = scan.opportunities
     st.success(f"Scanned {scan.fetched} active eBay listings · {len(opportunities)} passed the {min_score:g}+ Radar threshold.")
-    st.caption("Evidence type: **ACTIVE ASKING PRICE** — not sold-price evidence.")
+    if evidence:
+        sold_total = sum(v.get("sold_count", 0) for v in evidence.values())
+        active_total = sum(v.get("active_count", 0) for v in evidence.values())
+        if sold_total:
+            st.caption(f"Market evidence: **{sold_total} sold comps** across the top leads, plus {active_total} active comps.")
+        else:
+            st.caption(f"Market evidence: **{active_total} active asking-price comps**. Sold-price evidence is not available for this account, so confidence remains low.")
 
     if not opportunities:
         st.info("No qualifying opportunities yet. Lower the minimum score, broaden the search, or try a different term.")
     else:
         rows = []
-        for item in opportunities:
-            result = opportunity_result(item)
+        for index, item in enumerate(opportunities):
+            result = evidence.get(index, {}).get("result")
+            if result is None:
+                from holy_grail_pipeline import opportunity_result
+                result = opportunity_result(item)
             rows.append({
                 "Radar": round(result["radar_score"]),
                 "Decision": result["decision"],
@@ -81,7 +93,11 @@ if scan is not None:
 
         st.markdown("### 🎯 Top opportunities")
         for rank, item in enumerate(opportunities[:10], start=1):
-            result = opportunity_result(item)
+            result = evidence.get(rank - 1, {}).get("result")
+            meta = evidence.get(rank - 1, {})
+            if result is None:
+                from holy_grail_pipeline import opportunity_result
+                result = opportunity_result(item)
             with st.container(border=True):
                 left, right = st.columns([4, 1])
                 with left:
@@ -92,6 +108,7 @@ if scan is not None:
                     if result["market_value"] is not None:
                         st.write(f"**Market value:** ${result['market_value']:,.2f}  ·  **Max buy:** ${result['max_buy_price']:,.2f}")
                         st.write(f"**Market confidence:** {result['market_confidence']}")
+                        st.caption(f"Evidence: {meta.get('sold_count', 0)} sold · {meta.get('active_count', 0)} active")
                     else:
                         st.warning("REVIEW — market-value evidence is required before CRTC recommends buying.")
                     st.info(f"**CRTC decision: {result['decision']}** — {result['reason']}")
