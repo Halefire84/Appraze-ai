@@ -28,6 +28,11 @@ GOLD_PURITY = {
 }
 SILVER_PURITY = {
     "Sterling / 925": 0.925, "Coin Silver / 900": 0.900, "Fine Silver / 999": 0.999,
+    # Backwards-compatible alias for the pre-rewrite label — same 92.5%
+    # sterling purity, not a second calculation. Kept out of app.py's own
+    # dict construction order above so the live UI's default/first option
+    # is unaffected; callers keyed to the old label still resolve correctly.
+    "Sterling (.925)": 0.925,
 }
 
 
