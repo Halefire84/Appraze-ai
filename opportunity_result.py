@@ -1,4 +1,4 @@
-"""CRTC opportunity result contract.
+"""CRTC canonical opportunity result contract.
 
 Keeps three decisions separate: anomaly lead strength (Radar), market-value
 confidence (comps/valuation), and purchase verdict (CRTC). A Radar hit is never
@@ -22,11 +22,17 @@ class OpportunityResult:
     rationale: Tuple[str, ...] = ()
 
 
-def build_opportunity_result(listing: dict, *, market_value: Optional[float] = None,
-                             market_confidence: str = "unknown",
-                             verdict: Optional[str] = None,
-                             max_buy_price: Optional[float] = None) -> OpportunityResult:
-    radar = analyze_listing({**listing, "estimated_value": market_value or listing.get("estimated_value")})
+def build_opportunity_result(
+    listing: dict,
+    *,
+    market_value: Optional[float] = None,
+    market_confidence: str = "unknown",
+    verdict: Optional[str] = None,
+    max_buy_price: Optional[float] = None,
+) -> OpportunityResult:
+    """Build a result without conflating missing/zero valuation evidence."""
+    evidence_value = market_value if market_value is not None else listing.get("estimated_value")
+    radar = analyze_listing({**listing, "estimated_value": evidence_value})
     rationale = tuple(signal.message for signal in radar.signals)
     return OpportunityResult(
         listing=dict(listing),
