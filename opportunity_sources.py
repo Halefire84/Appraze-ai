@@ -1,9 +1,4 @@
-"""Legitimate acquisition-to-Radar bridges for CRTC.
-
-Adapters return raw source records; this module converts them into the
-canonical listing contract and scores them. No scraping, CAPTCHA solving,
-or anti-bot bypass is performed here.
-"""
+"""Legitimate acquisition-to-Radar bridges for CRTC."""
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
@@ -21,47 +16,35 @@ class SourceScan:
 
 
 def scan_ebay(query: str, *, limit: int = 25, min_score: float = 25.0) -> SourceScan:
-    """Search eBay active listings through the official Browse API, then rank them.
+    """Run the CRTC last-chance eBay hunt: <=24h, $100 primary, $150 hard max."""
+    if not query.strip():
+        return SourceScan("eBay", query, 0, [])
+    from ebay_holy_grail import scan_ebay_last_chance
+    result = scan_ebay_last_chance(
+        [query], limit_per_query=limit, primary_ceiling=100.0,
+        absolute_ceiling=150.0, hours=24, min_score=min_score,
+    )
+    return SourceScan("eBay", query, int(result["fetched"]), list(result["opportunities"]))
 
-    Active asking prices are not sold comps and are never presented as sold evidence.
-    """
+
+def scan_ebay_active(query: str, *, limit: int = 25, min_score: float = 25.0) -> SourceScan:
+    """Legacy active-listing scan retained for the Market Comps workflow."""
     if not query.strip():
         return SourceScan("eBay", query, 0, [])
     comps = EbayBrowseAdapter().fetch_comps(query, limit=limit)
-    raw = [
-        {
-            "source": "eBay",
-            "source_listing_id": "",
-            "url": comp.url,
-            "title": comp.title,
-            "description": "",
-            "price": comp.price,
-            "condition": comp.condition,
-            "shipping": comp.shipping,
-        }
-        for comp in comps
-    ]
+    raw = [{
+        "source": "eBay", "source_listing_id": "", "url": comp.url,
+        "title": comp.title, "description": "", "price": comp.price,
+        "condition": comp.condition, "shipping": comp.shipping,
+    } for comp in comps]
     normalized = [normalize_listing(item) for item in raw]
-    return SourceScan(
-        "eBay", query, len(normalized),
-        rank_opportunities(normalized, min_score=min_score),
-    )
+    return SourceScan("eBay", query, len(normalized), rank_opportunities(normalized, min_score=min_score))
 
 
 def source_scan_status() -> Dict[str, Dict[str, Any]]:
     """Return source readiness without making a network request."""
-    if is_ebay_configured():
-        ebay = {
-            "key": "ebay",
-            "name": "eBay",
-            "status": "ready",
-            "evidence": "active",
-        }
-    else:
-        ebay = {
-            "key": "ebay",
-            "name": "eBay",
-            "status": "needs_credentials",
-            "evidence": "active",
-        }
-    return {"ebay": ebay}
+    return {"ebay": {
+        "key": "ebay", "name": "eBay",
+        "status": "ready" if is_ebay_configured() else "needs_credentials",
+        "evidence": "active",
+    }}
