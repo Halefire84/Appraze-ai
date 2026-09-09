@@ -54,7 +54,24 @@ def publish_mock(draft: Dict) -> Dict:
     return transition_listing(draft, "READY_TO_PUBLISH", external_id=f"DEMO-{draft['sku']}-{draft['marketplace'].upper().replace(' ', '-')[:8]}")
 
 if "master" not in st.session_state:
-    st.session_state.master = MasterItem("CRTC-000001", "Vintage Martin Acoustic-Electric Guitar", "Vintage acoustic-electric guitar in very good used condition. Includes case. See photos for condition details.", "Musical Instruments", 1249.00, 350.00, 1, "Used — Very Good", ["photo-1", "photo-2", "photo-3"])
+    master_rows = load_table("listing_masters")
+    saved_master = (master_rows.payload or [])[-1] if master_rows.success and master_rows.payload else None
+    if saved_master:
+        st.session_state.master = MasterItem(
+            str(saved_master.get("sku") or "CRTC-ITEM"),
+            str(saved_master.get("title") or "Untitled item"),
+            str(saved_master.get("description") or ""),
+            str(saved_master.get("category") or ""),
+            float(saved_master.get("price") or 0),
+            float(saved_master.get("cost") or 0),
+            max(1, int(saved_master.get("quantity") or 1)),
+            str(saved_master.get("condition") or "Used"),
+            list(saved_master.get("photos") or []),
+        )
+        st.session_state["master_source"] = "Flip Ledger"
+    else:
+        st.session_state.master = MasterItem("CRTC-000001", "Vintage Martin Acoustic-Electric Guitar", "Vintage acoustic-electric guitar in very good used condition. Includes case. See photos for condition details.", "Musical Instruments", 1249.00, 350.00, 1, "Used — Very Good", ["photo-1", "photo-2", "photo-3"])
+        st.session_state["master_source"] = "Demo"
 
 if "drafts" not in st.session_state:
     loaded = load_table("listing_drafts")
@@ -65,6 +82,8 @@ if "drafts" not in st.session_state:
 st.title("🛒 CRTC Cross-List Command Center")
 st.caption("One master inventory record → marketplace-specific drafts → approved publishing integrations")
 st.info(st.session_state.get("listing_storage_message", ""))
+if st.session_state.get("master_source") == "Flip Ledger":
+    st.success("Master listing received from Flip Ledger. Generate marketplace drafts below.")
 
 left, right = st.columns([1.25, 1])
 with left:
