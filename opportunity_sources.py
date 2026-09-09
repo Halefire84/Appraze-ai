@@ -7,7 +7,7 @@ or anti-bot bypass is performed here.
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from comps_adapters import EbayAuthError, EbayBrowseAdapter
+from comps_adapters import EbayAuthError, EbayBrowseAdapter, is_ebay_configured
 from holy_grail_pipeline import OpportunityCandidate, rank_opportunities
 from listing_normalizer import normalize_listing
 
@@ -42,16 +42,26 @@ def scan_ebay(query: str, *, limit: int = 25, min_score: float = 25.0) -> Source
         for comp in comps
     ]
     normalized = [normalize_listing(item) for item in raw]
-    return SourceScan("eBay", query, len(normalized), rank_opportunities(normalized, min_score=min_score))
+    return SourceScan(
+        "eBay", query, len(normalized),
+        rank_opportunities(normalized, min_score=min_score),
+    )
 
 
 def source_scan_status() -> Dict[str, Dict[str, Any]]:
-    """Machine-readable source readiness for the UI and future adapters."""
-    try:
-        EbayBrowseAdapter().fetch_comps("test", limit=1)
-        ebay = {"key": "ebay", "name": "eBay", "status": "ready", "evidence": "active"}
-    except EbayAuthError:
-        ebay = {"key": "ebay", "name": "eBay", "status": "needs_credentials", "evidence": "active"}
-    except Exception as exc:
-        ebay = {"key": "ebay", "name": "eBay", "status": "error", "evidence": "active", "error": str(exc)}
+    """Return source readiness without making a network request."""
+    if is_ebay_configured():
+        ebay = {
+            "key": "ebay",
+            "name": "eBay",
+            "status": "ready",
+            "evidence": "active",
+        }
+    else:
+        ebay = {
+            "key": "ebay",
+            "name": "eBay",
+            "status": "needs_credentials",
+            "evidence": "active",
+        }
     return {"ebay": ebay}
