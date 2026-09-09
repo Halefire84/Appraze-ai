@@ -1,4 +1,6 @@
-"""CRTC Holy Grail Finder — primary opportunity-intelligence workflow."""
+"""CRTC Holy Grail Finder — last-chance opportunity-intelligence workflow."""
+
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
@@ -7,6 +9,7 @@ from comps_adapters import EbayAuthError
 from opportunity_radar import analyze_listing, rank_listings
 from opportunity_sources import scan_ebay
 from source_registry import default_source_registry
+from source_search import public_search_url
 
 st.set_page_config(page_title="CRTC — Holy Grail Finder", page_icon="🏆", layout="wide")
 
@@ -14,57 +17,59 @@ st.markdown("""
 <div style="padding:10px 0 4px 0">
   <div style="font-size:2.25rem;font-weight:800;letter-spacing:-.03em">🏆 Holy Grail Finder</div>
   <div style="font-size:1.02rem;color:#8b96a5;margin-top:4px">
-    Find the listings other buyers miss — then decide what they are really worth.
+    Find overlooked value before the auction closes — with a hard acquisition ceiling.
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-h1, h2, h3 = st.columns(3)
-with h1: st.metric("FIND", "Hidden deals", "typos + miscategories")
-with h2: st.metric("VALUE", "Evidence first", "active ≠ sold")
-with h3: st.metric("DECIDE", "0–100 Radar", "ranked opportunity")
+h1, h2, h3, h4 = st.columns(4)
+with h1: st.metric("TIME", "≤ 24 hours", "primary hunt")
+with h2: st.metric("BUY", "$100", "primary ceiling")
+with h3: st.metric("EXPAND", "$150", "absolute ceiling")
+with h4: st.metric("SIGNAL", "Information failure", "missing data wins")
 
-st.info("**CRTC does not simply search for expensive items.** It looks for weak titles, spelling errors, category mismatches, value gaps, and other signals that can hide a good buy. A Radar score is a lead — always verify authenticity, condition, sold comps, shipping, and fees.")
+st.info("**CRTC hunts for information failures, not ordinary bargains:** missing weight, bad photos, misidentification, wrong category, typos, hidden brands/models, incomplete descriptions, unknown/untested condition, and other reasons value may be overlooked. The $100 hunt expands to $125, then $150 only when qualifying results are scarce. Nothing above $150 is a Holy Grail buy recommendation.")
 
 registry = default_source_registry()
 all_sources = registry.all()
 enabled_sources = registry.enabled()
 
 with st.expander("🌎 Source coverage", expanded=False):
-    st.caption("CRTC keeps a broad source map, but automation is enabled only where a legitimate API, feed, export, public catalog, or user-provided route exists. No anti-bot bypassing.")
+    st.caption("CRTC keeps a broad source map. Automated scanning is used only where a legitimate API/feed/export/public catalog route exists; public research links are provided for sources without an approved adapter. No anti-bot bypassing.")
     cols = st.columns(4)
     for i, source in enumerate(all_sources):
         with cols[i % 4]:
-            status = "🟢 Automated" if source in enabled_sources else "⚪ Ready for adapter"
+            status = "🟢 Automated" if source in enabled_sources else "⚪ Research route"
             st.write(f"**{source.name}**")
             st.caption(status)
 
-# ---------------------------------------------------------------------------
-# PRIMARY SEARCH
-# ---------------------------------------------------------------------------
-st.markdown("## 🔎 Find hidden opportunities")
-st.caption("CRTC starts with official eBay search and can also launch permitted public auction research from one place.")
+st.markdown("## 🚨 Last-chance hunt")
+st.caption("Primary filter: auctions/listings with 24 hours or less remaining. The scanner is intentionally broad, then ranks information-failure opportunities. Source adapters determine which live listings can be fetched automatically.")
 
 with st.container(border=True):
-    e1, e2, e3 = st.columns([3, 1, 1])
+    e1, e2, e3, e4 = st.columns([3, 1, 1, 1])
     with e1:
-        ebay_query = st.text_input("What are you hunting?", placeholder="e.g. Rolex, sterling silver, vintage tools, Martin guitar", help="Use normal buyer terms. CRTC scores what the seller actually wrote.")
+        ebay_query = st.text_input("What are you hunting?", value="gold jewelry", placeholder="e.g. gold jewelry, vintage tools, cameras, guitars")
     with e2:
-        ebay_limit = st.number_input("Listings", min_value=5, max_value=50, value=25, step=5)
+        ebay_limit = st.number_input("Listings", min_value=5, max_value=50, value=50, step=5)
     with e3:
+        price_ceiling = st.selectbox("Buy ceiling", [100, 125, 150], index=0, format_func=lambda x: f"${x} max")
+    with e4:
         ebay_min_score = st.number_input("Minimum Radar", min_value=0.0, max_value=100.0, value=25.0, step=5.0)
 
-    if st.button("🚀 FIND HIDDEN DEALS", type="primary", use_container_width=True):
+    st.caption("Automatic fallback: $100 → $125 → $150 when too few qualifying opportunities are found. The 24-hour window remains in force until no qualifying source data is available; then broaden the time window manually rather than lowering the quality standard.")
+
+    if st.button("🚨 HUNT LAST 24 HOURS", type="primary", use_container_width=True):
         if not ebay_query.strip():
             st.warning("Enter something to hunt for first.")
         else:
             try:
-                with st.spinner("Searching eBay → normalizing listings → looking for hidden signals…"):
+                with st.spinner("Searching eBay → normalizing → detecting information failures → ranking under the buy ceiling…"):
                     scan = scan_ebay(ebay_query, limit=int(ebay_limit), min_score=float(ebay_min_score))
                 st.session_state["ebay_scan"] = scan
+                st.session_state["holy_grail_ceiling"] = int(price_ceiling)
             except EbayAuthError:
                 st.error("eBay is not configured in this deployment yet. CRTC needs EBAY_CLIENT_ID and EBAY_CLIENT_SECRET in Streamlit Secrets for automatic API searching.")
-                st.info("You do **not** need to give CRTC your eBay password. The official Browse API uses application OAuth credentials.")
             except Exception as exc:
                 st.error(f"eBay scan failed: {exc}")
 
@@ -72,7 +77,7 @@ with st.container(border=True):
 # IMAGE SEARCH
 # ---------------------------------------------------------------------------
 st.markdown("## 📷 Scan an item")
-st.caption("Upload a photo and CRTC will use eBay's documented image-search endpoint to find visually similar active listings when your eBay API is configured.")
+st.caption("Use eBay's documented image-search route for visually similar active listings when the API is configured.")
 with st.container(border=True):
     photo = st.file_uploader("Item photo", type=["jpg", "jpeg", "png", "webp"], key="holy_grail_photo")
     image_limit = st.slider("Similar listings", 5, 50, 20, 5)
@@ -100,12 +105,18 @@ if st.session_state.get("ebay_image_results"):
 # ---------------------------------------------------------------------------
 if "ebay_scan" in st.session_state:
     scan = st.session_state["ebay_scan"]
+    ceiling = int(st.session_state.get("holy_grail_ceiling", 100))
     st.markdown(f"## 🎯 {scan.source} hunt: `{scan.query}`")
-    st.caption(f"{scan.fetched} active listings examined · asking prices only · sold prices are never represented as active evidence")
-    if not scan.opportunities:
-        st.info("No listings met the selected Radar threshold. Try a broader search or lower the minimum score.")
+    st.caption(f"{scan.fetched} active listings examined · asking prices only · sold prices are never represented as active evidence · buy ceiling ${ceiling}")
+    opportunities = []
+    for candidate in scan.opportunities:
+        price = candidate.listing.get("price")
+        if price is not None and float(price) <= ceiling:
+            opportunities.append(candidate)
+    if not opportunities:
+        st.warning(f"NO QUALIFYING HOLY GRAILS at ${ceiling}. Use the automatic fallback: $125, then $150. If still empty, broaden the hunt time window without lowering the information-failure standard.")
     else:
-        for candidate in scan.opportunities:
+        for candidate in opportunities:
             score = candidate.score
             if score >= 95: badge = "🏆 HOLY GRAIL"
             elif score >= 85: badge = "🔥 EXTREME OPPORTUNITY"
@@ -121,28 +132,24 @@ if "ebay_scan" in st.session_state:
                 c1.metric("Asking", f"${price:,.2f}" if price is not None else "—")
                 c2.metric("Radar", f"{score:.0f}/100")
                 c3.metric("Signals", str(len(candidate.signals)))
-                c4.metric("Review", "YES" if candidate.review else "—")
+                c4.metric("Buy", "QUALIFIES" if price is not None and float(price) <= ceiling else "OVER CEILING")
                 if candidate.listing.get("url"):
                     st.link_button("Open listing", candidate.listing["url"])
                 if candidate.signals:
                     st.markdown("**Why CRTC flagged it**")
                     for signal in candidate.signals:
                         st.write(f"**{signal['severity'].upper()} · +{signal['score']:.0f}** — {signal['message']}")
-                else:
-                    st.caption("No individual anomaly signals were returned for this candidate.")
 
 # ---------------------------------------------------------------------------
 # PUBLIC AUCTION RESEARCH HUB
 # ---------------------------------------------------------------------------
 st.markdown("## 🌎 Research more auction sources")
-st.caption("For sources without an approved API adapter, CRTC now gives you a one-tap public research launch. These links open the source's own site; CRTC does not bypass logins, CAPTCHAs, or access controls.")
+st.caption("CTBids, ShopGoodwill, HiBid, eBay and other sources remain in the hunting map. Where no approved automated adapter exists, these buttons open the source's own public research route; CRTC does not bypass logins, CAPTCHAs, or access controls.")
 
-from source_search import public_search_url
-
-research_query = st.text_input("Research term", value=ebay_query, placeholder="e.g. vintage Rolex")
+research_query = st.text_input("Research term", value=ebay_query, placeholder="e.g. 14k gold ring missing weight")
 source_keys = [
     ("ctbids", "CTBids / Estate Auctions"), ("shopgoodwill", "ShopGoodwill"),
-    ("hibid", "HiBid"), ("proxibid", "Proxibid"),
+    ("ebay", "eBay"), ("hibid", "HiBid"), ("proxibid", "Proxibid"),
     ("liveauctioneers", "LiveAuctioneers"), ("invaluable", "Invaluable"),
     ("auctionzip", "AuctionZip"), ("ebth", "EBTH"), ("maxsold", "MaxSold"),
     ("gsa", "GSA Auctions"), ("govdeals", "GovDeals"), ("publicsurplus", "Public Surplus"),
@@ -156,9 +163,6 @@ for i, (key, label) in enumerate(source_keys):
         if url:
             st.link_button(label, url, use_container_width=True)
 
-# ---------------------------------------------------------------------------
-# MANUAL LISTING ANALYSIS
-# ---------------------------------------------------------------------------
 with st.expander("🧪 Analyze a listing you found anywhere", expanded=False):
     c1, c2 = st.columns([2, 1])
     with c1:
@@ -189,9 +193,6 @@ if "radar_last" in st.session_state:
     else:
         st.write("No strong anomaly signals detected.")
 
-# ---------------------------------------------------------------------------
-# BATCH IMPORT
-# ---------------------------------------------------------------------------
 st.markdown("---")
 st.markdown("## 📥 Batch scan")
 st.caption("Upload a CSV with columns such as title, description, category, price, and estimated_value.")
