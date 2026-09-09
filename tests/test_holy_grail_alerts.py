@@ -1,25 +1,24 @@
 import unittest
 
-from alert_engine import AlertPolicy, alert_fingerprint, should_alert
+from opportunity_radar import analyze_listing
 
 
-class TestHolyGrailAlerts(unittest.TestCase):
-    def test_fingerprint_is_stable(self):
-        listing = {"source": "eBay", "source_listing_id": "123", "url": "https://example.com/123"}
-        self.assertEqual(alert_fingerprint(listing), alert_fingerprint(dict(listing)))
+class TestHolyGrailCoverage(unittest.TestCase):
+    def test_bulk_quantity_signal(self):
+        result = analyze_listing({"title": "box of 25 tools", "price": 40, "quantity": 25})
+        self.assertTrue(any(s.code == "bulk_quantity" for s in result.signals))
 
-    def test_holy_grail_threshold(self):
-        policy = AlertPolicy()
-        self.assertTrue(should_alert(95, set(), "eBay:123", policy))
-        self.assertFalse(should_alert(94.9, set(), "eBay:123", policy))
+    def test_hidden_brand_signal(self):
+        result = analyze_listing({"title": "vintage receiver", "description": "Marantz stereo receiver"})
+        self.assertTrue(any(s.code == "brand_hidden_in_description" for s in result.signals))
 
-    def test_dedupe(self):
-        policy = AlertPolicy(min_score=85)
-        self.assertFalse(should_alert(95, {"eBay:123"}, "eBay:123", policy))
+    def test_hidden_model_signal(self):
+        result = analyze_listing({"title": "old equipment", "description": "Model: ABC1234 professional unit"})
+        self.assertTrue(any(s.code == "model_number_hidden" for s in result.signals))
 
-    def test_lower_threshold(self):
-        policy = AlertPolicy(min_score=85)
-        self.assertTrue(should_alert(86, set(), "x", policy))
+    def test_precious_material_signal(self):
+        result = analyze_listing({"title": "old ring", "description": "14K gold"})
+        self.assertTrue(any(s.code == "precious_material_present" for s in result.signals))
 
 
 if __name__ == "__main__":
