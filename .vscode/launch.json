@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Streamlit: run app.py",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "streamlit",
+      "args": ["run", "app.py", "--server.enableCORS=false", "--server.enableXsrfProtection=false"],
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "FastAPI: stripe_webhook_server (local)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["stripe_webhook_server:app", "--reload", "--port", "8000"],
+      "justMyCode": true,
+      "console": "integratedTerminal",
+      "env": { "STRIPE_WEBHOOK_SECRET": "whsec_local_placeholder" }
+    },
+    {
+      "name": "Python: current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

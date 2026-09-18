@@ -13,6 +13,10 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+For a full local dev setup (VS Code, Dev Containers, secrets template,
+pre-push test gate, browser/mobile QA checklist), see
+[LOCAL_DEV.md](LOCAL_DEV.md).
+
 ## Deploy it / set it up for real use
 
 See [DEPLOY.md](DEPLOY.md) — covers Streamlit Community Cloud deployment
