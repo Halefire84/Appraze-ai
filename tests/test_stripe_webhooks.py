@@ -66,6 +66,56 @@ class TestVerifyStripeSignature(unittest.TestCase):
         with self.assertRaises(StripeWebhookError):
             verify_stripe_signature(b"{}", "t=123", WEBHOOK_SECRET)
 
+    def test_non_numeric_timestamp_raises(self):
+        payload = b"{}"
+        signature = hmac.new(
+            WEBHOOK_SECRET.encode(), f"not-a-number.{payload.decode()}".encode(), hashlib.sha256
+        ).hexdigest()
+        with self.assertRaises(StripeWebhookError):
+            verify_stripe_signature(payload, f"t=not-a-number,v1={signature}", WEBHOOK_SECRET)
+
+    def test_stale_timestamp_is_rejected_as_a_possible_replay(self):
+        payload = b'{"type": "charge.succeeded"}'
+        old_timestamp = int(time.time()) - 600  # 10 minutes old > 5 minute tolerance
+        header = _sign(payload, timestamp=old_timestamp)
+        self.assertFalse(verify_stripe_signature(payload, header, WEBHOOK_SECRET))
+
+    def test_timestamp_within_tolerance_passes(self):
+        payload = b'{"type": "charge.succeeded"}'
+        recent_timestamp = int(time.time()) - 60  # 1 minute old, well within tolerance
+        header = _sign(payload, timestamp=recent_timestamp)
+        self.assertTrue(verify_stripe_signature(payload, header, WEBHOOK_SECRET))
+
+    def test_future_timestamp_beyond_tolerance_is_rejected(self):
+        # Clock skew is one thing, but a signature dated far in the future is
+        # just as suspicious as a stale replay.
+        payload = b'{"type": "charge.succeeded"}'
+        future_timestamp = int(time.time()) + 600
+        header = _sign(payload, timestamp=future_timestamp)
+        self.assertFalse(verify_stripe_signature(payload, header, WEBHOOK_SECRET))
+
+    def test_tolerance_disabled_accepts_stale_timestamp(self):
+        payload = b'{"type": "charge.succeeded"}'
+        old_timestamp = int(time.time()) - 600
+        header = _sign(payload, timestamp=old_timestamp)
+        self.assertTrue(
+            verify_stripe_signature(payload, header, WEBHOOK_SECRET, tolerance_seconds=0)
+        )
+
+    def test_custom_tolerance_and_injected_clock(self):
+        payload = b'{"type": "charge.succeeded"}'
+        header = _sign(payload, timestamp=1_000_000)
+        self.assertTrue(
+            verify_stripe_signature(
+                payload, header, WEBHOOK_SECRET, tolerance_seconds=120, now=1_000_100
+            )
+        )
+        self.assertFalse(
+            verify_stripe_signature(
+                payload, header, WEBHOOK_SECRET, tolerance_seconds=120, now=1_000_300
+            )
+        )
+
 
 class TestHandleChargeSucceeded(unittest.TestCase):
     def test_normal_event(self):
