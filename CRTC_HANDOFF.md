@@ -2,7 +2,62 @@
 
 **Canonical repository:** Halefire84/Appraze-ai  
 **Product direction:** CRTC (Cooper River Trading Co.)  
-**Last handoff:** 2026-09-09
+**Last handoff:** 2026-09-18 (production-hardening pass)
+
+## 2026-09-18 production-hardening pass
+Baseline before changes: `python3 -m pytest tests/ -q` -> 251 passed, 0 failed
+(pytest/streamlit/pandas/requests/fastapi/uvicorn/httpx/stripe installed
+fresh into the environment first — none were present). No secrets, `eval`/
+`exec`/`pickle`/`subprocess`, or missing-timeout HTTP calls were found in a
+full-repo grep sweep.
+
+Changes made, each verified by the test suite (final: `python3 -m pytest
+tests/ -q` -> 291 passed, 0 failed, 0 regressions):
+- **stripe_webhooks.py**: `verify_stripe_signature` now rejects a
+  signature whose timestamp is more than 5 minutes (Stripe's own
+  recommended tolerance) from the current time, closing a replay-attack
+  gap where a captured valid payload+signature could otherwise be
+  replayed indefinitely. Configurable via `tolerance_seconds`/`now` for
+  callers and tests. 7 new tests in `tests/test_stripe_webhooks.py`.
+- **app.py**: `static/manifest.json` was never actually linked into the
+  page — `.streamlit/config.toml` claimed a "head-injection snippet" that
+  did not exist, so the app was not installable as a PWA despite having a
+  manifest and icons. Added a real injection via
+  `st.components.v1.html()` (writes into `window.parent.document.head`,
+  the only way to reach the true page `<head>` from Streamlit without a
+  custom component). Known limitation: this only runs on app.py itself;
+  Streamlit's multipage `pages/*.py` scripts don't re-run app.py, so a
+  deep link straight to a sub-page won't carry the manifest tag. manifest
+  `start_url` is `/`, i.e. app.py, so this doesn't block installability
+  today but is worth revisiting if deep-link installs matter later.
+- **ebay_image_scan.py**: rewritten with the full defensive-handling list
+  from the hardening spec — size cap (10 MB), MIME allowlist + magic-byte
+  sanity check, specific `EbayImageSearchError` for timeout/connection
+  failure/HTTP 4xx&5xx/malformed JSON/expired token, result dedup, and a
+  hard cap on returned result count. 17 new tests in
+  `tests/test_ebay_image_scan.py`. (Not yet wired into any Streamlit page
+  — was dead code before and after this pass.)
+- **listing_bridge.py**: added `enrich_listing_with_ai()` +
+  `ListingAIResult`, a testable AI abstraction sitting between
+  `build_master_listing()` (unchanged, still fully deterministic) and the
+  marketplace-draft step. No API key in source (reads from a caller-
+  supplied `api_key`, matching the existing `ANTHROPIC_API_KEY`
+  Streamlit-secrets pattern already used in app.py's Analyzer tab).
+  Explicit timeout, hard input-size cap enforced before any network call,
+  swappable `transport` for testing (no new dependency — reuses the
+  urllib pattern already in app.py). The result dataclass has no field
+  for specifications/provenance/accessories/measurements/authenticity, so
+  even a provider that ignores its prompt instructions can't get an
+  invented claim into the result — enforced structurally, not just by
+  prompt wording. 17 new tests in `tests/test_listing_ai_enrichment.py`
+  covering all 11 required cases (valid/malformed/empty/non-JSON
+  response, timeout, auth failure, rate limit, oversized input, missing
+  evidence, unsupported-claim rejection, and AI-completely-unavailable).
+  **Not yet wired into any Streamlit page** — it's a ready-to-use library
+  function; the Cross-List page (`pages/5_🔗_Cross_List.py`) is the
+  logical place to call it next, deliberately left undone this pass
+  rather than making an unverified UI change with no way to browser-test
+  it in this environment.
 
 ## Current state
 - Appraze repository remains the canonical codebase; do NOT start a replacement app/repository.
