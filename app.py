@@ -9,6 +9,7 @@ Run locally (optional, no terminal needed for deployment - see DEPLOY.md):
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime
 import io
@@ -107,6 +108,50 @@ DARK_CSS = """
 </style>
 """
 st.markdown(DARK_CSS, unsafe_allow_html=True)
+
+# --------------------------------------------------------------------------
+# PWA HEAD INJECTION
+# --------------------------------------------------------------------------
+# static/manifest.json + the PWA icons only make the app installable if a
+# <link rel="manifest"> actually reaches the real page <head> -- browsers
+# never discover a manifest that isn't referenced. st.markdown(...,
+# unsafe_allow_html=True) can't do this: a <script> tag set via
+# dangerouslySetInnerHTML never executes, and a bare <link> lands in
+# Streamlit's app body, not <head>. components.html() instead renders in a
+# same-origin iframe, so its script can reach window.parent.document.head
+# directly -- the standard workaround for injecting real <head> tags into a
+# Streamlit page. Runs once per browser tab (guarded by a data attribute)
+# so Streamlit's frequent reruns don't keep re-appending duplicate tags.
+_PWA_HEAD_INJECTION = """
+<script>
+(function () {
+    try {
+        var head = window.parent.document.head;
+        if (head.querySelector('[data-crtc-pwa]')) return;
+        var tags = [
+            ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
+            ['link', {rel: 'icon', href: './app/static/icon-192.png', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/icon-192.png'}],
+            ['meta', {name: 'theme-color', content: '#0b0f14'}],
+            ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
+            ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
+            ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'}],
+        ];
+        tags.forEach(function (t) {
+            var el = window.parent.document.createElement(t[0]);
+            el.setAttribute('data-crtc-pwa', '1');
+            for (var k in t[1]) el.setAttribute(k, t[1][k]);
+            head.appendChild(el);
+        });
+    } catch (e) {
+        // Same-origin access can fail in unusual embeds (e.g. a cross-origin
+        // preview iframe) -- fail silently rather than breaking the app;
+        // the app is fully usable without the install prompt.
+    }
+})();
+</script>
+"""
+components.html(_PWA_HEAD_INJECTION, height=0, width=0)
 
 # --------------------------------------------------------------------------
 # LOGIN GATE
