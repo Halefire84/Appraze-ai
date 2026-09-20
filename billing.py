@@ -1,12 +1,15 @@
 """
 Cooper River Trading Co. — Appraze Billing
 
-NOT CURRENTLY USED — nothing in this repo imports this file except pos.py
-(itself unused; see pos.py's own banner), verified by grep across app.py,
-pages/*.py, and tests/ on 2026-09-20. app.py has no paywall/subscription
-verification logic anywhere (grepped for "paywall", "subscription",
-"verify_checkout", "is_paid" — zero hits), so the subscriber-paywall
-feature this module implements does not currently exist in the live app.
+verify_checkout_session() is wired in indirectly via pos.py's
+check_payment_status() as of 2026-09-20 (pos.py is now used by app.py's
+"Charge Customer" tab) — it's a generic read-only Checkout Session status
+check that works for any session regardless of how it was created, not
+only ones a Payment Link produced. The subscriber-paywall flow described
+below (payment_link_url() + a Payment-Link-driven redirect back into the
+app) is still not wired into app.py — app.py has no paywall/subscription
+gating anywhere (grepped for "paywall", "subscription", "is_paid" — zero
+hits in app.py). That part of this module remains unused.
 ---------------------------------------------
 Deliberately uses Stripe PAYMENT LINKS, not the Checkout Sessions API or any
 card element — consistent with CRTC's "Stripe Payment Links only, no raw

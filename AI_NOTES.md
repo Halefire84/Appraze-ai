@@ -29,12 +29,18 @@ capable of going stale as any other doc, as this correction proves.)
 
 Core app: `app.py` (Streamlit) + `finance.py` (pure math, unit-tested).
 `app.py`'s actual tabs today: Deal Dashboard, Profit Calculator,
-Inventory, Suppliers, Charge Customer, AI Analyzer — no Mail, Invoice
-Import, or POS Checkout tab exists despite some module docstrings
-describing those as current features.
+Inventory, Suppliers, Charge Customer, AI Analyzer — no Mail or Invoice
+Import tab exists despite some module docstrings describing those as
+current features. Charge Customer IS real POS now (see below) — that
+part of the earlier correction to this file is superseded already.
 
 Supporting modules actually wired in: `auth.py` / `storage.py`
 (Apps Script-backed login+persistence, see `AppsScript_Code.gs`),
+`pos.py` / `billing.py`'s `verify_checkout_session()` (Charge Customer
+tab creates a one-off Stripe Checkout Session per sale via `pos.py` and
+persists it to the shared `sales_log` table, with a manual "Check
+Status" button and automatic webhook reconciliation both able to mark it
+paid — fixed 2026-09-20, see below),
 `stripe_webhook_server.py` / `stripe_webhooks.py` / `webhook_store.py`
 (standalone webhook-reconciliation service, separate from `app.py`),
 `comps.py` / `comps_adapters.py` (Market Comps engine — manual entry, CSV
@@ -46,17 +52,19 @@ module set under `pages/`.
 Built but NOT wired into any tab/page as of 2026-09-20 (each now says so
 in its own file header — see `README.md`'s "Built but not currently
 wired" section and `CRTC_HANDOFF.md` for the full inventory and why):
-`billing.py`, `pos.py`, `mail.py` / `mail_parse.py`, `drive_scan.py`,
-`crtc.py` (superseded by `pages/5_🔗_Cross_List.py`),
-`financial_intelligence.py` / `payments_adapter.py` (future-roadmap
-scaffolding, see `CRTC_FINANCIAL_ROADMAP.md`), `crtc_learning.py` (tested,
-tied to `docs/CRTC_CONTINUOUS_HUNT.md`'s design), `ebay_image_scan.py`
-(recent, deliberate, not legacy). None were deleted — this environment
-treats file deletion as a destructive action needing explicit user
+`billing.py`'s subscriber-paywall half (`payment_link_url()`; its
+`verify_checkout_session()` IS used, see above), `mail.py` /
+`mail_parse.py`, `drive_scan.py`, `crtc.py` (superseded by
+`pages/5_🔗_Cross_List.py`), `financial_intelligence.py` /
+`payments_adapter.py` (future-roadmap scaffolding, see
+`CRTC_FINANCIAL_ROADMAP.md`), `crtc_learning.py` (tested, tied to
+`docs/CRTC_CONTINUOUS_HUNT.md`'s design), `ebay_image_scan.py` (recent,
+deliberate, not legacy). None were deleted — this environment treats
+file deletion as a destructive action needing explicit user
 confirmation — they're marked instead so nobody mistakes them for live
 code.
 
-300 tests in `tests/` as of 2026-09-20 (`python3 -m pytest tests/ -q`),
+315 tests in `tests/` as of 2026-09-20 (`python3 -m pytest tests/ -q`),
 all passing — re-run this yourself before trusting the number; it will
 drift the moment either of us adds more.
 
@@ -68,7 +76,13 @@ replay-protection (timestamp tolerance), a real PWA manifest `<head>`
 link, hardened `ebay_image_scan.py`, a testable AI listing-enrichment
 abstraction in `listing_bridge.py`, rich eBay listings preserved through
 `opportunity_sources.scan_ebay_active()` instead of collapsing to a
-single blank `source_listing_id`, and this file-inventory correction.
+single blank `source_listing_id`, a file-inventory correction (this
+section), and — same session, right after — wiring `pos.py`/`billing.py`
+into the Charge Customer tab because the old inline Payment Link flow
+never wrote an invoice_id or a `sales_log` row, so the webhook
+reconciliation service had nothing to match against and "Recent Charges"
+only lived in session state. First test coverage for both modules added
+(`tests/test_pos.py`, `tests/test_billing.py`).
 
 ## Deliberately NOT built here, and why
 

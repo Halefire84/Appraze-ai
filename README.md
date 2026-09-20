@@ -3,12 +3,12 @@
 A single-page Streamlit dashboard for tracking, filtering, and evaluating
 resale/auction deals across CTBids, eBay, HiBid, Facebook Marketplace,
 Mercari, Chairish, and Etsy — plus inventory margin tracking, market comps
-valuation, an AI item analyzer, and Stripe charge creation. (`app.py`'s
-actual tabs, as of 2026-09-20: Deal Dashboard, Profit Calculator,
-Inventory, Suppliers, Charge Customer, AI Analyzer. Several modules below
-implement invoice-import/mail-tracking/POS features that were built but
-are not currently wired into any tab — see their "NOT CURRENTLY USED"
-file headers.)
+valuation, an AI item analyzer, and Stripe point-of-sale checkout.
+(`app.py`'s actual tabs, as of 2026-09-20: Deal Dashboard, Profit
+Calculator, Inventory, Suppliers, Charge Customer, AI Analyzer. A few
+other modules below implement invoice-import/mail-tracking features that
+were built but are not currently wired into any tab — see their "NOT
+CURRENTLY USED" file headers.)
 
 ## Run locally
 
@@ -61,6 +61,13 @@ syntax.
   hashing, session gating
 - `storage.py` — persists any named table (deals, inventory, sales_log, ...)
   per user via the same Apps Script backend
+- `pos.py` — creates one-off Stripe Checkout Sessions for point-of-sale
+  charges, tagged with an invoice ID; powers `app.py`'s "Charge Customer"
+  tab, which also writes the resulting row into the shared `sales_log`
+  table so it's reconcilable by any device or by the webhook service
+- `billing.py` — `verify_checkout_session()` is `pos.py`'s manual
+  "Check Status" lookup; the subscriber-paywall half of this module
+  (`payment_link_url()`) is unrelated and still unused, see below
 - `stripe_webhooks.py` — pure, unit-tested Stripe webhook signature
   verification + event handling
 - `stripe_webhook_server.py` / `webhook_store.py` — the small standalone
@@ -77,12 +84,10 @@ syntax.
 USED" in each file's own header as of 2026-09-20 — kept rather than
 deleted; see `CRTC_HANDOFF.md` for the full inventory)
 
-- `billing.py` — verifies Stripe Payment Link checkout sessions
-  (subscriber paywall); `app.py` has no paywall logic today
-- `pos.py` — creates one-off Stripe Checkout Sessions for point-of-sale
-  charges; `app.py`'s live "Charge Customer" tab instead creates a Stripe
-  Payment Link inline, which is arguably the wrong primitive for a
-  different amount every sale — flagged, not yet resolved
+- `billing.py`'s subscriber-paywall flow (`payment_link_url()` + the
+  Payment-Link redirect it describes) — `app.py` has no paywall logic
+  today. (`verify_checkout_session()` in the same file *is* used, by
+  `pos.py` — see above.)
 - `drive_scan.py` — scans a named Google Drive folder for new invoice
   files via the Apps Script backend
 - `mail.py` / `mail_parse.py` — read-only Gmail tracking of supplier

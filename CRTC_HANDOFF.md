@@ -2,7 +2,76 @@
 
 **Canonical repository:** Halefire84/Appraze-ai  
 **Product direction:** CRTC (Cooper River Trading Co.)  
-**Last handoff:** 2026-09-18 (production-hardening pass)
+**Last handoff:** 2026-09-20 (Charge Customer tab wired to pos.py)
+
+## 2026-09-20 — fix: wire pos.py/billing.py into the live Charge Customer tab
+Follow-up to the same day's file-inventory pass below, which had flagged
+(not yet fixed) that `app.py`'s "Charge Customer" tab created Stripe
+charges via a raw inline Payment Link call instead of using `pos.py`.
+Investigating further found the real bug was worse than a "wrong Stripe
+primitive" style nit:
+
+- The old flow never set `payment_intent_data[metadata][invoice_id]` on
+  the created object, so a `charge.succeeded` webhook for it would have
+  no `invoice_id` in its metadata for `stripe_webhooks.handle_charge_succeeded()`
+  to read.
+- It only appended to `st.session_state.charge_log_by_ws` — pure
+  in-memory session state, never written to the persistent `sales_log`
+  table `stripe_webhook_server.py`/`webhook_store.py` reconcile against.
+  Refreshing the page or opening the app on another device lost the
+  entire "Recent Charges" list.
+- Net effect: the whole Stripe webhook reconciliation feature (hardened
+  for replay-protection in the 2026-09-18 pass) was completely
+  disconnected from the live POS UI — it had nothing to reconcile
+  against, ever, regardless of webhook correctness.
+
+Fix: `app.py`'s Charge Customer tab now calls `pos.create_pos_checkout()`
+(the module that was already correctly built, already handling a dynamic
+per-sale amount via a Checkout Session, already tagging `invoice_id` in
+metadata) and persists the result as a `sales_log` row via
+`storage.save_table(..., "sales_log", shared=True)`, using the exact
+`"Invoice #"` / `"Status"` field names `AppsScript_Code.gs`'s
+`handleUpdateSalesLogStatus_` and `stripe_webhooks.update_invoice_status()`
+already expect (verified by reading `AppsScript_Code.gs` directly, not
+assumed). "Recent Charges" now reads from the persisted table instead of
+session state, and a manual "Check Payment Status" button
+(`pos.check_payment_status()`) was added for the rows still "Awaiting
+Payment" — this closes the gap between what `pos.py`'s own docstring
+promised ("the POS tab's Check Status button already covers manual
+reconciliation") and what the tab actually had, which was no such
+button at all.
+
+`pos.py` and `billing.py` are no longer marked "NOT CURRENTLY USED" —
+their docstring headers were updated to say what wires into what.
+`mail.py`/`mail_parse.py`/`drive_scan.py`/`crtc.py` remain unused; not
+touched by this fix.
+
+Tests: both modules had **zero** test coverage before this fix, despite
+`pos.py` now being live payment-creation code — added `tests/test_pos.py`
+(9 tests: rejects non-positive amount, missing secret key fails
+gracefully, successful session creation sends the right cents/metadata,
+two sales never collide on the same `invoice_id`, HTTP error / connection
+failure both degrade to a failed result instead of crashing, and
+`check_payment_status()`'s paid/unpaid/error paths) and
+`tests/test_billing.py` (5 tests covering `verify_checkout_session()`'s
+paid/unpaid/missing-customer-details/HTTP-error/connection-error paths).
+
+```
+python3 -m pytest tests/test_pos.py tests/test_billing.py -q  -> 15 passed
+python3 -m pytest tests/ -q                                    -> 315 passed, 0 failed
+                                                                    (300 baseline + 15 new)
+python3 -m py_compile app.py                                   -> exit 0
+```
+
+Also removed a dead `import urllib.parse` from `app.py` left over from
+the old inline Payment Link code (nothing else in `app.py` used it —
+verified by grep before removing).
+
+**Not done / explicitly out of scope for this fix:** `billing.py`'s
+subscriber-paywall flow (`payment_link_url()`) is still not wired into
+any paywall/subscription gate in `app.py` — that's a separate, unrelated
+feature gap from the POS bug just fixed, and nothing asked for it this
+pass.
 
 ## 2026-09-18 production-hardening pass
 Baseline before changes: `python3 -m pytest tests/ -q` -> 251 passed, 0 failed
@@ -148,16 +217,14 @@ Confirmed dead (zero references from `app.py`, any `pages/*.py`, or
   `pages/5_🔗_Cross_List.py`; would actually error if run standalone
   (calls `st.set_page_config()` outside the `pages/` mechanism).
 - `pos.py` — superseded when `app.py` was consolidated into one
-  production app. **Notable side-finding, not yet resolved:** `app.py`'s
-  live "Charge Customer" tab creates a Stripe **Payment Link** (fixed
-  price) inline instead of using this module's one-off Checkout Session
-  approach — per this file's own docstring, a Payment Link is the wrong
-  primitive for a point-of-sale charge that's a different amount every
-  time. Worth revisiting: the live code may be the one that needs
-  fixing, not this file that needs deleting.
-- `billing.py` — only consumer was `pos.py` (also dead); `app.py` has no
-  paywall/subscription-verification logic anywhere (grepped for
-  "paywall", "subscription", "verify_checkout", "is_paid" — zero hits).
+  production app. **Fixed the same day, right after this entry was
+  written — see the 2026-09-20 "fix: wire pos.py/billing.py" entry
+  above.** The side-finding here turned out to be worse than a wrong-
+  Stripe-primitive nit: the live flow never set an `invoice_id` or wrote
+  a `sales_log` row, so webhook reconciliation had nothing to match
+  against at all. `pos.py`/`billing.py` are both live code now, not dead.
+- `billing.py` — at the time this entry was written, only consumer was
+  `pos.py` (also dead then). Both are wired in now — see above.
 - `mail.py` — `README.md` claimed it "powers the Mail tab"; `app.py` has
   no Mail tab (grepped its 6 real tabs: Deal Dashboard, Profit
   Calculator, Inventory, Suppliers, Charge Customer, AI Analyzer).
