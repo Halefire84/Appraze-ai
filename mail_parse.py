@@ -3,6 +3,12 @@ mail_parse.py — pure, testable parsing for detecting shipment tracking
 numbers, invoice/order references, and dollar amounts inside an email's
 subject/body text.
 
+Note (2026-09-20): its only caller, mail.py, is itself not wired into
+app.py or any page (see mail.py's own banner) — this module's logic is
+real and tested (tests/test_mail_parse.py) but currently has no live
+production path. Kept as-is rather than removed, since it's small, pure,
+and immediately reusable if the Mail feature is revived.
+
 Deliberately has zero dependency on Streamlit, imaplib, or the email
 package (see mail.py for the actual inbox-fetching side) so it can be
 unit-tested in isolation, the same way finance.py's money math is kept

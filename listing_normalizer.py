@@ -108,9 +108,16 @@ def normalize_listing(record: Mapping[str, Any], *, source: str = "") -> Dict[st
     title = _text(_first(record, ("title", "name", "listing_title", "item_title")))
     description = _text(_first(record, ("description", "details", "item_description", "short_description")))
     category = _text(_first(record, ("category", "category_name", "department", "section")))
+    # Independent taxonomy only. Do NOT derive expected keywords from the
+    # listing's own category/title/description -- that made
+    # opportunity_radar.detect_category_mismatch() self-cancelling: the
+    # "expected" evidence was manufactured from the very same category
+    # being validated, so a wrong category could never be caught (F-04).
+    # Callers with an independent taxonomy/classifier may still supply
+    # expected_keywords explicitly.
     expected = _first(record, ("expected_keywords", "category_keywords"), None)
     if expected is None:
-        expected = _expected_keywords(category, title, description)
+        expected = ()
     elif isinstance(expected, str):
         expected = tuple(x.strip() for x in expected.split(",") if x.strip())
     else:

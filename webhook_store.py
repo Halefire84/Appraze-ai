@@ -100,7 +100,7 @@ def save_sales_log(rows: list) -> WebhookStoreResult:
         return WebhookStoreResult(False, error=f"connection error: {e}")
 
 
-def update_sales_log_status(invoice_id: str, new_status: str) -> WebhookStoreResult:
+def update_sales_log_status(invoice_id: str, new_status: str, *, force: bool = False) -> WebhookStoreResult:
     """
     Atomic single-row update, preferred over load_sales_log() +
     save_sales_log() for reconciling one invoice: those two are separate
@@ -114,6 +114,14 @@ def update_sales_log_status(invoice_id: str, new_status: str) -> WebhookStoreRes
     payload.found tells the caller whether a matching invoice_id existed
     yet (it may not, if the webhook arrives before the POS tab has
     persisted its "Awaiting Payment" row).
+
+    AppsScript_Code.gs's handleUpdateSalesLogStatus_ enforces status
+    precedence server-side (Refunded > Partially Refunded > Paid > Failed >
+    Awaiting Payment) so a delayed/out-of-order webhook can never downgrade
+    a more-final status. found=True with applied=False means the row
+    exists but the update was refused as a downgrade -- not an error,
+    Stripe still gets acknowledged. Pass force=True only for an explicit
+    manual override (never from the automatic webhook path).
     """
     url = os.environ.get("APPS_SCRIPT_URL")
     token = os.environ.get("APPS_SCRIPT_TOKEN")
@@ -127,6 +135,7 @@ def update_sales_log_status(invoice_id: str, new_status: str) -> WebhookStoreRes
                 "action": "update_sales_log_status",
                 "invoice_id": invoice_id,
                 "new_status": new_status,
+                "force": "true" if force else "false",
             },
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )
@@ -134,6 +143,9 @@ def update_sales_log_status(invoice_id: str, new_status: str) -> WebhookStoreRes
         data = resp.json()
         if not data.get("success"):
             return WebhookStoreResult(False, error=data.get("error", "update failed"))
-        return WebhookStoreResult(True, payload=data.get("found"))
+        return WebhookStoreResult(
+            True,
+            payload={"found": bool(data.get("found")), "applied": bool(data.get("applied", data.get("found")))},
+        )
     except Exception as e:
         return WebhookStoreResult(False, error=f"connection error: {e}")

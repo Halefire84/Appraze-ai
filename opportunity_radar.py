@@ -141,13 +141,24 @@ def detect_title_description_mismatch(title: str, description: str) -> List[Rada
     return []
 
 
+_MIN_CROSS_CATEGORY_HITS = 2  # require a strong, multi-term match before flagging an unrecognized category
+
+
 def detect_category_mismatch(
     category: Optional[str],
     expected_keywords: Optional[Sequence[str]],
     title: str,
     description: str = "",
 ) -> List[RadarSignal]:
-    """Flag text that conflicts with the supplied marketplace category."""
+    """Flag text that conflicts with the supplied marketplace category.
+
+    Evidence must come from an INDEPENDENT source: either the caller's own
+    taxonomy/classifier (expected_keywords) or this module's own fixed
+    _CATEGORY_TERMS map -- never anything derived from the listing's own
+    category/title/description (that made this self-cancelling; see F-04
+    and listing_normalizer.normalize_listing(), which no longer manufactures
+    expected_keywords from the listing itself).
+    """
     if not category:
         return []
     haystack = set(_tokens(" ".join((_text(title), _text(description)))))
@@ -163,6 +174,24 @@ def detect_category_mismatch(
         hits = sum(1 for keyword in expected if keyword in haystack)
         if hits == 0:
             return [_signal("possible_misclassification", "high", 28, f"Listing text does not match the supplied category '{_text(category)}'.")]
+        return []
+    # No caller-supplied taxonomy and the claimed category isn't one CRTC
+    # recognizes. Still independently checkable: if the listing text
+    # strongly matches a DIFFERENT recognized category's fixed term set,
+    # and the claimed category's own words share no vocabulary with that
+    # category, it's very likely just miscategorized -- a camera listed
+    # under "Clothing" being the canonical example. A single incidental
+    # term (e.g. "chair" under "Home & Garden") is not enough; requiring
+    # _MIN_CROSS_CATEGORY_HITS keeps this from firing on ordinary listings.
+    category_words = set(_tokens(category_key))
+    for other_category, other_terms in _CATEGORY_TERMS.items():
+        hits = haystack & other_terms
+        if len(hits) >= _MIN_CROSS_CATEGORY_HITS and not (category_words & other_terms):
+            return [_signal(
+                "possible_misclassification", "high", 28,
+                f"Listing text strongly matches '{other_category}' terminology "
+                f"({', '.join(sorted(hits))}) but is listed under an unrelated category '{_text(category)}'.",
+            )]
     return []
 
 

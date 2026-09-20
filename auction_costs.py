@@ -9,6 +9,8 @@ fees remain unknown rather than being silently invented.
 """
 from typing import Any, Dict, Optional
 
+from number_normalize import parse_percent_points
+
 
 def _number(value: Any) -> Optional[float]:
     if value in (None, "", False):
@@ -30,7 +32,13 @@ def calculate_auction_cost(
 ) -> Dict[str, Any]:
     """Return transparent all-in acquisition cost for an auction bid."""
     bid_value = max(0.0, float(bid))
-    premium = None if buyer_premium_pct is None else max(0.0, float(buyer_premium_pct))
+    # Routes through the canonical percent parser so "18", "18%", and the
+    # 0.18-fraction ambiguity all normalize to the same 18 percentage
+    # points, instead of a bare float() cast that would treat 0.18 as
+    # 0.18% -- a 100x unit error (see number_normalize.py / F-06, F-17).
+    premium = parse_percent_points(buyer_premium_pct) if buyer_premium_pct is not None else None
+    if premium is not None:
+        premium = max(0.0, premium)
     ship = None if shipping is None else max(0.0, float(shipping))
     fees = None if other_fees is None else max(0.0, float(other_fees))
 
@@ -61,6 +69,9 @@ def max_bid_for_target_all_in(
     """Invert all-in cost to a maximum bid; return None if premium is unknown."""
     if buyer_premium_pct is None:
         return None
+    premium = parse_percent_points(buyer_premium_pct)
+    if premium is None:
+        return None
     fixed = max(0.0, float(shipping or 0.0)) + max(0.0, float(other_fees or 0.0))
-    multiplier = 1.0 + max(0.0, float(buyer_premium_pct)) / 100
+    multiplier = 1.0 + max(0.0, premium) / 100
     return round(max(0.0, float(max_all_in_cost) - fixed) / multiplier, 2)

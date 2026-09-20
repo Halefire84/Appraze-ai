@@ -288,6 +288,32 @@ function handleLoadData_(sheet, params) {
   return jsonResponse({ success: true, payload: null });
 }
 
+// Status precedence for sales_log rows -- mirrors stripe_webhooks.py's
+// STATUS_RANK exactly (keep the two in sync if either changes). A delayed/
+// out-of-order webhook delivery must never downgrade a more-final status:
+// a late "charge.succeeded" arriving after its own refund must not
+// resurrect "Paid (Card)" over "Refunded" (F-09). This is the one place
+// that actually enforces it for the live webhook path -- stripe_webhooks.py's
+// own can_transition()/update_invoice_status() only protect an in-memory
+// list a caller passes in; stripe_webhook_server.py never calls those, it
+// calls this function directly, so the precedence check has to live here
+// too or the live path stays unprotected regardless of what the Python
+// module does.
+var SALES_LOG_STATUS_RANK_ = {
+  "Awaiting Payment": 0,
+  "Failed": 1,
+  "Payment Failed": 1,
+  "Paid": 2,
+  "Paid (Card)": 2,
+  "Partially Refunded": 3,
+  "Refunded": 4
+};
+
+function salesLogStatusRank_(status) {
+  if (!status || !(status in SALES_LOG_STATUS_RANK_)) return -1;
+  return SALES_LOG_STATUS_RANK_[status];
+}
+
 // Atomic single-row update for the sales_log table, used by the Stripe
 // webhook service instead of load-mutate-save (see webhook_store.py /
 // stripe_webhook_server.py). Read + mutate + write happen inside this one
@@ -297,6 +323,7 @@ function handleLoadData_(sheet, params) {
 function handleUpdateSalesLogStatus_(sheet, params) {
   const invoiceId = String(params.invoice_id || "");
   const newStatus = String(params.new_status || "");
+  const force = String(params.force || "") === "true";
   if (!invoiceId || !newStatus) {
     return jsonResponse({ success: false, error: "invoice_id and new_status are required" });
   }
@@ -316,19 +343,30 @@ function handleUpdateSalesLogStatus_(sheet, params) {
           return jsonResponse({ success: false, error: "sales_log payload is not valid JSON" });
         }
         let found = false;
+        let applied = false;
+        let currentStatus = null;
         for (let j = 0; j < rows.length; j++) {
           if (rows[j]["Invoice #"] === invoiceId) {
-            rows[j]["Status"] = newStatus;
             found = true;
+            currentStatus = rows[j]["Status"];
+            if (force || salesLogStatusRank_(newStatus) >= salesLogStatusRank_(currentStatus)) {
+              rows[j]["Status"] = newStatus;
+              applied = true;
+            }
             break;
           }
         }
         if (!found) {
           return jsonResponse({ success: true, found: false });
         }
+        if (!applied) {
+          // Found the row but refused to downgrade it -- not an error,
+          // the caller (and Stripe) still gets a 2xx acknowledgment.
+          return jsonResponse({ success: true, found: true, applied: false, current_status: currentStatus });
+        }
         sheet.getRange(i + 1, 3).setValue(JSON.stringify(rows));
         sheet.getRange(i + 1, 4).setValue(new Date().toISOString());
-        return jsonResponse({ success: true, found: true });
+        return jsonResponse({ success: true, found: true, applied: true });
       }
     }
     return jsonResponse({ success: true, found: false }); // sales_log table doesn't exist yet

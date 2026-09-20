@@ -9,6 +9,7 @@ Run locally (optional, no terminal needed for deployment - see DEPLOY.md):
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from datetime import date, datetime
 import io
@@ -16,12 +17,13 @@ import base64
 import json
 import urllib.request
 import urllib.error
-import urllib.parse
 from finance import (
     compute_verdict, deal_roi, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
 )
 from auth import require_auth, logout
+from pos import create_pos_checkout, check_payment_status
+from storage import load_table, save_table
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -107,6 +109,50 @@ DARK_CSS = """
 </style>
 """
 st.markdown(DARK_CSS, unsafe_allow_html=True)
+
+# --------------------------------------------------------------------------
+# PWA HEAD INJECTION
+# --------------------------------------------------------------------------
+# static/manifest.json + the PWA icons only make the app installable if a
+# <link rel="manifest"> actually reaches the real page <head> -- browsers
+# never discover a manifest that isn't referenced. st.markdown(...,
+# unsafe_allow_html=True) can't do this: a <script> tag set via
+# dangerouslySetInnerHTML never executes, and a bare <link> lands in
+# Streamlit's app body, not <head>. components.html() instead renders in a
+# same-origin iframe, so its script can reach window.parent.document.head
+# directly -- the standard workaround for injecting real <head> tags into a
+# Streamlit page. Runs once per browser tab (guarded by a data attribute)
+# so Streamlit's frequent reruns don't keep re-appending duplicate tags.
+_PWA_HEAD_INJECTION = """
+<script>
+(function () {
+    try {
+        var head = window.parent.document.head;
+        if (head.querySelector('[data-crtc-pwa]')) return;
+        var tags = [
+            ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
+            ['link', {rel: 'icon', href: './app/static/icon-192.png', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/icon-192.png'}],
+            ['meta', {name: 'theme-color', content: '#0b0f14'}],
+            ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
+            ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
+            ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'}],
+        ];
+        tags.forEach(function (t) {
+            var el = window.parent.document.createElement(t[0]);
+            el.setAttribute('data-crtc-pwa', '1');
+            for (var k in t[1]) el.setAttribute(k, t[1][k]);
+            head.appendChild(el);
+        });
+    } catch (e) {
+        // Same-origin access can fail in unusual embeds (e.g. a cross-origin
+        // preview iframe) -- fail silently rather than breaking the app;
+        // the app is fully usable without the install prompt.
+    }
+})();
+</script>
+"""
+components.html(_PWA_HEAD_INJECTION, height=0, width=0)
 
 # --------------------------------------------------------------------------
 # LOGIN GATE
@@ -644,8 +690,9 @@ with tab_sup:
 with tab_charge:
     st.markdown("#### Charge a Customer")
     st.caption(
-        "Creates a Stripe Payment Link. Send or show the link/QR to your customer - they enter "
-        "their own card or tap Apple Pay / Google Pay. Your card number never touches this app."
+        "Creates a one-off Stripe Checkout link for this exact amount. Send or show the link/QR "
+        "to your customer - they enter their own card or tap Apple Pay / Google Pay. Your card "
+        "number never touches this app."
     )
 
     stripe_key = None
@@ -661,52 +708,76 @@ with tab_charge:
             "Secrets, then reload this page."
         )
     else:
-        if "charge_log_by_ws" not in st.session_state:
-            st.session_state.charge_log_by_ws = {}
-        if WORKSPACE not in st.session_state.charge_log_by_ws:
-            st.session_state.charge_log_by_ws[WORKSPACE] = []
+        # sales_log is the one durable, shared record every charge lands in -
+        # the standalone webhook service (stripe_webhook_server.py) and the
+        # "Check Status" button below both read/write this exact table, so a
+        # charge created here is reconcilable from any device or session,
+        # unlike the old session-state-only "Recent Charges" list this
+        # replaced (which vanished on refresh and gave the webhook service
+        # nothing to match against, since it never carried an invoice_id).
+        sales_log_result = load_table("sales_log", shared=True)
+        sales_log = list(sales_log_result.payload) if sales_log_result.success and sales_log_result.payload else []
 
         with st.form("charge_form"):
             amt = st.number_input("Amount ($)", min_value=0.50, step=1.0, format="%.2f")
             desc = st.text_input("Description", placeholder="e.g. Estate cleanout \u2014 123 Main St")
-            submitted = st.form_submit_button("Create Payment Link")
+            submitted = st.form_submit_button("Create Checkout Link")
 
         if submitted and amt > 0 and desc.strip():
-            try:
-                data = urllib.parse.urlencode({
-                    "line_items[0][price_data][currency]": "usd",
-                    "line_items[0][price_data][product_data][name]": desc.strip(),
-                    "line_items[0][price_data][unit_amount]": int(round(amt * 100)),
-                    "line_items[0][quantity]": 1,
-                }).encode()
-                req = urllib.request.Request("https://api.stripe.com/v1/payment_links", data=data, method="POST")
-                auth = base64.b64encode(f"{stripe_key}:".encode()).decode()
-                req.add_header("Authorization", f"Basic {auth}")
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    result = json.loads(resp.read().decode())
-                link_url = result.get("url", "")
-                st.success("Payment link created!")
-                st.code(link_url, language=None)
-                st.session_state.charge_log_by_ws[WORKSPACE].append({
+            result = create_pos_checkout(amt, desc.strip())
+            if result.success:
+                st.success("Checkout link created!")
+                st.code(result.checkout_url, language=None)
+                sales_log.append({
+                    "Invoice #": result.invoice_id,
                     "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Description": desc.strip(), "Amount": amt, "Status": "Open", "Link": link_url,
+                    "Description": desc.strip(),
+                    "Amount": amt,
+                    "Status": "Awaiting Payment",
+                    "Link": result.checkout_url,
+                    "session_id": result.session_id,
                 })
-            except urllib.error.HTTPError as e:
-                st.error(f"Stripe error: {e.read().decode()[:300]}")
-            except Exception as e:
-                st.error(f"Couldn't create the payment link: {e}")
+                save_result = save_table(pd.DataFrame(sales_log), "sales_log", shared=True)
+                if not save_result.success:
+                    st.warning(
+                        f"Checkout link created, but couldn't save it to the shared sales log "
+                        f"({save_result.error}). The link above still works \u2014 write down the "
+                        f"invoice number ({result.invoice_id}) to reconcile it manually."
+                    )
+            else:
+                st.error(result.error)
 
         st.markdown("---")
         st.markdown("#### Recent Charges")
-        log = st.session_state.charge_log_by_ws[WORKSPACE]
-        if log:
-            log_df = pd.DataFrame(log)
+        if sales_log:
+            log_df = pd.DataFrame(sales_log).drop(columns=["session_id"], errors="ignore")
             st.dataframe(log_df, use_container_width=True, column_config={
                 "Amount": st.column_config.NumberColumn(format="$%.2f"),
                 "Link": st.column_config.LinkColumn(),
             })
+
+            awaiting = [row for row in sales_log if row.get("Status") == "Awaiting Payment" and row.get("session_id")]
+            if awaiting:
+                st.markdown("##### Check payment status")
+                st.caption(
+                    "The webhook service reconciles these automatically if it's deployed (see "
+                    "DEPLOY.md). This button does the same check manually, right now."
+                )
+                for row in awaiting[-5:]:  # most recent few - avoid an unbounded button list
+                    c1, c2 = st.columns([3, 1])
+                    c1.write(f"**{row.get('Invoice #')}** \u2014 {row.get('Description', '')} (${float(row.get('Amount', 0)):,.2f})")
+                    if c2.button("Check Status", key=f"check_{row['Invoice #']}", use_container_width=True):
+                        if check_payment_status(row["session_id"]):
+                            for r in sales_log:
+                                if r.get("Invoice #") == row["Invoice #"]:
+                                    r["Status"] = "Paid (Card)"
+                            save_table(pd.DataFrame(sales_log), "sales_log", shared=True)
+                            st.success(f"{row['Invoice #']} is paid!")
+                            st.rerun()
+                        else:
+                            st.info("Not paid yet.")
         else:
-            st.info("No charges created yet this session.")
+            st.info("No charges created yet.")
 
 # ==========================================================================
 # AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)

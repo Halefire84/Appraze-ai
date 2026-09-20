@@ -1,5 +1,14 @@
 """
 Cooper River Trading Co. — Appraze POS Checkout
+
+Wired into app.py's "Charge Customer" tab as of 2026-09-20. Previously
+app.py created Stripe charges via a raw inline Payment Link request that
+never set an invoice_id or wrote a sales_log row — the webhook
+reconciliation service (stripe_webhook_server.py) had nothing to match
+against, and "Recent Charges" only lived in ephemeral session state. This
+module's create_pos_checkout()/check_payment_status() are now the single
+path app.py uses to create and reconcile a charge; see app.py's
+tab_charge block.
 ----------------------------------------------------
 Different from billing.py's subscriber paywall on purpose: that one uses a
 fixed-price Payment Link (same price every time, for app access). A POS

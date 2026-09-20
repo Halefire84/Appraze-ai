@@ -101,5 +101,16 @@ def _apply_update(update: dict) -> None:
     result = update_sales_log_status(update["invoice_id"], update["new_status"])
     if not result.success:
         logger.warning("Could not update sales_log for invoice_id=%s: %s", update["invoice_id"], result.error)
-    elif not result.payload:
+        return
+    found = bool((result.payload or {}).get("found"))
+    applied = bool((result.payload or {}).get("applied"))
+    if not found:
         logger.info("No sales_log row found for invoice_id=%s yet (event may have arrived before the row was saved).", update["invoice_id"])
+    elif not applied:
+        # Found the row but the status-precedence check in AppsScript_Code.gs
+        # refused it as a downgrade (e.g. a delayed charge.succeeded arriving
+        # after its own refund) -- not an error, Stripe still gets a 2xx.
+        logger.info(
+            "sales_log row for invoice_id=%s not downgraded to %s (a more-final status already applied).",
+            update["invoice_id"], update["new_status"],
+        )

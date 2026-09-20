@@ -1,5 +1,10 @@
 """
 Cooper River Trading Co. — Appraze Drive Folder Scanner
+
+NOT CURRENTLY USED — nothing in this repo imports this file (verified by
+grep across app.py, pages/*.py, and tests/ on 2026-09-20), and it has no
+test coverage. README.md describes it as an active feature; that
+description is stale.
 -----------------------------------------------------------
 Scans a named Google Drive folder (e.g. "Invoices" or "Inventory") for new
 image/PDF files, via the same Apps Script backend used for auth/storage.

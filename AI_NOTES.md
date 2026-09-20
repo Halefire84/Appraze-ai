@@ -19,27 +19,70 @@ tools, since we can't see each other's sessions otherwise.
 - **Update this file** when you finish a chunk of work or hand off to a
   different tool, so the next session (any tool) isn't flying blind.
 
-## Current state of `main` (as of this file's last update)
+## Current state of `main` (last corrected 2026-09-20 — this section had
+drifted: it listed `verdict_engine.py`, which was deleted in commit
+`7aae182` and no longer exists, described several modules as active
+features that current `app.py` doesn't actually wire in, and its test
+count was stale. If you're an AI/human about to trust a summary here,
+cross-check it against `git log`/`grep` first — this file is exactly as
+capable of going stale as any other doc, as this correction proves.)
 
 Core app: `app.py` (Streamlit) + `finance.py` (pure math, unit-tested).
-Supporting modules: `auth.py` / `storage.py` (Apps Script-backed
-login+persistence, see `AppsScript_Code.gs`), `billing.py` / `pos.py` /
-`stripe_webhook_server.py` / `stripe_webhooks.py` / `webhook_store.py`
-(Stripe paywall + POS + webhook reconciliation), `comps.py` /
-`comps_adapters.py` (Market Comps engine — manual entry, CSV import, real
-eBay Browse API for active listings, real eBay Marketplace Insights API
-for sold comps with automatic fallback when that API isn't approved —
-see below), `mail.py` / `mail_parse.py` (read-only Gmail IMAP for
-supplier invoices), `drive_scan.py` (Google Drive invoice scanning),
-`verdict_engine.py`. 162 tests in `tests/`, all passing.
+`app.py`'s actual tabs today: Deal Dashboard, Profit Calculator,
+Inventory, Suppliers, Charge Customer, AI Analyzer — no Mail or Invoice
+Import tab exists despite some module docstrings describing those as
+current features. Charge Customer IS real POS now (see below) — that
+part of the earlier correction to this file is superseded already.
 
-Recent work (Claude, this session): a no-login Demo Mode for in-person
-pitching, AI Analyzer now drafts ready-to-post marketplace listings (not
-just a price estimate), real eBay sold-comps lookup wired into the AI
-Analyzer tab, and a fix moving every Apps Script HTTP call from GET to
-POST (the old GET version put full table payloads and the auth token in
-the URL query string — a real payload-size ceiling bug plus a
-credential-in-logs issue; both fixed).
+Supporting modules actually wired in: `auth.py` / `storage.py`
+(Apps Script-backed login+persistence, see `AppsScript_Code.gs`),
+`pos.py` / `billing.py`'s `verify_checkout_session()` (Charge Customer
+tab creates a one-off Stripe Checkout Session per sale via `pos.py` and
+persists it to the shared `sales_log` table, with a manual "Check
+Status" button and automatic webhook reconciliation both able to mark it
+paid — fixed 2026-09-20, see below),
+`stripe_webhook_server.py` / `stripe_webhooks.py` / `webhook_store.py`
+(standalone webhook-reconciliation service, separate from `app.py`),
+`comps.py` / `comps_adapters.py` (Market Comps engine — manual entry, CSV
+import, real eBay Browse API for active listings, real eBay Marketplace
+Insights API for sold comps with automatic fallback when that API isn't
+approved), plus the full Opportunity Radar / Holy Grail / flip-lifecycle
+module set under `pages/`.
+
+Built but NOT wired into any tab/page as of 2026-09-20 (each now says so
+in its own file header — see `README.md`'s "Built but not currently
+wired" section and `CRTC_HANDOFF.md` for the full inventory and why):
+`billing.py`'s subscriber-paywall half (`payment_link_url()`; its
+`verify_checkout_session()` IS used, see above), `mail.py` /
+`mail_parse.py`, `drive_scan.py`, `crtc.py` (superseded by
+`pages/5_🔗_Cross_List.py`), `financial_intelligence.py` /
+`payments_adapter.py` (future-roadmap scaffolding, see
+`CRTC_FINANCIAL_ROADMAP.md`), `crtc_learning.py` (tested, tied to
+`docs/CRTC_CONTINUOUS_HUNT.md`'s design), `ebay_image_scan.py` (recent,
+deliberate, not legacy). None were deleted — this environment treats
+file deletion as a destructive action needing explicit user
+confirmation — they're marked instead so nobody mistakes them for live
+code.
+
+315 tests in `tests/` as of 2026-09-20 (`python3 -m pytest tests/ -q`),
+all passing — re-run this yourself before trusting the number; it will
+drift the moment either of us adds more.
+
+Recent work (Claude): a no-login Demo Mode for in-person pitching, AI
+Analyzer now drafts ready-to-post marketplace listings (not just a price
+estimate), real eBay sold-comps lookup wired into the AI Analyzer tab, a
+fix moving every Apps Script HTTP call from GET to POST, Stripe webhook
+replay-protection (timestamp tolerance), a real PWA manifest `<head>`
+link, hardened `ebay_image_scan.py`, a testable AI listing-enrichment
+abstraction in `listing_bridge.py`, rich eBay listings preserved through
+`opportunity_sources.scan_ebay_active()` instead of collapsing to a
+single blank `source_listing_id`, a file-inventory correction (this
+section), and — same session, right after — wiring `pos.py`/`billing.py`
+into the Charge Customer tab because the old inline Payment Link flow
+never wrote an invoice_id or a `sales_log` row, so the webhook
+reconciliation service had nothing to match against and "Recent Charges"
+only lived in session state. First test coverage for both modules added
+(`tests/test_pos.py`, `tests/test_billing.py`).
 
 ## Deliberately NOT built here, and why
 

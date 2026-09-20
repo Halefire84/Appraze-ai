@@ -1,5 +1,15 @@
 """CRTC Cross-List Command Center.
 
+NOT CURRENTLY USED — nothing in this repo imports this file (verified by
+grep across app.py, pages/*.py, and tests/ on 2026-09-20). It predates and
+was superseded by pages/5_Cross_List.py, which does the same job as a
+real Streamlit page. Kept for reference/history rather than deleted
+(file deletion in this environment is a confirm-with-the-user action);
+this file would actually error if run standalone, since it calls
+st.set_page_config() outside the pages/ mechanism, which Streamlit only
+allows once per session. Safe to delete once someone confirms
+pages/5_Cross_List.py fully covers its functionality.
+
 One master inventory item produces marketplace-specific listing drafts.
 Listing lifecycle is persisted separately from flip inventory. Publishing is
 only performed by approved marketplace integrations; this prototype never

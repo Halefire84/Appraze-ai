@@ -155,6 +155,129 @@ class TestEbayBrowseAdapter(unittest.TestCase):
         mock_requests.post.assert_not_called()
         mock_requests.get.assert_not_called()
 
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_fetch_listings_preserves_rich_fields_fetch_comps_discards(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+
+        token_response = mock.Mock()
+        token_response.json.return_value = {"access_token": "fake_token", "expires_in": 7200}
+        token_response.raise_for_status.return_value = None
+
+        search_response = mock.Mock()
+        search_response.json.return_value = {
+            "itemSummaries": [
+                {
+                    "itemId": "v1|123456789|0",
+                    "title": "14k Gold Chain 22in",
+                    "shortDescription": "Solid 14k gold chain, tested.",
+                    "price": {"value": "240.00", "currency": "USD"},
+                    "condition": "Pre-owned",
+                    "itemWebUrl": "https://ebay.com/item/1",
+                    "shippingOptions": [{"shippingCost": {"value": "5.00"}}],
+                    "categories": [{"categoryId": "10968", "categoryName": "Jewelry & Watches"}],
+                    "image": {"imageUrl": "https://ebay.com/img/1.jpg"},
+                    "additionalImages": [{"imageUrl": "https://ebay.com/img/1b.jpg"}],
+                    "seller": {"username": "goldseller99"},
+                    "itemLocation": {"city": "Charleston"},
+                    "itemEndDate": "2026-09-25T12:00:00Z",
+                },
+            ]
+        }
+        search_response.raise_for_status.return_value = None
+
+        mock_requests.post.return_value = token_response
+        mock_requests.get.return_value = search_response
+
+        adapter = EbayBrowseAdapter()
+        listings = adapter.fetch_listings("14k gold chain")
+
+        self.assertEqual(len(listings), 1)
+        listing = listings[0]
+        self.assertEqual(listing["source_listing_id"], "v1|123456789|0")
+        self.assertEqual(listing["url"], "https://ebay.com/item/1")
+        self.assertEqual(listing["description"], "Solid 14k gold chain, tested.")
+        self.assertEqual(listing["category"], "Jewelry & Watches")
+        self.assertEqual(listing["price"], 240.0)
+        self.assertEqual(listing["seller"], "goldseller99")
+        self.assertEqual(listing["location"], "Charleston")
+        self.assertEqual(listing["images"], ["https://ebay.com/img/1.jpg", "https://ebay.com/img/1b.jpg"])
+        self.assertEqual(listing["auction_end"], "2026-09-25T12:00:00Z")
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_fetch_listings_falls_back_through_id_chain(self, mock_st, mock_requests):
+        """No itemId -> legacyItemId -> itemWebUrl, same fallback chain as
+        ebay_holy_grail.py's auction scan, so a listing never collapses to
+        the same blank source_listing_id as every other result."""
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        token_response = mock.Mock()
+        token_response.json.return_value = {"access_token": "tok", "expires_in": 7200}
+        token_response.raise_for_status.return_value = None
+        search_response = mock.Mock()
+        search_response.json.return_value = {
+            "itemSummaries": [
+                {"legacyItemId": "999888777", "title": "No itemId", "price": {"value": "10"}, "itemWebUrl": "https://ebay.com/item/2"},
+                {"title": "No id at all", "price": {"value": "12"}, "itemWebUrl": "https://ebay.com/item/3"},
+            ]
+        }
+        search_response.raise_for_status.return_value = None
+        mock_requests.post.return_value = token_response
+        mock_requests.get.return_value = search_response
+
+        listings = EbayBrowseAdapter().fetch_listings("test")
+        self.assertEqual(listings[0]["source_listing_id"], "999888777")
+        self.assertEqual(listings[1]["source_listing_id"], "https://ebay.com/item/3")
+        # The two listings never collapse onto the same identifier.
+        self.assertNotEqual(listings[0]["source_listing_id"], listings[1]["source_listing_id"])
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_fetch_listings_skips_bad_price_rows(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        token_response = mock.Mock()
+        token_response.json.return_value = {"access_token": "tok", "expires_in": 7200}
+        token_response.raise_for_status.return_value = None
+        search_response = mock.Mock()
+        search_response.json.return_value = {"itemSummaries": [{"title": "No price", "price": {}}]}
+        search_response.raise_for_status.return_value = None
+        mock_requests.post.return_value = token_response
+        mock_requests.get.return_value = search_response
+
+        self.assertEqual(EbayBrowseAdapter().fetch_listings("test"), [])
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_fetch_listings_empty_query_returns_no_listings_without_network_call(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        listings = EbayBrowseAdapter().fetch_listings("   ")
+        self.assertEqual(listings, [])
+        mock_requests.post.assert_not_called()
+        mock_requests.get.assert_not_called()
+
+    @mock.patch("comps_adapters.requests")
+    @mock.patch("comps_adapters.st")
+    def test_fetch_comps_behavior_is_unchanged_by_fetch_listings(self, mock_st, mock_requests):
+        """fetch_comps() must keep returning plain Comp objects exactly as
+        before -- fetch_listings() is a new sibling method, not a
+        replacement, and comps.py's valuation math depends on this shape."""
+        mock_st.secrets.get.side_effect = lambda k: {"EBAY_CLIENT_ID": "id", "EBAY_CLIENT_SECRET": "secret"}.get(k)
+        token_response = mock.Mock()
+        token_response.json.return_value = {"access_token": "tok", "expires_in": 7200}
+        token_response.raise_for_status.return_value = None
+        search_response = mock.Mock()
+        search_response.json.return_value = {
+            "itemSummaries": [{"title": "Item", "price": {"value": "50"}, "itemWebUrl": "https://ebay.com/x"}]
+        }
+        search_response.raise_for_status.return_value = None
+        mock_requests.post.return_value = token_response
+        mock_requests.get.return_value = search_response
+
+        comps = EbayBrowseAdapter().fetch_comps("item")
+        self.assertEqual(len(comps), 1)
+        self.assertIsInstance(comps[0], Comp)
+        self.assertEqual(comps[0].price, 50.0)
+
 
 class TestEbayMarketplaceInsightsAdapter(unittest.TestCase):
     def setUp(self):
