@@ -4,6 +4,35 @@
 **Product direction:** CRTC (Cooper River Trading Co.)  
 **Last handoff:** 2026-09-20 (P0 hardening: canonical decision engine + webhook correctness)
 
+## OPEN PRODUCT REQUIREMENTS (owner-requested 2026-09-20, not started — check this before closing out any "done" milestone)
+
+1. **Pluggable payment processor — not Stripe-only.** Owner wants the POS
+   "Charge Customer" flow to eventually support more than one merchant
+   processor, not lock the business owner into Stripe specifically.
+   `payments_adapter.py` already has provider-neutral scaffolding for this
+   (`PaymentEvent` dataclass) but nothing implements a second processor
+   yet. Scope realistically: pick one concrete second processor (Square
+   is the natural fit for in-person card POS) and build a real adapter
+   behind that interface — don't attempt a generic "any merchant" layer,
+   every processor's API shape is genuinely different.
+2. **Bring-your-own Anthropic API key.** Owner wants a business owner to
+   optionally supply their own `ANTHROPIC_API_KEY` for the AI
+   Analyzer/listing-enrichment features instead of relying on the shared
+   platform key. Blocked on architecture today: this is a single shared
+   Streamlit deployment (one global key), not multi-tenant. Two options,
+   different sizes of lift:
+   - Lighter: a per-session override field in the app UI, stored via the
+     existing Apps-Script-backed table (per-login, not truly multi-tenant
+     secrets).
+   - Heavier: real multi-tenant secret storage — a bigger architecture
+     change, see "Multi-tenant data isolation" under known limitations
+     below, which is already an open item for unrelated reasons.
+   Hard constraint either way: every AI feature must keep failing safe
+   with zero API calls when no key is configured (already true for
+   `enrich_listing_with_ai()` and the AI Analyzer — preserve this), and
+   nothing should call the API speculatively when a deterministic path
+   already answers the question.
+
 ## 2026-09-20 (later) — P0 hardening: canonical decision engine, webhook correctness, SKU/category fixes
 
 ### Where this came from
