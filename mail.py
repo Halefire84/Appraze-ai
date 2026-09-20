@@ -2,6 +2,14 @@
 mail.py — optional inbound-mail tracking for Appraze (supplier invoices and
 shipment tracking numbers), via read-only IMAP against a Gmail inbox.
 
+NOT CURRENTLY USED — nothing in this repo imports this file (verified by
+grep across app.py, pages/*.py, and tests/ on 2026-09-20). README.md
+describes it as "powering the Mail tab," but app.py has no Mail tab —
+grepped for "Mail tab", "IMAP", "Gmail" in app.py, zero hits. The GMAIL_ADDRESS
+/GMAIL_APP_PASSWORD secrets it needs are otherwise unused. mail_parse.py
+(the pure parsing logic this module calls) is real, tested, and kept as-is
+even though its only caller is this unused file.
+
 Cooper River Trading Co. doesn't order through a fixed warehouse the way a
 NAPA Auto Parts or a big-box retailer would — inventory comes from random
 estate auctions, HiBid lots, and (maybe someday) liquidation companies, so

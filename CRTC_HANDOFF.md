@@ -129,6 +129,73 @@ docstring already carries for the same reason. `scan_ebay_active()` still
 has no UI caller (unchanged from before this fix); wiring it into a page
 is future work, not done here.
 
+## 2026-09-20 — file inventory: mark dead code, correct stale docs
+The user asked for an inventory of "old shit" in the repo and to either
+delete or mark unused files. Built a full import graph (grepped every
+root `.py` module against `app.py`, every `pages/*.py`, and `tests/`) and
+cross-checked findings against `git log` per-file and the existing docs.
+
+**Attempted `git rm` on the confirmed-dead files; the environment's
+auto-mode classifier denied it as an "Irreversible Local Destruction"
+action.** Used the user's explicitly offered fallback instead: marked
+each file's docstring `NOT CURRENTLY USED` with the specific evidence,
+rather than deleting. Files are still present and importable; nothing
+was removed.
+
+Confirmed dead (zero references from `app.py`, any `pages/*.py`, or
+`tests/`), now marked in their own headers:
+- `crtc.py` — a Cross-List prototype superseded by
+  `pages/5_🔗_Cross_List.py`; would actually error if run standalone
+  (calls `st.set_page_config()` outside the `pages/` mechanism).
+- `pos.py` — superseded when `app.py` was consolidated into one
+  production app. **Notable side-finding, not yet resolved:** `app.py`'s
+  live "Charge Customer" tab creates a Stripe **Payment Link** (fixed
+  price) inline instead of using this module's one-off Checkout Session
+  approach — per this file's own docstring, a Payment Link is the wrong
+  primitive for a point-of-sale charge that's a different amount every
+  time. Worth revisiting: the live code may be the one that needs
+  fixing, not this file that needs deleting.
+- `billing.py` — only consumer was `pos.py` (also dead); `app.py` has no
+  paywall/subscription-verification logic anywhere (grepped for
+  "paywall", "subscription", "verify_checkout", "is_paid" — zero hits).
+- `mail.py` — `README.md` claimed it "powers the Mail tab"; `app.py` has
+  no Mail tab (grepped its 6 real tabs: Deal Dashboard, Profit
+  Calculator, Inventory, Suppliers, Charge Customer, AI Analyzer).
+- `drive_scan.py` — zero references anywhere, no test coverage.
+  `README.md` described it as active; that was stale.
+
+Kept as tested pure logic despite its only caller (`mail.py`) being dead:
+`mail_parse.py` (real tests in `tests/test_mail_parse.py`, small, easy to
+revive).
+
+Explicitly NOT marked dead / NOT touched — different category from the
+above (unused today, but tied to a live roadmap doc or recent deliberate
+work, not superseded legacy code): `financial_intelligence.py` /
+`payments_adapter.py` (scaffolding named in `CRTC_FINANCIAL_ROADMAP.md`),
+`crtc_learning.py` (tested, referenced by `docs/CRTC_CONTINUOUS_HUNT.md`),
+`ebay_image_scan.py` (hardened by Claude in the 2026-09-18 pass,
+deliberately staged for future wiring, not legacy).
+
+Docs corrected to stop describing dead/unused modules as live features:
+- `README.md` — fixed the intro line and `app.py`'s tab list to match
+  its actual 6 tabs (verified by grepping `st.tabs(...)`), split the
+  module list into "wired in" vs. "built but not currently wired," and
+  removed a bullet for `verdict_engine.py`, which doesn't exist in this
+  repo at all (deleted in commit `7aae182`, long before this pass —
+  `README.md` had never been updated to drop it).
+- `AI_NOTES.md` — this is a **multi-agent coordination file**; the repo
+  is also worked on by another AI (Grok) per its own text. Its "current
+  state" summary was stale (162 tests when the real count is 300, the
+  same nonexistent `verdict_engine.py` reference, several modules
+  described as active that aren't). Corrected in place rather than
+  rewritten, with an explicit note-to-self at the top: this file can go
+  stale exactly like any other doc, so cross-check it against
+  `git log`/`grep` rather than trusting it blindly.
+
+Tests run: `python3 -m pytest tests/ -q` -> 300 passed, 0 failed (no
+regressions — no runtime code changed, only docstrings/markdown).
+`python3 -m compileall -q .` -> exit 0. `git diff --check` -> exit 0.
+
 ## Unresolved issues carried into the next session
 The "CRTC — New Master Development Direction" P0 list has NOT been
 started yet (no code changes in this entry address it):

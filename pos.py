@@ -1,5 +1,17 @@
 """
 Cooper River Trading Co. — Appraze POS Checkout
+
+NOT CURRENTLY USED — nothing in this repo imports this file (verified by
+grep across app.py, pages/*.py, and tests/ on 2026-09-20). It was
+superseded when app.py was consolidated into one production app: app.py's
+own "Recent Charges" flow creates Stripe charges inline via a raw Payment
+Link request instead of calling this module's one-off Checkout Session
+approach. Worth a second look before deleting outright: per this file's
+own docstring below, a Payment Link (fixed price) is arguably the wrong
+Stripe primitive for point-of-sale (a different dollar amount every sale)
+compared to this module's Checkout Session approach — app.py's live
+behavior may be the one that needs fixing, not this file that needs
+deleting. Flagged 2026-09-20, not resolved.
 ----------------------------------------------------
 Different from billing.py's subscriber paywall on purpose: that one uses a
 fixed-price Payment Link (same price every time, for app access). A POS

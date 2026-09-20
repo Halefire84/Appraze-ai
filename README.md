@@ -3,8 +3,12 @@
 A single-page Streamlit dashboard for tracking, filtering, and evaluating
 resale/auction deals across CTBids, eBay, HiBid, Facebook Marketplace,
 Mercari, Chairish, and Etsy — plus inventory margin tracking, market comps
-valuation, an AI item analyzer, invoice import, mail tracking, and
-point-of-sale checkout.
+valuation, an AI item analyzer, and Stripe charge creation. (`app.py`'s
+actual tabs, as of 2026-09-20: Deal Dashboard, Profit Calculator,
+Inventory, Suppliers, Charge Customer, AI Analyzer. Several modules below
+implement invoice-import/mail-tracking/POS features that were built but
+are not currently wired into any tab — see their "NOT CURRENTLY USED"
+file headers.)
 
 ## Run locally
 
@@ -36,9 +40,9 @@ syntax.
 
 ## Project layout
 
-- `app.py` — the Streamlit UI and production entry point (all tabs: Deal
-  Dashboard, Inventory, Profit Calculator, Melt Calculator, Market Comps,
-  AI Analyzer, Invoice Import, Mail, POS Checkout)
+- `app.py` — the Streamlit UI and production entry point (tabs: Deal
+  Dashboard, Profit Calculator, Inventory, Suppliers, Charge Customer, AI
+  Analyzer)
 - `finance.py` — pure profit/margin/melt/tax math, the single source of
   truth for every dollar figure shown in the app; unit-tested, no
   Streamlit/pandas dependency
@@ -57,24 +61,43 @@ syntax.
   hashing, session gating
 - `storage.py` — persists any named table (deals, inventory, sales_log, ...)
   per user via the same Apps Script backend
-- `billing.py` — verifies Stripe Payment Link checkout sessions (subscriber
-  paywall)
-- `pos.py` — creates one-off Stripe Checkout Sessions for point-of-sale
-  charges, tagged with an invoice ID the webhook service reconciles later
-- `drive_scan.py` — scans a named Google Drive folder for new invoice
-  files via the same Apps Script backend
 - `stripe_webhooks.py` — pure, unit-tested Stripe webhook signature
   verification + event handling
 - `stripe_webhook_server.py` / `webhook_store.py` — the small standalone
   FastAPI service (deployed separately from Streamlit) that receives those
   webhooks and reconciles POS sales automatically; see DEPLOY.md
-- `verdict_engine.py` — standalone deterministic buy/pass scorer with its
-  own risk/confidence model; not currently called from `app.py`
-- `mail.py` / `mail_parse.py` — read-only Gmail tracking of supplier
-  invoices/shipments, powering the Mail tab; parsing logic is unit-tested
-- `AppsScript_Code.gs` — the Apps Script backend `auth.py`/`storage.py`/
-  `drive_scan.py` talk to; paste into a Sheet's Extensions → Apps Script
-  (see DEPLOY.md — replace the placeholder `SHEET_ID`/`TOKEN`/
-  `ADMIN_SETUP_CODE` with your own before deploying)
+- `AppsScript_Code.gs` — the Apps Script backend `auth.py`/`storage.py`
+  talk to; paste into a Sheet's Extensions → Apps Script (see DEPLOY.md —
+  replace the placeholder `SHEET_ID`/`TOKEN`/`ADMIN_SETUP_CODE` with your
+  own before deploying)
 - `static/` — PWA manifest + icons for "Install as app"
 - `tests/` — unit tests
+
+### Built but not currently wired into `app.py` (marked "NOT CURRENTLY
+USED" in each file's own header as of 2026-09-20 — kept rather than
+deleted; see `CRTC_HANDOFF.md` for the full inventory)
+
+- `billing.py` — verifies Stripe Payment Link checkout sessions
+  (subscriber paywall); `app.py` has no paywall logic today
+- `pos.py` — creates one-off Stripe Checkout Sessions for point-of-sale
+  charges; `app.py`'s live "Charge Customer" tab instead creates a Stripe
+  Payment Link inline, which is arguably the wrong primitive for a
+  different amount every sale — flagged, not yet resolved
+- `drive_scan.py` — scans a named Google Drive folder for new invoice
+  files via the Apps Script backend
+- `mail.py` / `mail_parse.py` — read-only Gmail tracking of supplier
+  invoices/shipments; no Mail tab exists in `app.py`. `mail_parse.py`'s
+  parsing logic is real and unit-tested even though its only caller isn't
+  wired in
+- `crtc.py` — an earlier Cross-List prototype, superseded by
+  `pages/5_🔗_Cross_List.py`
+- `financial_intelligence.py` / `payments_adapter.py` — provider-neutral
+  scaffolding for a planned future Plaid/Venmo/PayPal integration (see
+  `CRTC_FINANCIAL_ROADMAP.md`), not yet built upon
+- `crtc_learning.py` — outcome-tracking/learning-loop module, tested but
+  not yet wired into Opportunity Radar (see `docs/CRTC_CONTINUOUS_HUNT.md`)
+- `ebay_image_scan.py` — hardened eBay search-by-image adapter, tested,
+  intentionally not yet called from any page (recent work, not legacy)
+
+Note: `verdict_engine.py`, previously listed here, was removed from the
+repo entirely (commit `7aae182`) — this file no longer exists.

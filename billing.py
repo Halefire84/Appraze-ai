@@ -1,5 +1,12 @@
 """
 Cooper River Trading Co. — Appraze Billing
+
+NOT CURRENTLY USED — nothing in this repo imports this file except pos.py
+(itself unused; see pos.py's own banner), verified by grep across app.py,
+pages/*.py, and tests/ on 2026-09-20. app.py has no paywall/subscription
+verification logic anywhere (grepped for "paywall", "subscription",
+"verify_checkout", "is_paid" — zero hits), so the subscriber-paywall
+feature this module implements does not currently exist in the live app.
 ---------------------------------------------
 Deliberately uses Stripe PAYMENT LINKS, not the Checkout Sessions API or any
 card element — consistent with CRTC's "Stripe Payment Links only, no raw
