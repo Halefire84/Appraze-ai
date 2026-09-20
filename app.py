@@ -11,7 +11,7 @@ Run locally (optional, no terminal needed for deployment - see DEPLOY.md):
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import io
 import base64
 import json
@@ -208,6 +208,34 @@ st.session_state.deals = st.session_state.deals_by_ws[WORKSPACE]
 
 if "editor_key" not in st.session_state:
     st.session_state.editor_key = 0
+
+
+# --------------------------------------------------------------------------
+# BUSINESS PROFILE — document identity belongs to the logged-in CRTC customer
+# --------------------------------------------------------------------------
+BUSINESS_PROFILE_DEFAULTS = {
+    "Business Name": "",
+    "Legal Name": "",
+    "Tax ID / EIN": "",
+    "Business Address": "",
+    "Phone": "",
+    "Email": "",
+    "Website": "",
+    "Invoice Footer": "",
+    "Tax Registration / State": "",
+}
+
+
+def load_business_profile():
+    result = load_table("business_profile")
+    if result.success and result.payload:
+        row = result.payload[0]
+        return {**BUSINESS_PROFILE_DEFAULTS, **row}
+    return dict(BUSINESS_PROFILE_DEFAULTS)
+
+
+def save_business_profile(profile):
+    return save_table(pd.DataFrame([profile]), "business_profile")
 
 
 def recalc(df: pd.DataFrame) -> pd.DataFrame:
@@ -784,6 +812,42 @@ with tab_charge:
 # ACCOUNTS / QUOTES / INVOICES
 # ===========================================================================
 with tab_accounts:
+    st.markdown("#### Business Profile & Sales Documents")
+    st.caption("Your business identity is used on quotes, invoices and printable sales documents.")
+
+    if "business_profile" not in st.session_state:
+        st.session_state.business_profile = load_business_profile()
+
+    profile = st.session_state.business_profile
+    with st.expander("⚙️ Your business information", expanded=not bool(profile.get("Business Name"))):
+        with st.form("business_profile_form"):
+            bp1, bp2 = st.columns(2)
+            with bp1:
+                business_name = st.text_input("Business / DBA name", value=profile.get("Business Name", ""))
+                legal_name = st.text_input("Legal business name", value=profile.get("Legal Name", ""))
+                tax_id = st.text_input("Tax ID / EIN", value=profile.get("Tax ID / EIN", ""), type="password", help="Stored as part of your business profile. Only include what you need printed on your documents.")
+                tax_registration = st.text_input("Tax registration / state", value=profile.get("Tax Registration / State", ""))
+                phone = st.text_input("Business phone", value=profile.get("Phone", ""))
+            with bp2:
+                email = st.text_input("Business email", value=profile.get("Email", ""))
+                website = st.text_input("Website", value=profile.get("Website", ""))
+                address = st.text_area("Business address", value=profile.get("Business Address", ""))
+                footer = st.text_area("Invoice / quote footer", value=profile.get("Invoice Footer", ""), placeholder="Payment terms, thank-you message, return policy, etc.")
+            save_profile = st.form_submit_button("Save business information", use_container_width=True)
+        if save_profile:
+            st.session_state.business_profile = {
+                "Business Name": business_name.strip(), "Legal Name": legal_name.strip(),
+                "Tax ID / EIN": tax_id.strip(), "Tax Registration / State": tax_registration.strip(),
+                "Business Address": address.strip(), "Phone": phone.strip(), "Email": email.strip(),
+                "Website": website.strip(), "Invoice Footer": footer.strip(),
+            }
+            result = save_business_profile(st.session_state.business_profile)
+            if result.success:
+                st.success("Business information saved. New documents will use it.")
+            else:
+                st.error(f"Could not save business information: {result.error}")
+
+    st.markdown("---")
     st.markdown("#### Customers, Quotes & Invoices")
     st.caption("Repeat customers, quotes, invoices, discounts and payment tracking — focused on reseller operations.")
 
@@ -902,7 +966,7 @@ with tab_accounts:
                     for col, val in [("Amount Paid", payment["amount_paid"]), ("Amount Due", payment["amount_due"]), ("Status", payment["status"])]: st.session_state.sales_documents.loc[doc_idx, col] = val
                     save_table(st.session_state.sales_documents, "sales_documents")
                     st.rerun()
-            html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{doc["Document #"]}</title><style>body{{font-family:Arial;max-width:800px;margin:40px auto;padding:20px}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #ddd}}</style></head><body><h1>Cooper River Trading Co.</h1><h2>{doc["Type"]} {doc["Document #"]}</h2><p><b>Customer:</b> {doc["Customer"]} ({doc["Account #"]})</p><p><b>Issued:</b> {doc["Issue Date"]} &nbsp; <b>Due:</b> {doc["Due Date"] or "—"}</p><p><b>Status:</b> {doc["Status"]}</p><hr><table><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr>{"" .join(f"<tr><td>{item.get('Description', '')}</td><td>{float(item.get('Quantity', 0)):g}</td><td>${float(item.get('Unit Price', 0)):,.2f}</td><td>${float(item.get('Quantity', 0))*float(item.get('Unit Price', 0)):,.2f}</td></tr>" for item in json.loads(doc.get("Line Items", "[]") or "[]"))}</table><p>Subtotal: ${float(doc["Subtotal"]):,.2f}<br>Discount: -${float(doc["Discount"]):,.2f}<br>Tax: ${float(doc["Tax"]):,.2f}<br>Shipping: ${float(doc["Shipping"]):,.2f}</p><h2>Total: ${float(doc["Total"]):,.2f}</h2><p>Amount due: ${float(doc["Amount Due"]):,.2f}</p><p>Print this page or save as PDF from your browser.</p></body></html>"""
+            html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{doc["Document #"]}</title><style>body{{font-family:Arial;max-width:800px;margin:40px auto;padding:20px}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #ddd}}</style></head><body><h1>{profile.get("Business Name") or profile.get("Legal Name") or "Your Business"}</h1><p>{profile.get("Business Address","")}<br>{profile.get("Phone","")} · {profile.get("Email","")} · {profile.get("Website","")}</p><h2>{doc["Type"]} {doc["Document #"]}</h2><p><b>Customer:</b> {doc["Customer"]} ({doc["Account #"]})</p><p><b>Issued:</b> {doc["Issue Date"]} &nbsp; <b>Due:</b> {doc["Due Date"] or "—"}</p><p><b>Status:</b> {doc["Status"]}</p><hr><table><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr>{"" .join(f"<tr><td>{item.get('Description', '')}</td><td>{float(item.get('Quantity', 0)):g}</td><td>${float(item.get('Unit Price', 0)):,.2f}</td><td>${float(item.get('Quantity', 0))*float(item.get('Unit Price', 0)):,.2f}</td></tr>" for item in json.loads(doc.get("Line Items", "[]") or "[]"))}</table><p>Subtotal: ${float(doc["Subtotal"]):,.2f}<br>Discount: -${float(doc["Discount"]):,.2f}<br>Tax: ${float(doc["Tax"]):,.2f}<br>Shipping: ${float(doc["Shipping"]):,.2f}</p><h2>Total: ${float(doc["Total"]):,.2f}</h2><p>Amount due: ${float(doc["Amount Due"]):,.2f}</p><p><b>Tax ID / EIN:</b> {profile.get("Tax ID / EIN","")} &nbsp; <b>Tax registration:</b> {profile.get("Tax Registration / State","")}</p><p>{profile.get("Invoice Footer","")}</p><p>Print this page or save as PDF from your browser.</p></body></html>"""
             st.download_button("Download printable document", html, file_name=f"{doc['Document #']}.html", mime="text/html", use_container_width=True)
         else: st.info("No quotes or invoices yet.")
 
