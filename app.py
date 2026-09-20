@@ -788,7 +788,7 @@ with tab_accounts:
     st.caption("Repeat customers, quotes, invoices, discounts and payment tracking — focused on reseller operations.")
 
     account_cols = ["Account #", "Business / Customer", "Contact", "Email", "Phone", "Billing Address", "Shipping Address", "Payment Terms", "Default Discount %", "Notes", "Created"]
-    doc_cols = ["Document #", "Type", "Account #", "Customer", "Issue Date", "Due Date", "Expiration Date", "Status", "Subtotal", "Discount", "Tax", "Shipping", "Total", "Amount Paid", "Amount Due", "Notes", "Created"]
+    doc_cols = ["Document #", "Type", "Account #", "Customer", "Issue Date", "Due Date", "Expiration Date", "Status", "Subtotal", "Discount", "Tax", "Shipping", "Total", "Amount Paid", "Amount Due", "Line Items", "Notes", "Created"]
     if "customer_accounts" not in st.session_state:
         loaded = load_table("customer_accounts")
         st.session_state.customer_accounts = pd.DataFrame(loaded.payload, columns=account_cols) if loaded.success and loaded.payload else pd.DataFrame(columns=account_cols)
@@ -804,6 +804,8 @@ with tab_accounts:
             contact = st.text_input("Contact person")
             email = st.text_input("Email")
             phone = st.text_input("Phone")
+            billing_address = st.text_area("Billing address")
+            shipping_address = st.text_area("Shipping address")
             terms = st.selectbox("Payment terms", ["Due on receipt", "Net 7", "Net 15", "Net 30", "Custom"])
             default_discount = st.number_input("Default discount %", min_value=0.0, max_value=100.0, step=1.0)
             notes = st.text_area("Notes")
@@ -812,7 +814,7 @@ with tab_accounts:
             if not customer_name.strip():
                 st.error("Customer/business name is required.")
             else:
-                row = {"Account #": new_account_number(), "Business / Customer": customer_name.strip(), "Contact": contact.strip(), "Email": email.strip(), "Phone": phone.strip(), "Billing Address": "", "Shipping Address": "", "Payment Terms": terms, "Default Discount %": default_discount, "Notes": notes.strip(), "Created": datetime.now().strftime("%Y-%m-%d %H:%M")}
+                row = {"Account #": new_account_number(), "Business / Customer": customer_name.strip(), "Contact": contact.strip(), "Email": email.strip(), "Phone": phone.strip(), "Billing Address": billing_address.strip(), "Shipping Address": shipping_address.strip(), "Payment Terms": terms, "Default Discount %": default_discount, "Notes": notes.strip(), "Created": datetime.now().strftime("%Y-%m-%d %H:%M")}
                 st.session_state.customer_accounts = pd.concat([st.session_state.customer_accounts, pd.DataFrame([row])], ignore_index=True)
                 save_table(st.session_state.customer_accounts, "customer_accounts")
                 st.success(f"Saved {row['Business / Customer']} ({row['Account #']}).")
@@ -858,7 +860,7 @@ with tab_accounts:
                 kind = "QUO" if create_quote else "INV"
                 doc_no = new_document_number(kind)
                 is_quote = create_quote
-                row = {"Document #": doc_no, "Type": "Quote" if is_quote else "Invoice", "Account #": selected_account["Account #"], "Customer": selected_account["Business / Customer"], "Issue Date": date.today().isoformat(), "Due Date": "" if is_quote else (date.today() + pd.Timedelta(days=30)).isoformat(), "Expiration Date": (date.today() + pd.Timedelta(days=14)).isoformat() if is_quote else "", "Status": "Draft" if is_quote else ("Awaiting Payment" if create_payment_link else "Unpaid"), "Subtotal": totals["subtotal"], "Discount": totals["discount"], "Tax": totals["tax"], "Shipping": totals["shipping"], "Total": totals["total"], "Amount Paid": 0.0, "Amount Due": totals["total"], "Notes": "", "Created": datetime.now().strftime("%Y-%m-%d %H:%M")}
+                row = {"Document #": doc_no, "Type": "Quote" if is_quote else "Invoice", "Account #": selected_account["Account #"], "Customer": selected_account["Business / Customer"], "Issue Date": date.today().isoformat(), "Due Date": "" if is_quote else (date.today() + pd.Timedelta(days=30)).isoformat(), "Expiration Date": (date.today() + pd.Timedelta(days=14)).isoformat() if is_quote else "", "Status": "Draft" if is_quote else ("Awaiting Payment" if create_payment_link else "Unpaid"), "Subtotal": totals["subtotal"], "Discount": totals["discount"], "Tax": totals["tax"], "Shipping": totals["shipping"], "Total": totals["total"], "Amount Paid": 0.0, "Amount Due": totals["total"], "Line Items": json.dumps(line_items.to_dict("records")), "Notes": "", "Created": datetime.now().strftime("%Y-%m-%d %H:%M")}
                 st.session_state.sales_documents = pd.concat([st.session_state.sales_documents, pd.DataFrame([row])], ignore_index=True)
                 save_table(st.session_state.sales_documents, "sales_documents")
                 if create_payment_link:
@@ -883,6 +885,16 @@ with tab_accounts:
             chosen = st.selectbox("Manage document", options, key="manage_sales_doc")
             doc_idx = int(chosen.split(" — ", 1)[0])
             doc = docs.loc[doc_idx]
+            if doc["Type"] == "Quote":
+                if st.button("Convert Quote to Invoice", key=f"convert_{doc['Document #']}"):
+                    invoice_no = new_document_number("INV")
+                    converted = doc.to_dict()
+                    converted.update({"Document #": invoice_no, "Type": "Invoice", "Issue Date": date.today().isoformat(), "Due Date": (date.today() + pd.Timedelta(days=30)).isoformat(), "Expiration Date": "", "Status": "Unpaid", "Amount Paid": 0.0, "Amount Due": float(doc["Total"]), "Created": datetime.now().strftime("%Y-%m-%d %H:%M")})
+                    st.session_state.sales_documents = pd.concat([st.session_state.sales_documents, pd.DataFrame([converted])], ignore_index=True)
+                    st.session_state.sales_documents.loc[doc_idx, "Status"] = "Accepted / Converted"
+                    save_table(st.session_state.sales_documents, "sales_documents")
+                    st.success(f"Created invoice {invoice_no} from {doc['Document #']}.")
+                    st.rerun()
             if doc["Type"] == "Invoice":
                 pay = st.number_input("Record payment", min_value=0.0, max_value=float(doc["Amount Due"] or 0), step=1.0, key=f"pay_{doc['Document #']}")
                 if st.button("Apply Payment", key=f"apply_{doc['Document #']}"):
@@ -890,7 +902,7 @@ with tab_accounts:
                     for col, val in [("Amount Paid", payment["amount_paid"]), ("Amount Due", payment["amount_due"]), ("Status", payment["status"])]: st.session_state.sales_documents.loc[doc_idx, col] = val
                     save_table(st.session_state.sales_documents, "sales_documents")
                     st.rerun()
-            html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{doc["Document #"]}</title><style>body{{font-family:Arial;max-width:800px;margin:40px auto;padding:20px}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #ddd}}</style></head><body><h1>Cooper River Trading Co.</h1><h2>{doc["Type"]} {doc["Document #"]}</h2><p><b>Customer:</b> {doc["Customer"]} ({doc["Account #"]})</p><p><b>Issued:</b> {doc["Issue Date"]} &nbsp; <b>Due:</b> {doc["Due Date"] or "—"}</p><p><b>Status:</b> {doc["Status"]}</p><hr><p>Subtotal: ${float(doc["Subtotal"]):,.2f}<br>Discount: -${float(doc["Discount"]):,.2f}<br>Tax: ${float(doc["Tax"]):,.2f}<br>Shipping: ${float(doc["Shipping"]):,.2f}</p><h2>Total: ${float(doc["Total"]):,.2f}</h2><p>Amount due: ${float(doc["Amount Due"]):,.2f}</p><p>Print this page or save as PDF from your browser.</p></body></html>"""
+            html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{doc["Document #"]}</title><style>body{{font-family:Arial;max-width:800px;margin:40px auto;padding:20px}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #ddd}}</style></head><body><h1>Cooper River Trading Co.</h1><h2>{doc["Type"]} {doc["Document #"]}</h2><p><b>Customer:</b> {doc["Customer"]} ({doc["Account #"]})</p><p><b>Issued:</b> {doc["Issue Date"]} &nbsp; <b>Due:</b> {doc["Due Date"] or "—"}</p><p><b>Status:</b> {doc["Status"]}</p><hr><table><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr>{"" .join(f"<tr><td>{item.get('Description', '')}</td><td>{float(item.get('Quantity', 0)):g}</td><td>${float(item.get('Unit Price', 0)):,.2f}</td><td>${float(item.get('Quantity', 0))*float(item.get('Unit Price', 0)):,.2f}</td></tr>" for item in json.loads(doc.get("Line Items", "[]") or "[]"))}</table><p>Subtotal: ${float(doc["Subtotal"]):,.2f}<br>Discount: -${float(doc["Discount"]):,.2f}<br>Tax: ${float(doc["Tax"]):,.2f}<br>Shipping: ${float(doc["Shipping"]):,.2f}</p><h2>Total: ${float(doc["Total"]):,.2f}</h2><p>Amount due: ${float(doc["Amount Due"]):,.2f}</p><p>Print this page or save as PDF from your browser.</p></body></html>"""
             st.download_button("Download printable document", html, file_name=f"{doc['Document #']}.html", mime="text/html", use_container_width=True)
         else: st.info("No quotes or invoices yet.")
 
