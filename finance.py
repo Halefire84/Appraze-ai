@@ -123,6 +123,23 @@ def sales_tax(subtotal, tax_rate_pct):
 # so the math is provably the same math the existing test suite
 # (tests/test_finance.py, tests/test_smoke.py) already verifies.
 
+import math as _math
+
+
+def _finance_invalid(*values):
+    """Return True if any value is NaN, Inf, or not coercible to float."""
+    for v in values:
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return True
+        if _math.isnan(f) or _math.isinf(f):
+            return True
+    return False
+
+
 DEFAULT_FEE_PCT = 13.0        # marketplace / payment-processing resale fee
 DEFAULT_PREMIUM_PCT = 18.0    # buyer's premium at purchase (CTBids default)
 
@@ -183,6 +200,14 @@ def calc_deal(cost, resale_value, fee_pct=DEFAULT_FEE_PCT, premium_pct=DEFAULT_P
     fee_pct:       platform resale fee, e.g. eBay/Mercari ~13%
     premium_pct:   buyer's premium at purchase, e.g. CTBids 18%
     """
+    if _finance_invalid(cost, resale_value, fee_pct, premium_pct):
+        # A malformed number (NaN/Inf/non-numeric) must never produce a
+        # legitimate BUY/STRONG BUY verdict -- fail to PASS instead.
+        return DealResult(0.0, 0.0, 0.0, 0.0, "PASS", "pass")
+    if cost is not None and float(cost) < 0:
+        return DealResult(0.0, 0.0, 0.0, 0.0, "PASS", "pass")
+    if resale_value is not None and float(resale_value) < 0:
+        return DealResult(0.0, 0.0, 0.0, 0.0, "PASS", "pass")
     true_cost = cost * (1 + premium_pct / 100)
     net_resale = resale_value * (1 - fee_pct / 100)
     gross_profit = net_resale - true_cost
