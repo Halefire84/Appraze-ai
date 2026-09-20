@@ -448,3 +448,137 @@ That decision should be made from evidence: user demand, usage frequency, techni
 
 **Guiding principle: Do not shrink the vision. Shrink the immediate scope.**
 
+
+
+## Beta Telemetry & Outcome Intelligence — Add to Launch Architecture
+
+CRTC should include a **privacy-conscious product telemetry layer** during beta so product decisions are based on real usage rather than guesses.
+
+### What to measure
+
+Track aggregate, non-sensitive product events such as:
+- Feature usage counts
+- Screen/workflow usage
+- Deal analyses started/completed
+- BUY/PASS decisions
+- Max Safe Buy calculations
+- Sold-comp searches
+- Inventory actions
+- Listing drafts generated
+- Crosslisting draft usage
+- Photo analyzer usage
+- POS/local-sale usage
+- Errors and failed workflows
+- Time-to-complete key workflows
+- Feature adoption and retention
+
+### What to measure for CRTC accuracy
+
+The most important telemetry is the **prediction → outcome loop**.
+
+For each eligible analyzed deal, retain the minimum data needed to compare:
+- predicted sale price/range
+- predicted profit/range
+- predicted ROI
+- predicted BUY/PASS
+- predicted maximum safe buy
+- confidence/evidence level
+
+Then, when the item actually sells, compare against:
+- actual sale price
+- actual fees
+- actual shipping
+- actual acquisition cost
+- actual realized profit
+- actual time-to-sale
+
+Calculate aggregate accuracy metrics such as:
+- predicted vs actual sale-price error
+- predicted vs actual profit error
+- predicted vs actual ROI error
+- BUY/PASS outcome accuracy
+- Max Safe Buy safety rate
+- percentage of profitable vs unprofitable purchases
+- confidence calibration over time
+
+Do not label an individual prediction as "correct" merely because the eventual sale price was close. Define outcome rules explicitly and document them.
+
+### Reporting
+
+Create an internal beta analytics/reporting view that can show:
+- Most-used features
+- Least-used features
+- Feature adoption over time
+- Funnel drop-off
+- Error rates
+- Average workflow completion time
+- BUY/PASS distribution
+- Predicted vs actual performance
+- Accuracy trends
+- Inventory aging/outcomes when enough data exists
+
+Support time ranges such as:
+- Today
+- 7 days
+- 30 days
+- Beta-to-date
+
+### Daily report
+
+Design the system so a daily report can eventually summarize:
+1. Users active
+2. Most-used features
+3. Least-used features
+4. Major errors
+5. Deal-analysis volume
+6. BUY/PASS distribution
+7. Prediction/outcome accuracy
+8. Notable changes from the previous day
+9. Features showing weak adoption
+10. Suggested investigation areas
+
+The daily report is an **observability/product-learning tool**, not an automated decision-maker. It should surface evidence for the product team to review.
+
+### Privacy and trust
+
+Telemetry must be:
+- Minimal
+- Purpose-limited
+- Documented
+- Configurable where appropriate
+- Free of passwords, payment secrets, authentication tokens and unnecessary PII
+- Careful with item/listing data that could identify a user
+- Protected with normal application security controls
+
+Prefer aggregated/product-usage events over recording raw user content.
+
+Do not collect more data simply because it might be useful later.
+
+### Architecture principle
+
+Telemetry should be implemented as a **thin instrumentation layer**, not woven through business logic.
+
+Use stable event names and a versioned event schema.
+
+Example conceptual events:
+- `deal_analysis_started`
+- `deal_analysis_completed`
+- `buy_pass_decision`
+- `max_safe_buy_calculated`
+- `sold_comp_search`
+- `inventory_item_created`
+- `listing_draft_created`
+- `photo_analysis_completed`
+- `sale_recorded`
+- `prediction_outcome_recorded`
+- `workflow_error`
+
+Never log sensitive request bodies, credentials or secrets.
+
+### Important product principle
+
+**Instrument before optimizing.**
+
+We should learn what beta users actually use before deciding what to expand, consolidate or move into the future/separate-product roadmap.
+
+This telemetry becomes part of the CRTC moat: the product can eventually learn from the difference between what it predicted and what actually happened.
