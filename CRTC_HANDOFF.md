@@ -663,3 +663,8 @@ Use **CRTC** as the product-facing name going forward. The GitHub repository nam
 
 ## Handoff instruction
 If context/usage runs out, resume from this document. First inspect the current repository state and recent commits, then continue with the numbered "Next implementation target" above. Do not rebuild prior work.
+
+
+## 2026-09-20 — Windows Store deployment pass
+
+Added a Windows Store deployment plan on branch `feat/crtc-windows-store`. The planned architecture is a thin Windows App SDK/WinUI 3 + WebView2 shell around the existing HTTPS Streamlit application, preserving current web behavior. Added Windows Store README, launch plan, build checklist, and ignore rules. No native rewrite or billing implementation was added. MSIX/build testing is NOT claimed because this environment is not Windows; validation must run on the Windows development machine/CI before merge.
