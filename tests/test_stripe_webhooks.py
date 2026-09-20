@@ -12,10 +12,12 @@ import unittest
 
 from stripe_webhooks import (
     StripeWebhookError,
+    can_transition,
     handle_charge_failed,
     handle_charge_refunded,
     handle_charge_succeeded,
     process_webhook_event,
+    status_rank,
     update_invoice_status,
     verify_stripe_signature,
 )
@@ -75,10 +77,15 @@ class TestVerifyStripeSignature(unittest.TestCase):
             verify_stripe_signature(payload, f"t=not-a-number,v1={signature}", WEBHOOK_SECRET)
 
     def test_stale_timestamp_is_rejected_as_a_possible_replay(self):
+        # A stale timestamp is treated as a validation failure (raises),
+        # not a plain "signature didn't match" (False) -- it's a possible
+        # replay of a captured valid payload+signature, which is a more
+        # serious finding than an ordinary mismatch.
         payload = b'{"type": "charge.succeeded"}'
         old_timestamp = int(time.time()) - 600  # 10 minutes old > 5 minute tolerance
         header = _sign(payload, timestamp=old_timestamp)
-        self.assertFalse(verify_stripe_signature(payload, header, WEBHOOK_SECRET))
+        with self.assertRaises(StripeWebhookError):
+            verify_stripe_signature(payload, header, WEBHOOK_SECRET)
 
     def test_timestamp_within_tolerance_passes(self):
         payload = b'{"type": "charge.succeeded"}'
@@ -92,14 +99,15 @@ class TestVerifyStripeSignature(unittest.TestCase):
         payload = b'{"type": "charge.succeeded"}'
         future_timestamp = int(time.time()) + 600
         header = _sign(payload, timestamp=future_timestamp)
-        self.assertFalse(verify_stripe_signature(payload, header, WEBHOOK_SECRET))
+        with self.assertRaises(StripeWebhookError):
+            verify_stripe_signature(payload, header, WEBHOOK_SECRET)
 
     def test_tolerance_disabled_accepts_stale_timestamp(self):
         payload = b'{"type": "charge.succeeded"}'
         old_timestamp = int(time.time()) - 600
         header = _sign(payload, timestamp=old_timestamp)
         self.assertTrue(
-            verify_stripe_signature(payload, header, WEBHOOK_SECRET, tolerance_seconds=0)
+            verify_stripe_signature(payload, header, WEBHOOK_SECRET, tolerance_sec=0)
         )
 
     def test_custom_tolerance_and_injected_clock(self):
@@ -107,14 +115,35 @@ class TestVerifyStripeSignature(unittest.TestCase):
         header = _sign(payload, timestamp=1_000_000)
         self.assertTrue(
             verify_stripe_signature(
-                payload, header, WEBHOOK_SECRET, tolerance_seconds=120, now=1_000_100
+                payload, header, WEBHOOK_SECRET, tolerance_sec=120, now=1_000_100
             )
         )
-        self.assertFalse(
+        with self.assertRaises(StripeWebhookError):
             verify_stripe_signature(
-                payload, header, WEBHOOK_SECRET, tolerance_seconds=120, now=1_000_300
+                payload, header, WEBHOOK_SECRET, tolerance_sec=120, now=1_000_300
             )
-        )
+
+    def test_non_ascii_signature_header_raises(self):
+        with self.assertRaises(StripeWebhookError):
+            verify_stripe_signature(b"{}", "t=1,v1=abc☃", WEBHOOK_SECRET)
+
+    def test_secret_rotation_accepts_any_valid_v1_signature(self):
+        # During a signing-secret rotation, Stripe sends multiple v1 values
+        # in one header (old secret + new secret). Any match must pass,
+        # regardless of position.
+        payload = b'{"ok":true}'
+        ts = str(int(time.time()))
+        signed = f"{ts}.".encode() + payload
+        good = hmac.new(WEBHOOK_SECRET.encode(), signed, hashlib.sha256).hexdigest()
+        header_good_first = f"t={ts},v1={good},v1=deadbeef"
+        header_good_last = f"t={ts},v1=deadbeef,v1={good}"
+        self.assertTrue(verify_stripe_signature(payload, header_good_first, WEBHOOK_SECRET))
+        self.assertTrue(verify_stripe_signature(payload, header_good_last, WEBHOOK_SECRET))
+
+    def test_string_payload_is_accepted_like_bytes(self):
+        payload_bytes = b'{"type": "charge.succeeded"}'
+        header = _sign(payload_bytes)
+        self.assertTrue(verify_stripe_signature(payload_bytes.decode(), header, WEBHOOK_SECRET))
 
 
 class TestHandleChargeSucceeded(unittest.TestCase):
@@ -157,16 +186,40 @@ class TestHandleChargeFailed(unittest.TestCase):
 
 
 class TestHandleChargeRefunded(unittest.TestCase):
-    def test_normal_event(self):
+    def test_full_refund_uses_amount_refunded_not_the_boolean(self):
+        # `refunded` is a BOOLEAN in Stripe's real payload (true even for a
+        # partial refund) -- using it as a dollar amount was the bug.
         event_data = {
             "id": "ch_999",
+            "amount": 5000,
+            "amount_refunded": 5000,
+            "refunded": True,
             "metadata": {"invoice_id": "POS-2"},
-            "refunded": 5000,
             "created": 0,
         }
         result = handle_charge_refunded(event_data)
         self.assertEqual(result["new_status"], "Refunded")
         self.assertEqual(result["refund_amount"], 50.0)
+
+    def test_partial_refund_status_and_amount(self):
+        event_data = {
+            "id": "ch_1000",
+            "amount": 5000,
+            "amount_refunded": 1500,  # only $15 of a $50 charge
+            "refunded": False,
+            "metadata": {"invoice_id": "POS-3"},
+            "created": 0,
+        }
+        result = handle_charge_refunded(event_data)
+        self.assertEqual(result["new_status"], "Partially Refunded")
+        self.assertEqual(result["refund_amount"], 15.0)
+        self.assertEqual(result["charge_amount"], 50.0)
+
+    def test_missing_amount_refunded_defaults_to_zero_not_a_crash(self):
+        event_data = {"id": "ch_1001", "amount": 5000, "metadata": {"invoice_id": "POS-4"}, "created": 0}
+        result = handle_charge_refunded(event_data)
+        self.assertEqual(result["refund_amount"], 0.0)
+        self.assertEqual(result["new_status"], "Refunded")
 
 
 class TestProcessWebhookEvent(unittest.TestCase):
@@ -225,6 +278,81 @@ class TestUpdateInvoiceStatus(unittest.TestCase):
     def test_matches_by_id_field_too(self):
         sales_log = [{"id": "INV-2", "Status": "Awaiting Payment"}]
         self.assertTrue(update_invoice_status(sales_log, "INV-2", "Refunded"))
+
+
+class TestStatusPrecedence(unittest.TestCase):
+    """A delayed/out-of-order webhook must never downgrade a more-final
+    status -- a late 'charge.succeeded' arriving after its own refund must
+    not resurrect 'Paid (Card)' over 'Refunded'."""
+
+    def test_rank_ordering(self):
+        self.assertLess(status_rank("Awaiting Payment"), status_rank("Payment Failed"))
+        self.assertLess(status_rank("Payment Failed"), status_rank("Paid (Card)"))
+        self.assertLess(status_rank("Paid (Card)"), status_rank("Partially Refunded"))
+        self.assertLess(status_rank("Partially Refunded"), status_rank("Refunded"))
+
+    def test_unknown_status_ranks_lowest(self):
+        self.assertEqual(status_rank(None), -1)
+        self.assertEqual(status_rank("Some Future Status Stripe Invents"), -1)
+
+    def test_forward_transition_allowed(self):
+        self.assertTrue(can_transition("Paid (Card)", "Refunded"))
+        self.assertTrue(can_transition("Awaiting Payment", "Paid (Card)"))
+        self.assertTrue(can_transition("Paid (Card)", "Paid (Card)"))  # same rank, no-op is fine
+
+    def test_downgrade_rejected(self):
+        self.assertFalse(can_transition("Refunded", "Paid (Card)"))
+        self.assertFalse(can_transition("Partially Refunded", "Awaiting Payment"))
+
+    def test_out_of_order_webhook_cannot_downgrade_refunded_to_paid(self):
+        sales_log = [{"Invoice #": "POS-1", "Status": "Refunded"}]
+        applied = update_invoice_status(sales_log, "POS-1", "Paid (Card)")
+        self.assertFalse(applied)
+        self.assertEqual(sales_log[0]["Status"], "Refunded")
+
+    def test_forward_transition_still_applies(self):
+        sales_log = [{"Invoice #": "POS-1", "Status": "Paid (Card)"}]
+        applied = update_invoice_status(sales_log, "POS-1", "Refunded")
+        self.assertTrue(applied)
+        self.assertEqual(sales_log[0]["Status"], "Refunded")
+
+    def test_force_bypasses_precedence(self):
+        sales_log = [{"Invoice #": "POS-1", "Status": "Refunded"}]
+        applied = update_invoice_status(sales_log, "POS-1", "Paid (Card)", force=True)
+        self.assertTrue(applied)
+        self.assertEqual(sales_log[0]["Status"], "Paid (Card)")
+
+
+class TestEventIdIdempotency(unittest.TestCase):
+    """Stripe guarantees at-least-once delivery -- the same event_id can
+    arrive more than once and must not be applied twice."""
+
+    def test_duplicate_event_id_is_skipped(self):
+        sales_log = [{"Invoice #": "POS-1", "Status": "Awaiting Payment"}]
+        seen: set = set()
+        first = update_invoice_status(sales_log, "POS-1", "Paid (Card)", event_id="evt_1", seen_event_ids=seen)
+        second = update_invoice_status(sales_log, "POS-1", "Refunded", event_id="evt_1", seen_event_ids=seen)
+        self.assertTrue(first)
+        self.assertFalse(second)  # same event_id, skipped even though it targets a different status
+        self.assertEqual(sales_log[0]["Status"], "Paid (Card)")
+
+    def test_different_event_ids_both_apply(self):
+        sales_log = [{"Invoice #": "POS-1", "Status": "Awaiting Payment"}]
+        seen: set = set()
+        self.assertTrue(update_invoice_status(sales_log, "POS-1", "Paid (Card)", event_id="evt_1", seen_event_ids=seen))
+        self.assertTrue(update_invoice_status(sales_log, "POS-1", "Refunded", event_id="evt_2", seen_event_ids=seen))
+        self.assertEqual(sales_log[0]["Status"], "Refunded")
+
+
+class TestProcessWebhookEventCarriesEventId(unittest.TestCase):
+    def test_event_id_is_attached_when_present(self):
+        event = {
+            "id": "evt_abc",
+            "type": "charge.succeeded",
+            "data": {"object": {"id": "ch_1", "metadata": {"invoice_id": "INV-1"}, "amount": 100, "created": 0}},
+        }
+        result = process_webhook_event(event)
+        self.assertEqual(result["event_id"], "evt_abc")
 
 
 if __name__ == "__main__":

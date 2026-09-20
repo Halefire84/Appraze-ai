@@ -90,7 +90,7 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
                 }
             },
         }
-        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload=True)) as mock_update:
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload={"found": True, "applied": True})) as mock_update:
             resp = self._post(event)
             self.assertEqual(resp.status_code, 200)
             body = resp.json()
@@ -103,7 +103,19 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
             "type": "charge.succeeded",
             "data": {"object": {"id": "ch_456", "metadata": {"invoice_id": "POS-DOES-NOT-EXIST"}, "amount": 100, "created": 0}},
         }
-        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload=False)):
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload={"found": False, "applied": False})):
+            resp = self._post(event)
+            self.assertEqual(resp.status_code, 200)
+
+    def test_charge_succeeded_found_but_downgrade_refused_does_not_crash(self):
+        # A delayed charge.succeeded arriving after its own refund: the row
+        # exists but AppsScript_Code.gs's precedence check refused the
+        # downgrade -- still a clean 200, not an error.
+        event = {
+            "type": "charge.succeeded",
+            "data": {"object": {"id": "ch_999", "metadata": {"invoice_id": "POS-ALREADY-REFUNDED"}, "amount": 100, "created": 0}},
+        }
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload={"found": True, "applied": False})):
             resp = self._post(event)
             self.assertEqual(resp.status_code, 200)
 
@@ -112,7 +124,7 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
             "type": "charge.succeeded",
             "data": {"object": {"id": "ch_dup", "metadata": {"invoice_id": "POS-DUP"}, "amount": 100, "created": 0}},
         }
-        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload=True)):
+        with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(True, payload={"found": True, "applied": True})):
             first = self._post(event)
             second = self._post(event)
             self.assertEqual(first.status_code, 200)
