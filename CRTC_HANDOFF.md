@@ -812,3 +812,49 @@ Business profile fields:
 Printable sales documents now use the customer's saved business identity and tax information instead of a hard-coded CRTC company name.
 
 Validation note: this change was committed through GitHub, but full local/CI application tests have not been run in the current environment. The next Windows/CI pass must run syntax/tests and verify profile persistence plus document rendering. Do not claim full test success until those commands actually execute.
+
+
+## 2026-09-20 — Admin Center / Guided Business Setup requirement
+
+Owner-requested requirement before switching development to Claude Code: CRTC should ship with a complete instructional **Admin Center** for each business owner/admin. This is part of launch usability/hardening, not a vague future feature.
+
+### Full Admin menu
+- Business Profile / DBA / Legal Identity
+- Tax Information
+- Invoice & Quote Settings
+- Payments / Stripe / future payment providers
+- Customers & Accounts
+- Discounts & Pricing
+- Inventory Settings
+- Marketplace Settings
+- Shipping / Delivery
+- AI / Photo Settings
+- Users & Permissions
+- Security & Account
+- Notifications
+- Reports & Analytics
+- Data / Export
+- Integrations
+- Help / Getting Started
+
+### First-run guided setup
+New businesses should be guided through:
+**Business Info → Tax Info → Invoice Branding → Payment Setup → Sales Tax → Marketplace Accounts → Shipping → Finish**
+
+Every Admin section should explain:
+- **What this does**
+- **What you need**
+- **Recommended setup**
+- **Where the setting affects CRTC**
+
+### Requirements
+- Owner/admin sees the full Admin menu.
+- Non-admin users must only see settings they are authorized to access.
+- Setup progress should be visible so an owner can see what remains incomplete.
+- Do not duplicate settings that already exist; consolidate them behind the Admin Center where practical.
+- Business identity/tax information must remain the business owner's information on documents; never hard-code CRTC as the customer's business.
+- Sensitive tax information must be handled minimally and never exposed unnecessarily in logs, telemetry, URLs, or error messages.
+- Keep the Admin Center instructional and actionable; avoid turning it into a bloated accounting/ERP system.
+
+### Claude Code handoff
+Before implementation, Claude must inspect the current repo and existing settings/profile/account/payment code, then implement this requirement without breaking existing functionality. Run actual syntax/tests after changes and report exact commands/results. Update this handoff with the implementation and validation status. Do not claim tests passed unless they were actually executed.
