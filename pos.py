@@ -60,7 +60,7 @@ class POSCheckoutResult:
     error: str = ""
 
 
-def create_pos_checkout(amount_dollars: float, description: str, customer_email: str = "") -> POSCheckoutResult:
+def create_pos_checkout(amount_dollars: float, description: str, customer_email: str = "", invoice_id: str = "") -> POSCheckoutResult:
     """
     Creates a one-off Stripe-hosted checkout page for a specific sale amount.
     Returns the URL to show/send to the customer (or open on a shared device
@@ -73,7 +73,7 @@ def create_pos_checkout(amount_dollars: float, description: str, customer_email:
     if amount_dollars <= 0:
         return POSCheckoutResult(False, error="Amount must be greater than $0.")
 
-    invoice_id = _new_invoice_id()
+    invoice_id = invoice_id or _new_invoice_id()
     app_url = st.secrets.get("APP_URL", "").rstrip("/")
     # These redirect URLs are mostly a nice-to-have: if APP_URL is set and the
     # SAME device completes payment (e.g. handed to the customer and back),
