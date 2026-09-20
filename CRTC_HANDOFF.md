@@ -793,3 +793,22 @@ Important validation status:
 - The next hardening pass should verify old saved `sales_documents` records migrate cleanly when the new Line Items field is absent, payment-webhook reconciliation updates invoice status correctly, and the browser-printable documents render correctly on mobile/desktop.
 
 Product boundary remains: CRTC handles reseller/customer sales operations, not general-ledger accounting, payroll, or QuickBooks-style bookkeeping.
+
+
+## 2026-09-20 — Business identity / tax profile
+Added a persistent business-profile layer for sales documents so customer invoices and quotes do not hard-code Cooper River Trading Co.
+
+Business profile fields:
+- Business / DBA name
+- Legal business name
+- Tax ID / EIN (masked during entry)
+- Tax registration / state
+- Business address
+- Business phone
+- Business email
+- Website
+- Custom invoice/quote footer for payment terms, return policy, thank-you text, etc.
+
+Printable sales documents now use the customer's saved business identity and tax information instead of a hard-coded CRTC company name.
+
+Validation note: this change was committed through GitHub, but full local/CI application tests have not been run in the current environment. The next Windows/CI pass must run syntax/tests and verify profile persistence plus document rendering. Do not claim full test success until those commands actually execute.
