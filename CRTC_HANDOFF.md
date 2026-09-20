@@ -673,3 +673,47 @@ Added a Windows Store deployment plan on branch `feat/crtc-windows-store`. The p
 ## 2026-09-20 — iOS App Store deployment pass
 
 Added an iOS App Store deployment plan on branch `feat/crtc-ios-store` using a thin native WKWebView shell around the production HTTPS Streamlit application. Production URL configured in the iOS documentation: `https://appraze-ai-dkc8kpa7pbtzhgwpgztqyh.streamlit.app/`. No Streamlit behavior changes, native rewrite, or billing implementation was added. Actual Xcode/archive/TestFlight/App Store validation is NOT claimed because this environment is not macOS/Xcode. The next execution point is to create/build the iOS shell on a Mac, run a physical iPhone smoke test, archive, and upload to TestFlight before App Review.
+
+
+## 2026-09-20 — Google Play/TWA deployment pass
+
+A dedicated branch `feat/crtc-google-play-twa` adds an Android Trusted Web Activity deployment scaffold without changing the existing Streamlit/web application. The Android project targets API 36, uses Android Browser Helper 2.7.3, documents Digital Asset Links, and supports release signing through external Gradle/CI secrets. Billing is intentionally not implemented.
+
+Files added/updated for this pass:
+- `android/settings.gradle`
+- `android/build.gradle`
+- `android/gradle.properties`
+- `android/app/build.gradle`
+- `android/app/src/main/AndroidManifest.xml`
+- `android/app/src/main/java/com/crtc/app/LauncherActivity.java`
+- `android/app/src/main/res/values/styles.xml`
+- `android/README.md`
+- `android/assetlinks.example.json`
+- `.github/workflows/android-twa.yml`
+- `android/CRTC_PLAY_STORE_LAUNCH_PLAN.md`
+
+Validation status: source/configuration review completed. Full Gradle/Android SDK build was **not executed in this environment** because the available runtime has no Android SDK/Gradle toolchain and cannot reach GitHub from the shell. Do not claim the AAB builds until the project is built on the Windows development machine or CI. The existing Python test suite was not rerun because this pass did not modify Python application code.
+
+Next exact return point: replace the production hostname placeholder, create/store the release keystore securely, publish the matching Digital Asset Links file, run `gradle :app:assembleDebug` and `gradle :app:bundleRelease` with real signing secrets, then install the resulting build on a physical Android device before merging the branch.
+
+
+## 2026-09-20 — Google Play/TWA deployment pass
+
+A dedicated branch `feat/crtc-google-play-twa` adds an Android Trusted Web Activity deployment scaffold without changing the existing Streamlit/web application. The Android project targets API 36, uses Android Browser Helper 2.7.3, documents Digital Asset Links, and supports release signing through external Gradle/CI secrets. Billing is intentionally not implemented.
+
+Files added/updated for this pass:
+- `android/settings.gradle`
+- `android/build.gradle`
+- `android/gradle.properties`
+- `android/app/build.gradle`
+- `android/app/src/main/AndroidManifest.xml`
+- `android/app/src/main/java/com/crtc/app/LauncherActivity.java`
+- `android/app/src/main/res/values/styles.xml`
+- `android/README.md`
+- `android/assetlinks.example.json`
+- `.github/workflows/android-twa.yml`
+- `android/CRTC_PLAY_STORE_LAUNCH_PLAN.md`
+
+Validation status: source/configuration review completed. Full Gradle/Android SDK build was **not executed in this environment** because the available runtime has no Android SDK/Gradle toolchain and cannot reach GitHub from the shell. Do not claim the AAB builds until the project is built on the Windows development machine or CI. The existing Python test suite was not rerun because this pass did not modify Python application code.
+
+Next exact return point: replace the production hostname placeholder, create/store the release keystore securely, publish the matching Digital Asset Links file, run `gradle :app:assembleDebug` and `gradle :app:bundleRelease` with real signing secrets, then install the resulting build on a physical Android device before merging the branch.
