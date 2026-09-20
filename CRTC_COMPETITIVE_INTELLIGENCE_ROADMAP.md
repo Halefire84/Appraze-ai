@@ -326,3 +326,125 @@ No roadmap item should be implemented merely because it appears here. Each item 
 - Prior competitive research covering Vendoo, List Perfectly, Crosslist, PrimeLister, Flyp and SellRaze
 
 This document is a living competitive/roadmap reference, not a commitment that every feature will ship on the listed date.
+
+
+## Product Expansion Architecture — Added 2026-09-20
+
+The roadmap is intentionally divided into **CRTC Core**, **CRTC Intelligence**, and **Future Expansion / Possible Separate Products**. Deferred ideas are not rejected; they are parked until real user behavior and product data show whether they belong in CRTC, should become an optional module, or deserve a separate product.
+
+### CRTC Core — The Money Engine
+
+The core product should remain focused on the reseller's economic loop:
+
+FIND → IDENTIFY → SOLD COMPS → DEMAND → TRUE ACQUISITION COST → EXPECTED NET → ROI → MAX SAFE BUY → BUY/PASS → INVENTORY → LIST → SELL → ACTUAL PROFIT
+
+Core capabilities:
+- Item identification and evidence-backed comps
+- Demand/sell-through signals
+- True acquisition-cost calculation
+- Fee, tax, premium and shipping modeling
+- Maximum Safe Buy / Maximum Bid
+- BUY/PASS decision with auditable reasoning
+- Inventory and cost basis
+- Listing creation and crosslisting drafts
+- Actual sale and realized-profit tracking
+
+### CRTC Operating System — Later Core Expansion
+
+Once the money engine is stable:
+- Verified marketplace states
+- Inventory aging
+- Dead-money detection
+- Repricing and minimum-profitable-price logic
+- Local + online sales unification
+- Source/supplier performance
+- Capital allocation
+- Personal sourcing history
+- Actual-vs-projected deal accuracy
+
+### CRTC Intelligence Layer — Later
+
+Use accumulated real-world outcomes to add:
+- Daily reseller brief
+- Category profitability intelligence
+- Source profitability intelligence
+- Personalized sourcing recommendations
+- Deal-history learning
+- Inventory-risk forecasting
+- Portfolio-level reseller analytics
+- "What should I buy more of?" insights
+
+These recommendations must be based on evidence and the user's actual results, not unexplained AI guesses.
+
+## Future Expansion / Possible Separate Products
+
+The following ideas remain intentionally parked rather than deleted:
+
+### Marketplace Automation
+- Advanced marketplace-specific automation
+- Poshmark-style engagement automation
+- Follow/share/relist automation
+- Advanced marketplace task scheduling
+- Broader marketplace integrations
+
+### Business Operations
+- Marketing automation
+- Customer CRM
+- Advanced shipping management
+- Accounting/bookkeeping
+- Advanced supplier management
+- Team/employee workflows
+- Multi-user business management
+- Enterprise features
+
+### AI Workforce
+Potential future agent capabilities:
+- Autonomous listing agent
+- Autonomous sourcing/research agent
+- Inventory-management agent
+- Pricing/repricing agent
+- Customer-response agent
+- Business reporting agent
+- Workflow orchestration across reseller tools
+
+These capabilities should only be added when their reliability, permissions, observability and reversibility are production-ready.
+
+## Feature Decision Rule
+
+Every future feature must answer at least one of these questions:
+
+1. Does it help the reseller make a better buying decision?
+2. Does it protect or increase margin?
+3. Does it help move inventory?
+4. Does it improve understanding of actual profit?
+5. Does it create trustworthy learning from real outcomes?
+
+If the answer is no, the feature should normally remain deferred.
+
+A feature should **not** be added solely because a competitor has it.
+
+## Do Not Delete — Reclassify
+
+When an existing CRTC feature does not fit the immediate core:
+- Do not casually delete it.
+- Identify dependencies and current usage.
+- Determine whether it supports the core indirectly.
+- Consolidate duplicate functionality where appropriate.
+- Move experimental or low-priority capabilities into the future roadmap when useful.
+- Preserve functionality unless there is a clear technical or product reason to remove it.
+- Document any removal or consolidation.
+
+The objective is to reduce **current product complexity**, not reduce the long-term vision.
+
+## Future Product Boundary
+
+A deferred capability may eventually become:
+1. A normal CRTC feature,
+2. An optional CRTC module,
+3. An agent/workflow add-on, or
+4. A separate product/company opportunity.
+
+That decision should be made from evidence: user demand, usage frequency, technical complexity, reliability requirements, monetization potential and whether the capability distracts from the core buy-to-profit loop.
+
+**Guiding principle: Do not shrink the vision. Shrink the immediate scope.**
+
