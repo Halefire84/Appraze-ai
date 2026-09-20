@@ -339,7 +339,7 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_ai = st.tabs([
+tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai = st.tabs([
     "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "💳  Charge Customer", "🧾  Accounts & Invoices", "🔍  AI Analyzer",
 ])
