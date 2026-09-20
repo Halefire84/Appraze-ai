@@ -582,3 +582,75 @@ Never log sensitive request bodies, credentials or secrets.
 We should learn what beta users actually use before deciding what to expand, consolidate or move into the future/separate-product roadmap.
 
 This telemetry becomes part of the CRTC moat: the product can eventually learn from the difference between what it predicted and what actually happened.
+
+
+## Lightweight Accounts, Quotes & Invoicing — Product Direction
+
+CRTC should support a focused customer/account and invoicing workflow without becoming a full accounting platform.
+
+### Customer / Account
+- Customer or business name
+- Contact person
+- Email / phone
+- Billing and shipping addresses
+- Notes
+- Customer-specific pricing/discount where useful
+- Payment terms
+- Account balance
+- Invoice, quote and sales history
+
+Repeat customers should be selectable from an account rather than requiring customer information to be re-entered.
+
+### Quotes
+Support a simple quote lifecycle:
+**DRAFT → SENT → ACCEPTED / EXPIRED / DECLINED → CONVERT TO INVOICE**
+
+Quote fields should include:
+- Quote number
+- Customer/account
+- Dates and expiration
+- Line items and quantities
+- Unit prices
+- Percentage or fixed discounts
+- Tax
+- Shipping/delivery
+- Total
+- Notes/terms
+- Status
+
+Accepted quotes should be convertible to invoices without retyping the transaction.
+
+### Invoices
+Support:
+- Invoice number
+- Customer/account
+- Line items
+- Quantity and unit price
+- Discounts
+- Tax
+- Shipping/delivery
+- Subtotal and total
+- Amount paid / amount due
+- Due date
+- Payment status
+- Notes
+- Payment method
+- PDF/print/share capability
+
+### Sales / Profit Integration
+Keep the workflow connected to the CRTC money loop:
+**QUOTE → INVOICE → PAYMENT → SALE → INVENTORY → ACTUAL PROFIT**
+
+A completed payment/sale should reconcile with inventory and realized-profit tracking where applicable.
+
+### Accounts Receivable — Lightweight
+For repeat commercial customers, provide a simple account view showing open invoices, paid amounts, outstanding balance, recent purchase and lifetime sales. Keep this focused on reseller operations rather than general ledger accounting.
+
+### Discounts
+Support fixed-dollar and percentage discounts. Customer-specific pricing can be added where it clearly supports repeat business. Do not build a large promotions/coupon engine unless later evidence justifies it.
+
+### Product Boundary
+This capability belongs as a focused extension of POS/sales operations. CRTC should **not** become QuickBooks or a full accounting system. Defer payroll, full bookkeeping, general-ledger accounting and other enterprise accounting functionality.
+
+### Implementation Rule
+Before adding functionality, audit the existing invoice/POS implementation and extend what already exists. Do not rebuild working infrastructure unnecessarily. Preserve existing payment/security behavior and add tests around invoice totals, discounts, tax, payment status, conversion from quote to invoice, and inventory/profit reconciliation.
