@@ -668,3 +668,8 @@ If context/usage runs out, resume from this document. First inspect the current 
 ## 2026-09-20 — Windows Store deployment pass
 
 Added a Windows Store deployment plan on branch `feat/crtc-windows-store`. The planned architecture is a thin Windows App SDK/WinUI 3 + WebView2 shell around the existing HTTPS Streamlit application, preserving current web behavior. Added Windows Store README, launch plan, build checklist, and ignore rules. No native rewrite or billing implementation was added. MSIX/build testing is NOT claimed because this environment is not Windows; validation must run on the Windows development machine/CI before merge.
+
+
+## 2026-09-20 — iOS App Store deployment pass
+
+Added an iOS App Store deployment plan on branch `feat/crtc-ios-store` using a thin native WKWebView shell around the production HTTPS Streamlit application. Production URL configured in the iOS documentation: `https://appraze-ai-dkc8kpa7pbtzhgwpgztqyh.streamlit.app/`. No Streamlit behavior changes, native rewrite, or billing implementation was added. Actual Xcode/archive/TestFlight/App Store validation is NOT claimed because this environment is not macOS/Xcode. The next execution point is to create/build the iOS shell on a Mac, run a physical iPhone smoke test, archive, and upload to TestFlight before App Review.
