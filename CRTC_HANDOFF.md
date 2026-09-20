@@ -726,3 +726,40 @@ Next exact return point: replace the production hostname placeholder, create/sto
 - Current Android production URL wiring commit: b9eb45c95bed72e88247d92d3fdf075118f9c4c7.
 - Social sneak-peek collateral direction: Android app screen, CRTC dashboard, deal-analysis screen, and Android → Windows → iOS platform graphic.
 - Video render is a marketing asset, not a product/deployment validation artifact; actual Android builds, device tests, signing, and store submission remain separate engineering gates.
+
+
+## 2026-09-20 — Beta telemetry / product learning direction
+
+CRTC should be instrumented before beta optimization so we can measure real user behavior and outcomes.
+
+Track privacy-conscious aggregate events for:
+- feature/screen usage
+- deal analyses
+- BUY/PASS decisions
+- Max Safe Buy calculations
+- sold-comp searches
+- inventory/listing/crosslisting activity
+- photo analysis
+- POS/local sales
+- workflow errors
+- workflow completion time
+- retention/adoption
+
+Most important: establish a prediction → outcome loop. Where an analyzed deal later sells, compare predicted sale price, profit, ROI, BUY/PASS and Max Safe Buy against actual sale price, fees, shipping, acquisition cost, realized profit and time-to-sale.
+
+Build internal reporting for:
+- most/least-used features
+- adoption trends
+- funnel drop-off
+- errors
+- workflow times
+- BUY/PASS distribution
+- predicted-vs-actual accuracy
+- accuracy trends
+- inventory outcomes
+
+Design for a daily beta report covering active users, feature usage, errors, deal volume, BUY/PASS distribution, prediction accuracy and notable day-over-day changes.
+
+Telemetry must be minimal and must never capture passwords, secrets, tokens or unnecessary PII. Prefer stable, versioned event names and a thin instrumentation layer separate from business logic.
+
+Roadmap reference: CRTC_COMPETITIVE_INTELLIGENCE_ROADMAP.md → Beta Telemetry & Outcome Intelligence.
