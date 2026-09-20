@@ -2,7 +2,153 @@
 
 **Canonical repository:** Halefire84/Appraze-ai  
 **Product direction:** CRTC (Cooper River Trading Co.)  
-**Last handoff:** 2026-09-20 (P0 hardening: canonical decision engine + webhook correctness)
+**Last handoff:** 2026-09-20 (Session 8: HANDOFF + launch checklist freeze)
+
+## Session 8 — HANDOFF + launch checklist freeze (2026-09-20)
+
+Per `CRTC_SESSION_PROMPTS.md` Session 8 (`CHATGPT_HANDOFF.md` Session table,
+item 8: "Freeze HANDOFF + LAUNCH_BLOCKERS.md"). Docs-only session — no code
+changed. Consolidates what the prior P0 hardening pass (documented below,
+"2026-09-20 (later) — P0 hardening") actually closed, so the next
+human/agent has one place to check before adding features or inviting beta
+testers, instead of re-deriving it from scattered entries.
+
+### 1. What P0/P1 is DONE (file + symbol)
+| Finding | Status | Where |
+|---|---|---|
+| F-01 two competing BUY bars (70% value vs 40% ROI) | DONE | `decision_policy.evaluate_deal()` — single engine, returns both `decision` and `roi_tier_label` explicitly |
+| F-02 webhook replay (signatures never expire) | DONE | `stripe_webhooks.verify_stripe_signature()` — `tolerance_sec` (default 300s), raises `StripeWebhookError` on stale timestamp |
+| F-02b signature rotation | DONE | `verify_stripe_signature()` accepts ANY matching `v1=` value, not just the first |
+| F-03 refund amount read from boolean `refunded` | DONE | `stripe_webhooks.handle_charge_refunded()` reads `amount_refunded`; distinguishes `"Refunded"` vs `"Partially Refunded"` |
+| F-04 category-mismatch self-validation | DONE | `listing_normalizer._expected_keywords()` no longer derives evidence from the listing's own category (defaults empty); `opportunity_radar.detect_category_mismatch()` cross-checks against the fixed `_CATEGORY_TERMS` map instead |
+| F-05 auction BUY with unknown shipping/premium treated as $0 | DONE | `decision_policy.evaluate_deal(..., require_shipping=True)` — `CostState` KNOWN/UNKNOWN/ESTIMATED/NOT_APPLICABLE; a material UNKNOWN returns REVIEW or CONDITIONAL BUY with the assumption named, never a silent $0 |
+| F-06/F-17 buyer_premium unit confusion | DONE | `number_normalize.parse_percent_points()` — `18`, `"18%"`, `0.18` all normalize to `18.0`; `buyer_premium` is percentage points everywhere, `buyer_premium_amount` is dollars |
+| F-08 SKU collision on literal `"CRTC-ITEM"` | DONE | `listing_bridge._stable_sku()` — content hash + fresh random component per call; no shared literal fallback remains |
+| F-09 out-of-order webhook downgrades Refunded → Paid | DONE (Python) / MIRRORED (Apps Script) | `stripe_webhooks.STATUS_RANK` + `can_transition()`/`update_invoice_status()` refuse to rank-downgrade; the same `STATUS_RANK` table is hand-mirrored into `AppsScript_Code.gs`'s `handleUpdateSalesLogStatus_` (the live webhook path calls the `.gs` function via `webhook_store.py`, not the Python helper directly — see "Known limitations" below) |
+| F-10–F-16 NaN/Inf/negative → BUY, non-ASCII → TypeError, only-last-v1-sig | DONE | `decision_policy.evaluate_deal()` / `finance.calc_deal()` reject invalid numbers to a safe PASS/REVIEW; `verify_stripe_signature()` raises `StripeWebhookError` (never an unhandled exception) on malformed/non-ASCII input |
+
+Full technical detail for each of the above is in the **"2026-09-20 (later) —
+P0 hardening"** entry further down this file — this table is a locator, not
+a replacement for it.
+
+### 2. What remains blocked for public beta
+- **Multi-tenant data isolation** — single shared Streamlit deployment
+  (one global workspace/API key). Not started. Either build real
+  multi-tenant storage or enforce a hard single-business mode in code + UI
+  before any multi-customer launch.
+- **Live Stripe Connect test-mode end-to-end** (OAuth → pay → refund →
+  webhook) with real deployment credentials — cannot be exercised from
+  this source-only environment; needs a live Stripe test account.
+- **ToS + privacy policy** — drafts exist per `CRTC_GAP_CLOSURE_REPORT.md`;
+  legal review not done.
+- **Full auth/session security review** — `auth.py` has real coverage
+  (`tests/test_auth.py`, 19 passing) for the require-auth gate itself, but
+  no dedicated `SECURITY_NOTES.md` audit (Session 7 of
+  `CRTC_SESSION_PROMPTS.md`) has been produced yet. A repo-wide grep for
+  `eval(`/`exec(`/`subprocess`/`pickle.` outside `tests/` found nothing
+  (re-verified this session). `listing_bridge.py`'s AI enrichment path
+  already separates system instructions from listing data structurally
+  (whitelisted output fields — an invented field in the AI's JSON response
+  is dropped, not trusted) but this has not been written up as a formal
+  security note.
+- **Event-id webhook idempotency** — `stripe_webhooks.update_invoice_status()`
+  accepts `event_id`/`seen_event_ids` and is tested, but
+  `stripe_webhook_server.py` (the live path) does not call it yet; only the
+  Apps Script status-precedence check protects production today.
+- **Store packaging** — Android/iOS/Windows plans exist (`android/`, `ios/`,
+  `windows/`) but none have been built/validated in a real
+  Gradle/Xcode/Visual Studio environment; this container has none of those
+  toolchains.
+- P2 items (adversarial test matrix expansion, observability/logging
+  around financial and payment events, concurrency review) not started.
+
+### 3. Exact test commands to run before every release
+```bash
+python3 -m pytest tests/test_p0_regression.py -q
+python3 -m pytest tests/test_p0_regression.py tests/test_stripe_webhooks.py tests/test_finance.py tests/test_deal_workspace.py tests/test_listing_bridge.py tests/test_auction_costs.py -q --tb=line
+python3 -m pytest tests/ -q
+python3 -m compileall -q .
+git diff --check
+```
+Actually run this session (all real, not estimated):
+```
+python3 -m pytest tests/test_p0_regression.py -q                                  -> 19 passed
+python3 -m pytest tests/test_auth.py -q                                            -> 19 passed
+python3 -m pytest tests/test_p0_regression.py tests/test_stripe_webhooks.py
+        tests/test_finance.py tests/test_deal_workspace.py
+        tests/test_listing_bridge.py tests/test_auction_costs.py -q --tb=line     -> 109 passed
+python3 -m pytest tests/ -q                                                        -> 367 passed, 12 warnings, 0 failed
+```
+The 12 warnings are `DeprecationWarning`s from `starlette`/`httpx` about
+`TestClient` internals (pinned dependency versions), not test failures or
+CRTC code issues.
+
+### 4. Canonical decision policy summary
+```
+Acquisition rule:  all-in cost <= 70% of estimated market value
+ROI tiers (after known fees, via finance.calc_deal/five_tier_verdict):
+  STRONG BUY  >= 60%
+  BUY         >= 40%
+  AT CEILING  >= 20%
+  BORDERLINE  >= 5%
+  PASS        < 5%
+Cost states: KNOWN | UNKNOWN | ESTIMATED | NOT_APPLICABLE
+  A material UNKNOWN cost never becomes $0 -> REVIEW or CONDITIONAL BUY
+  with the missing assumption named.
+Invalid numbers (NaN/Inf/negative) -> REVIEW, never BUY/STRONG BUY.
+```
+Single source of truth: `decision_policy.evaluate_deal()`. Every BUY/PASS
+path (`deal_workspace.py`, `auction_radar.py`, `crtc_opportunity.py`)
+delegates to it — see the P0 hardening entry below for the full list of
+call sites and the two call sites deliberately NOT migrated
+(`acquisition_hunter.py`, `crtc_hunt_engine.py` — different math, not
+another copy of this rule).
+
+### 5. buyer_premium unit convention
+`buyer_premium` / `buyer_premium_pct` = **percentage points** everywhere in
+this codebase (`18` means 18%, not 0.18). Dollar amounts use the distinct
+name `buyer_premium_amount`. Fractional input `0.18` is normalized to `18`
+by `number_normalize.parse_percent_points()` — never interpreted as
+`0.18%`. Wired into `auction_costs.calculate_auction_cost()` and
+`auction_costs.max_bid_for_target_all_in()`.
+
+### 6. Webhook status precedence
+`STATUS_RANK` (higher number wins, an update can never move an invoice to a
+lower rank):
+```
+Awaiting Payment          0
+Failed / Payment Failed   1
+Paid / Paid (Card)        2
+Partially Refunded        3
+Refunded                  4
+```
+Defined in `stripe_webhooks.py` (`can_transition()`/`update_invoice_status()`)
+and hand-mirrored in `AppsScript_Code.gs`'s `handleUpdateSalesLogStatus_`
+(the actual live webhook path). **The two copies do not share code** — a
+`.gs` file cannot import Python — so any future change to `STATUS_RANK`
+must be made in both places or production silently falls back to
+unprotected ordering.
+
+### 7. Do not add features until:
+- [x] Canonical BUY decision engine (`decision_policy.py`)
+- [x] Unknown costs cannot silently become $0
+- [x] Stripe replay protection (timestamp tolerance)
+- [x] Stripe signature rotation (any valid v1 accepted)
+- [x] Stripe refund accounting (`amount_refunded`, not boolean)
+- [x] Webhook out-of-order precedence (Python + mirrored Apps Script)
+- [x] Category-mismatch fixed through the real pipeline
+- [x] Financial input validation (NaN/Inf/negative/boolean-as-number)
+- [x] Unique SKUs without `"CRTC-ITEM"` fallback
+- [x] Buyer-premium units standardized
+- [ ] Webhook event-id idempotency wired into the live server path
+- [ ] Dedicated security audit / `SECURITY_NOTES.md` (Session 7 not done)
+- [ ] Multi-tenant data isolation or an enforced single-business mode
+- [ ] Live Stripe Connect test-mode E2E
+- [ ] ToS / privacy policy legal review
+- [ ] Store packaging validated on real Android/iOS/Windows toolchains
+
+See `LAUNCH_BLOCKERS.md` for the hard external gates as a standalone
+checklist.
 
 ## OPEN PRODUCT REQUIREMENTS (owner-requested 2026-09-20, not started — check this before closing out any "done" milestone)
 
