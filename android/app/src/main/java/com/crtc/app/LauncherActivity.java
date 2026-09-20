@@ -13,6 +13,6 @@ import android.os.Bundle;
 public final class LauncherActivity extends com.google.androidbrowserhelper.trusted.LauncherActivity {
     @Override
     protected Uri getLaunchingUrl() {
-        return Uri.parse("https://REPLACE_WITH_CRTC_PRODUCTION_HOST/");
+        return Uri.parse("https://appraze-ai-dkc8kpa7pbtzhgwpgztqyh.streamlit.app/");
     }
 }
