@@ -717,3 +717,12 @@ Files added/updated for this pass:
 Validation status: source/configuration review completed. Full Gradle/Android SDK build was **not executed in this environment** because the available runtime has no Android SDK/Gradle toolchain and cannot reach GitHub from the shell. Do not claim the AAB builds until the project is built on the Windows development machine or CI. The existing Python test suite was not rerun because this pass did not modify Python application code.
 
 Next exact return point: replace the production hostname placeholder, create/store the release keystore securely, publish the matching Digital Asset Links file, run `gradle :app:assembleDebug` and `gradle :app:bundleRelease` with real signing secrets, then install the resulting build on a physical Android device before merging the branch.
+
+## 2026-09-20 — Marketing / competitor-neutral promo direction
+- CRTC social promotion may use a short comparison-style video showing CRTC alongside generic, unnamed alternatives without naming or identifying competitors.
+- Messaging must remain factual and product-focused: demonstrate CRTC workflows, multi-platform direction, AI-assisted deal analysis, opportunity scoring, and business automation without unsupported claims about competitors.
+- Do not imply benchmark results, market superiority, store availability, or competitor deficiencies unless those claims are later verified with evidence.
+- Current canonical production URL: https://appraze-ai-dkc8kpa7pbtzhgwpgztqyh.streamlit.app/
+- Current Android production URL wiring commit: b9eb45c95bed72e88247d92d3fdf075118f9c4c7.
+- Social sneak-peek collateral direction: Android app screen, CRTC dashboard, deal-analysis screen, and Android → Windows → iOS platform graphic.
+- Video render is a marketing asset, not a product/deployment validation artifact; actual Android builds, device tests, signing, and store submission remain separate engineering gates.
