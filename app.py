@@ -23,6 +23,7 @@ from finance import (
 )
 from auth import require_auth, logout
 from pos import create_pos_checkout, check_payment_status
+from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
 
 # --------------------------------------------------------------------------
@@ -340,7 +341,7 @@ st.write("")
 # --------------------------------------------------------------------------
 tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_ai = st.tabs([
     "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
-    "🤝  Suppliers", "💳  Charge Customer", "🔍  AI Analyzer",
+    "🤝  Suppliers", "💳  Charge Customer", "🧾  Accounts & Invoices", "🔍  AI Analyzer",
 ])
 
 with tab_dash:
@@ -779,7 +780,121 @@ with tab_charge:
         else:
             st.info("No charges created yet.")
 
-# ==========================================================================
+# ==========================================================================# ===========================================================================
+# ACCOUNTS / QUOTES / INVOICES
+# ===========================================================================
+with tab_accounts:
+    st.markdown("#### Customers, Quotes & Invoices")
+    st.caption("Repeat customers, quotes, invoices, discounts and payment tracking — focused on reseller operations.")
+
+    account_cols = ["Account #", "Business / Customer", "Contact", "Email", "Phone", "Billing Address", "Shipping Address", "Payment Terms", "Default Discount %", "Notes", "Created"]
+    doc_cols = ["Document #", "Type", "Account #", "Customer", "Issue Date", "Due Date", "Expiration Date", "Status", "Subtotal", "Discount", "Tax", "Shipping", "Total", "Amount Paid", "Amount Due", "Notes", "Created"]
+    if "customer_accounts" not in st.session_state:
+        loaded = load_table("customer_accounts")
+        st.session_state.customer_accounts = pd.DataFrame(loaded.payload, columns=account_cols) if loaded.success and loaded.payload else pd.DataFrame(columns=account_cols)
+    if "sales_documents" not in st.session_state:
+        loaded = load_table("sales_documents")
+        st.session_state.sales_documents = pd.DataFrame(loaded.payload, columns=doc_cols) if loaded.success and loaded.payload else pd.DataFrame(columns=doc_cols)
+
+    ac1, ac2 = st.columns([1, 2])
+    with ac1:
+        st.markdown("##### Add Customer / Business")
+        with st.form("new_customer_form", clear_on_submit=True):
+            customer_name = st.text_input("Business / customer name")
+            contact = st.text_input("Contact person")
+            email = st.text_input("Email")
+            phone = st.text_input("Phone")
+            terms = st.selectbox("Payment terms", ["Due on receipt", "Net 7", "Net 15", "Net 30", "Custom"])
+            default_discount = st.number_input("Default discount %", min_value=0.0, max_value=100.0, step=1.0)
+            notes = st.text_area("Notes")
+            add_customer = st.form_submit_button("Save Customer", use_container_width=True)
+        if add_customer:
+            if not customer_name.strip():
+                st.error("Customer/business name is required.")
+            else:
+                row = {"Account #": new_account_number(), "Business / Customer": customer_name.strip(), "Contact": contact.strip(), "Email": email.strip(), "Phone": phone.strip(), "Billing Address": "", "Shipping Address": "", "Payment Terms": terms, "Default Discount %": default_discount, "Notes": notes.strip(), "Created": datetime.now().strftime("%Y-%m-%d %H:%M")}
+                st.session_state.customer_accounts = pd.concat([st.session_state.customer_accounts, pd.DataFrame([row])], ignore_index=True)
+                save_table(st.session_state.customer_accounts, "customer_accounts")
+                st.success(f"Saved {row['Business / Customer']} ({row['Account #']}).")
+                st.rerun()
+
+    with ac2:
+        st.markdown("##### Customer Accounts")
+        edited_accounts = st.data_editor(st.session_state.customer_accounts, num_rows="dynamic", use_container_width=True, key="customer_accounts_editor", column_config={"Default Discount %": st.column_config.NumberColumn(min_value=0.0, max_value=100.0, format="%.1f%%")})
+        if not edited_accounts.equals(st.session_state.customer_accounts):
+            st.session_state.customer_accounts = edited_accounts
+            save_table(edited_accounts, "customer_accounts")
+
+    st.markdown("---")
+    st.markdown("##### Create Quote or Invoice")
+    accounts = st.session_state.customer_accounts
+    if not len(accounts):
+        st.info("Add a customer above before creating a quote or invoice.")
+    else:
+        labels = {f"{r['Account #']} — {r['Business / Customer']}": i for i, r in accounts.iterrows()}
+        selected_label = st.selectbox("Customer / account", list(labels.keys()), key="sales_customer")
+        selected_account = accounts.loc[labels[selected_label]].to_dict()
+        default_disc = float(selected_account.get("Default Discount %", 0) or 0)
+        line_items = st.data_editor(pd.DataFrame([{"Description": "", "Quantity": 1.0, "Unit Price": 0.0}]), num_rows="dynamic", use_container_width=True, key="sales_line_items", column_config={"Description": st.column_config.TextColumn(required=True), "Quantity": st.column_config.NumberColumn(min_value=0.0, step=1.0), "Unit Price": st.column_config.NumberColumn(min_value=0.0, format="$%.2f")})
+        fc1, fc2, fc3, fc4 = st.columns(4)
+        with fc1: discount_type = st.selectbox("Discount type", ["fixed", "percent"], key="sales_discount_type")
+        with fc2: discount_value = st.number_input("Discount", min_value=0.0, value=default_disc if discount_type == "percent" else 0.0, step=1.0, key="sales_discount")
+        with fc3: tax_pct = st.number_input("Tax %", min_value=0.0, max_value=100.0, step=0.25, key="sales_tax")
+        with fc4: shipping = st.number_input("Shipping / delivery", min_value=0.0, step=1.0, key="sales_shipping")
+        totals = calculate_totals(line_items.to_dict("records"), discount_value, discount_type, tax_pct, shipping)
+        t1, t2, t3, t4 = st.columns(4)
+        t1.metric("Subtotal", f"${totals['subtotal']:,.2f}")
+        t2.metric("Discount", f"-${totals['discount']:,.2f}")
+        t3.metric("Tax + Shipping", f"${totals['tax'] + totals['shipping']:,.2f}")
+        t4.metric("Total", f"${totals['total']:,.2f}")
+        q1, q2, q3 = st.columns(3)
+        with q1: create_quote = st.button("Create Quote", use_container_width=True)
+        with q2: create_invoice = st.button("Create Invoice", use_container_width=True)
+        with q3: create_payment_link = st.button("Create Payment Link", use_container_width=True)
+        if create_quote or create_invoice or create_payment_link:
+            if totals["total"] <= 0:
+                st.error("Add at least one priced line item.")
+            else:
+                kind = "QUO" if create_quote else "INV"
+                doc_no = new_document_number(kind)
+                is_quote = create_quote
+                row = {"Document #": doc_no, "Type": "Quote" if is_quote else "Invoice", "Account #": selected_account["Account #"], "Customer": selected_account["Business / Customer"], "Issue Date": date.today().isoformat(), "Due Date": "" if is_quote else (date.today() + pd.Timedelta(days=30)).isoformat(), "Expiration Date": (date.today() + pd.Timedelta(days=14)).isoformat() if is_quote else "", "Status": "Draft" if is_quote else ("Awaiting Payment" if create_payment_link else "Unpaid"), "Subtotal": totals["subtotal"], "Discount": totals["discount"], "Tax": totals["tax"], "Shipping": totals["shipping"], "Total": totals["total"], "Amount Paid": 0.0, "Amount Due": totals["total"], "Notes": "", "Created": datetime.now().strftime("%Y-%m-%d %H:%M")}
+                st.session_state.sales_documents = pd.concat([st.session_state.sales_documents, pd.DataFrame([row])], ignore_index=True)
+                save_table(st.session_state.sales_documents, "sales_documents")
+                if create_payment_link:
+                    result = create_pos_checkout(totals["total"], f"{doc_no} — {selected_account['Business / Customer']}", str(selected_account.get("Email", "") or ""), invoice_id=doc_no)
+                    if result.success:
+                        log = load_table("sales_log", shared=True)
+                        sales_log = list(log.payload) if log.success and log.payload else []
+                        sales_log.append({"Invoice #": doc_no, "Date": datetime.now().strftime("%Y-%m-%d %H:%M"), "Description": f"{selected_account['Business / Customer']} — invoice", "Amount": totals["total"], "Status": "Awaiting Payment", "Link": result.checkout_url, "session_id": result.session_id})
+                        save_table(pd.DataFrame(sales_log), "sales_log", shared=True)
+                        st.success(f"Payment link created for {doc_no}.")
+                        st.code(result.checkout_url)
+                    else: st.error(result.error)
+                else: st.success(f"{row['Type']} {doc_no} created.")
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown("##### Documents / Accounts Receivable")
+        docs = st.session_state.sales_documents
+        if len(docs):
+            st.dataframe(docs, use_container_width=True, column_config={k: st.column_config.NumberColumn(format="$%.2f") for k in ["Subtotal","Discount","Tax","Shipping","Total","Amount Paid","Amount Due"]})
+            options = [f"{i} — {r['Document #']} — {r['Customer']} — ${float(r['Total']):,.2f}" for i, r in docs.iterrows()]
+            chosen = st.selectbox("Manage document", options, key="manage_sales_doc")
+            doc_idx = int(chosen.split(" — ", 1)[0])
+            doc = docs.loc[doc_idx]
+            if doc["Type"] == "Invoice":
+                pay = st.number_input("Record payment", min_value=0.0, max_value=float(doc["Amount Due"] or 0), step=1.0, key=f"pay_{doc['Document #']}")
+                if st.button("Apply Payment", key=f"apply_{doc['Document #']}"):
+                    payment = apply_payment(float(doc["Total"]), float(doc["Amount Paid"]) + pay)
+                    for col, val in [("Amount Paid", payment["amount_paid"]), ("Amount Due", payment["amount_due"]), ("Status", payment["status"])]: st.session_state.sales_documents.loc[doc_idx, col] = val
+                    save_table(st.session_state.sales_documents, "sales_documents")
+                    st.rerun()
+            html = f"""<!doctype html><html><head><meta charset="utf-8"><title>{doc["Document #"]}</title><style>body{{font-family:Arial;max-width:800px;margin:40px auto;padding:20px}}table{{width:100%;border-collapse:collapse}}td,th{{padding:8px;border-bottom:1px solid #ddd}}</style></head><body><h1>Cooper River Trading Co.</h1><h2>{doc["Type"]} {doc["Document #"]}</h2><p><b>Customer:</b> {doc["Customer"]} ({doc["Account #"]})</p><p><b>Issued:</b> {doc["Issue Date"]} &nbsp; <b>Due:</b> {doc["Due Date"] or "—"}</p><p><b>Status:</b> {doc["Status"]}</p><hr><p>Subtotal: ${float(doc["Subtotal"]):,.2f}<br>Discount: -${float(doc["Discount"]):,.2f}<br>Tax: ${float(doc["Tax"]):,.2f}<br>Shipping: ${float(doc["Shipping"]):,.2f}</p><h2>Total: ${float(doc["Total"]):,.2f}</h2><p>Amount due: ${float(doc["Amount Due"]):,.2f}</p><p>Print this page or save as PDF from your browser.</p></body></html>"""
+            st.download_button("Download printable document", html, file_name=f"{doc['Document #']}.html", mime="text/html", use_container_width=True)
+        else: st.info("No quotes or invoices yet.")
+
+
 # AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
 # ==========================================================================
 with tab_ai:
