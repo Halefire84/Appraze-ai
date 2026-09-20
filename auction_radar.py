@@ -4,11 +4,16 @@ Acquisition stays outside this module. Callers provide records obtained from
 an allowed public catalog, permitted feed/export, or user-provided file.
 Market comps are also caller-supplied so this layer never scrapes or invents
 auction data.
+
+Acquisition decisions delegate to decision_policy.evaluate_deal() -- the one
+canonical decision authority -- rather than the inline 70%-rule copy this
+module used to carry independently of deal_workspace.py and
+crtc_opportunity.py's own separate copies of the same math.
 """
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
-from auction_costs import calculate_auction_cost, max_bid_for_target_all_in
 from auction_source_adapters import build_catalog_adapter
+from decision_policy import evaluate_deal
 from holy_grail_pipeline import OpportunityCandidate, rank_opportunities
 from valuation_bridge import value_candidate
 
@@ -38,34 +43,51 @@ def enrich_auction_opportunities(
         }
         bid = listing.get("price")
         if bid is not None:
-            cost = calculate_auction_cost(
-                bid,
-                buyer_premium_pct=listing.get("buyer_premium"),
+            market_value = result.get("market_value")
+            premium_pct = listing.get("buyer_premium_pct")
+            if premium_pct is None:
+                premium_pct = listing.get("buyer_premium")  # legacy key, percentage points
+            decision = evaluate_deal(
+                price=bid,
+                market_value=market_value,
+                is_auction=True,
+                buyer_premium_pct=premium_pct,
                 shipping=listing.get("shipping"),
+                other_fees=listing.get("other_fees"),
+                require_shipping=True,
+            )
+            # Preserve the calculate_auction_cost()-shaped dict the Auction
+            # Hunt page reads (cost.get("all_in_cost")) rather than exposing
+            # decision_policy's own richer cost_components shape here.
+            cost = {
+                "bid": round(float(bid), 2),
+                "buyer_premium_pct": None,
+                "buyer_premium_amount": None,
+                "shipping": None,
+                "other_fees": None,
+                "known_addons": 0.0,
+                "all_in_cost": decision.all_in_cost,
+                "complete": decision.costs_complete,
+            }
+            for component in decision.cost_components:
+                if component.name == "buyer_premium_pct":
+                    cost["buyer_premium_pct"] = component.amount
+                elif component.name == "buyer_premium":
+                    cost["buyer_premium_amount"] = component.amount
+                elif component.name == "shipping":
+                    cost["shipping"] = component.amount
+                elif component.name == "other_fees":
+                    cost["other_fees"] = component.amount
+            cost["known_addons"] = round(
+                sum(v for v in (cost["buyer_premium_amount"], cost["shipping"], cost["other_fees"]) if v is not None),
+                2,
             )
             meta["acquisition_cost"] = cost
-            market_value = result.get("market_value")
             if market_value is not None:
-                target_all_in = round(float(market_value) * 0.70, 2)
-                max_bid = max_bid_for_target_all_in(
-                    target_all_in,
-                    buyer_premium_pct=listing.get("buyer_premium"),
-                    shipping=listing.get("shipping"),
-                )
-                meta["target_all_in_cost"] = target_all_in
-                meta["max_bid"] = max_bid
-                if max_bid is None:
-                    result["decision"] = "REVIEW"
-                    result["reason"] = "Buyer premium is unknown, so CRTC will not claim a safe maximum auction bid."
-                elif float(bid) <= max_bid:
-                    result["decision"] = "BUY"
-                    result["reason"] = "Bid is at or below the 70% all-in acquisition target after known auction costs."
-                elif float(bid) <= float(market_value) * 0.85:
-                    result["decision"] = "BORDERLINE"
-                    result["reason"] = "Bid is below estimated market value but exceeds the 70% all-in acquisition target."
-                else:
-                    result["decision"] = "PASS"
-                    result["reason"] = "Bid is too high relative to estimated market value after auction costs."
+                meta["target_all_in_cost"] = decision.acquisition_target_all_in
+                meta["max_bid"] = decision.max_bid_or_price
+                result["decision"] = decision.decision
+                result["reason"] = decision.reason
         evidence[index] = meta
     return evidence
 

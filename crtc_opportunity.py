@@ -3,12 +3,23 @@
 Keeps three decisions separate: Radar lead quality, market-value confidence,
 and acquisition decision. Radar is a discovery signal; it is never treated as
 proof of resale value.
+
+The acquisition decision itself is delegated to decision_policy.evaluate_deal()
+-- the one canonical decision authority -- rather than reimplementing the
+70% rule here independently of deal_workspace.py and auction_radar.py's own
+copies of the same math (those used to disagree; see CRTC_HANDOFF.md).
 """
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
 
+from decision_policy import DECISION_BORDERLINE, DECISION_BUY, DECISION_PASS, DECISION_REVIEW, evaluate_deal
 
-DECISIONS = ("BUY", "PASS", "BORDERLINE", "REVIEW")
+# This module's own historical decision vocabulary. build_opportunity() only
+# calls evaluate_deal() with is_auction=False, require_shipping=False, so
+# the canonical engine's richer vocabulary (STRONG BUY / AT CEILING /
+# CONDITIONAL BUY) never actually surfaces here -- only these four ever
+# will, which is why callers that pattern-match against DECISIONS still work.
+DECISIONS = (DECISION_BUY, DECISION_PASS, DECISION_BORDERLINE, DECISION_REVIEW)
 
 
 @dataclass(frozen=True)
@@ -44,31 +55,22 @@ def build_opportunity(candidate: Any, *, market_value: Optional[float] = None,
     listing = candidate.listing
     price = listing.get("price")
     value = market_value if market_value is not None else listing.get("estimated_value")
-    if max_buy_price is None and value is not None:
-        max_buy_price = round(float(value) * 0.70, 2)
+
+    canonical = None
+    if decision is None or max_buy_price is None or not reason:
+        canonical = evaluate_deal(price=price, market_value=value, is_auction=False, require_shipping=False)
+
+    if max_buy_price is None:
+        max_buy_price = canonical.acquisition_target_all_in
 
     if decision is None:
-        if price is None or value is None:
-            decision = "REVIEW"
-        elif float(price) <= float(max_buy_price):
-            decision = "BUY"
-        elif float(price) <= float(value) * 0.85:
-            decision = "BORDERLINE"
-        else:
-            decision = "PASS"
+        decision = canonical.decision
 
     if decision not in DECISIONS:
         raise ValueError(f"Unsupported CRTC decision: {decision}")
 
     if not reason:
-        if decision == "BUY":
-            reason = "Asking price is at or below the 70% acquisition target."
-        elif decision == "BORDERLINE":
-            reason = "Price is below estimated market value but above the 70% target."
-        elif decision == "PASS":
-            reason = "Asking price is too high relative to the available market value."
-        else:
-            reason = "More market-value evidence is required before a purchase decision."
+        reason = canonical.reason
 
     return CRTCOpportunity(
         source=str(listing.get("source") or ""),
