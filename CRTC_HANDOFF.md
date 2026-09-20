@@ -59,6 +59,117 @@ tests/ -q` -> 291 passed, 0 failed, 0 regressions):
   rather than making an unverified UI change with no way to browser-test
   it in this environment.
 
+## 2026-09-20 — Radar integration: preserve rich eBay listings through the scan
+Context: a "CRTC — New Master Development Direction" doc (simulation-driven
+P0–P20 hardening plan: canonical BUY decision, Stripe replay/refund/
+ordering fixes, category-mismatch pipeline fix, financial-input
+validation, SKU/listing-identity integrity, etc.) was handed off in the
+same session as a narrower, immediately-actionable request: finish wiring
+rich eBay listings through `listing_normalizer.py` into the existing
+Opportunity Radar. This entry covers only that narrower request, actually
+completed and tested this session. **The P0–P20 plan itself is not yet
+started** — see "Unresolved issues" below; the next session should begin
+there, in the stated priority order, not re-litigate prioritization.
+
+**Discrepancy to flag**: the handoff message claimed "the only intentional
+uncommitted change is comps_adapters.py, where fetch_listings() was added
+to EbayBrowseAdapter." At the start of this session, `git status` showed a
+clean working tree and `EbayBrowseAdapter` had no `fetch_listings` method
+— that change was not present in this checkout (likely made in a
+different session/machine that never pushed/synced here). Rather than
+fabricate around the gap, `fetch_listings()` was implemented fresh this
+session as described below.
+
+Root cause found: `opportunity_sources.scan_ebay_active()` (dead code —
+grepped, zero callers anywhere in the repo) built its Radar-bound listing
+dicts from `EbayBrowseAdapter.fetch_comps()`'s `Comp` objects. `Comp` has
+no `source_listing_id`/`description`/`category` field, so the dict it
+rebuilt **always set `"source_listing_id": ""` and `"description": ""`
+for every listing**, regardless of what eBay actually returned — every
+listing scanned through this path would have collapsed onto the same
+blank identifier. The primary hunt path (`ebay_holy_grail.py` ->
+`holy_grail_pipeline.py`) already did this correctly and was not touched.
+
+Fix:
+- **comps_adapters.py**: added `EbayBrowseAdapter.fetch_listings()`, a
+  sibling to `fetch_comps()` (not a replacement — `fetch_comps()` has a
+  zero-line diff, verified with `git diff`). Calls the identical Browse
+  `search` endpoint and does the same defensive price parsing, but
+  returns the full per-item record (source_listing_id with the same
+  itemId -> legacyItemId -> itemWebUrl fallback chain `ebay_holy_grail.py`
+  already uses, url, title, description, category, condition, shipping,
+  seller, location, images, auction_end) instead of a reduced `Comp`.
+- **opportunity_sources.py**: `scan_ebay_active()` now calls
+  `fetch_listings()` -> `listing_normalizer.normalize_listing()` ->
+  `holy_grail_pipeline.rank_opportunities()`, so source_listing_id/url/
+  description/category survive into the ranked `OpportunityCandidate`.
+  `verdict_engine.py`/`opportunity_result.py` were not recreated (they
+  stay removed per commit 7aae182); `crtc_opportunity.py`/
+  `holy_grail_pipeline.py` already cover that surface.
+
+Tests run (all real, actually executed this session):
+```
+python3 -m pytest tests/test_comps_adapters.py tests/test_opportunity_sources.py -q
+  -> 32 passed
+python3 -m pytest tests/ -q
+  -> 300 passed, 0 failed, 0 errored (291 baseline + 9 new: 5 in
+     test_comps_adapters.py for fetch_listings, 4 in
+     test_opportunity_sources.py for the scan_ebay_active fix)
+python3 -m compileall -q .
+  -> exit 0, no output (all files compile)
+git diff --check
+  -> exit 0, no output (no whitespace/conflict-marker errors)
+```
+Known limitation: `fetch_listings()`'s field names for `categories`,
+`shortDescription`, `itemLocation`, `seller`, and `image`/
+`additionalImages` are taken from eBay's public Browse API docs, not
+verified against a live call in this session (no eBay credentials
+available here) — same caveat `EbayMarketplaceInsightsAdapter`'s own
+docstring already carries for the same reason. `scan_ebay_active()` still
+has no UI caller (unchanged from before this fix); wiring it into a page
+is future work, not done here.
+
+## Unresolved issues carried into the next session
+The "CRTC — New Master Development Direction" P0 list has NOT been
+started yet (no code changes in this entry address it):
+1. Canonical BUY decision engine (unify the 70%-of-market-value rule and
+   finance.py's 40% ROI threshold into one authority).
+2. Stripe webhook replay protection — **partially done already**: see the
+   2026-09-18 entry above, `verify_stripe_signature()` already has a
+   5-minute timestamp-tolerance check. Signature-rotation (accept any
+   valid v1 signature during rotation) and durable event-idempotency are
+   still open.
+3. Stripe refund accounting — `stripe_webhooks.py` still treats Stripe's
+   `refunded` boolean as a monetary amount rather than reading the actual
+   refunded-amount field; partial/multiple/duplicate refunds are unhandled.
+4. Category-mismatch detection — `opportunity_radar.detect_category_mismatch()`
+   still derives its expected-keyword evidence from the listing's own
+   category/title/description (see `listing_normalizer._expected_keywords()`),
+   so it can validate itself. Needs an independent taxonomy/classifier.
+5. Financial input validation (NaN/Infinity/negative/boolean-as-number)
+   is not yet enforced at a system boundary.
+6. Unknown acquisition costs (shipping, buyer premium) are not yet
+   modeled as an explicit KNOWN/UNKNOWN/ESTIMATED/NOT_APPLICABLE state —
+   still capable of silently defaulting to 0 in places (e.g. `shipping=0.0`
+   in `ebay_image_scan.py`'s comps, which is fine there since it's outside
+   BUY-decision math, but the broader financial-normalization layer the
+   direction doc asks for does not exist yet).
+7. Buyer-premium unit ambiguity (`buyer_premium` vs `buyer_premium_pct`)
+   not yet resolved; `listing_normalizer.NormalizedListing.buyer_premium`
+   is a single ambiguous field today.
+8. SKU/listing-identity collisions — `listing_bridge.build_master_listing()`
+   still falls back to the literal string `"CRTC-ITEM"` when both `sku`
+   and `source_listing_id` are missing, which is exactly the collision
+   the direction doc flags.
+9. P2 items (adversarial test matrix, observability around financial/
+   payment events, mobile/Windows/web deployment review, concurrency
+   review) not started.
+
+Recommended next session: start at P0 item 1 (canonical decision engine)
+per the direction doc's stated priority order, inspecting `finance.py`,
+`comps.py`, `crtc_opportunity.py`, and `holy_grail_pipeline.py` first —
+do not re-ask the user to reprioritize.
+
 ## Current state
 - Appraze repository remains the canonical codebase; do NOT start a replacement app/repository.
 - Opportunity Radar backend exists in `opportunity_radar.py`.
@@ -167,11 +278,11 @@ Every source should be transformed into a common listing schema before scoring. 
 Radar should then look for the same anomaly classes across every source: typos, weak metadata, title/description contradictions, category errors, suspiciously low prices, incomplete brand/model identifiers, and combinations of weak signals. It should also learn source-specific patterns without changing the core scoring contract.
 
 ## Next implementation target
-1. Connect the existing eBay Browse acquisition to `listing_normalizer.py`, preserving the richer listing fields instead of reducing everything immediately to `Comp` objects.
-2. Feed normalized eBay records into Opportunity Radar and rank the live candidates while preserving original listing URLs.
-3. Add a dedicated CRTC opportunity result model/UI that separates Radar lead score from market-value confidence and eventual BUY/PASS.
-4. Add source adapters incrementally, prioritizing CTBids/Estate Auctions, ShopGoodwill, HiBid, and other sources where legitimate acquisition is available.
-5. Connect promising candidates to the existing valuation/comps and CRTC verdict workflow.
+1. ~~Connect the existing eBay Browse acquisition to `listing_normalizer.py`, preserving the richer listing fields instead of reducing everything immediately to `Comp` objects.~~ **Done 2026-09-20** — see that entry above (`EbayBrowseAdapter.fetch_listings()` + `opportunity_sources.scan_ebay_active()`). The auction/last-chance path (`ebay_holy_grail.py`) already did this before.
+2. ~~Feed normalized eBay records into Opportunity Radar and rank the live candidates while preserving original listing URLs.~~ **Done** — same fix; `source_listing_id`/`url`/`description`/`category` now survive into the ranked `OpportunityCandidate`. `scan_ebay_active()` still has no UI caller (pre-existing gap, not addressed).
+3. **STOP — superseded by the 2026-09-20 "New Master Development Direction" P0/P1 list above.** Do not resume the numbered items below (dedicated opportunity model/UI, additional source adapters, verdict-workflow wiring) until every P0 item in that list is resolved, tested, and committed — hardening now takes priority over new source coverage or new features. See "Unresolved issues carried into the next session" above for the concrete starting point (P0 item 1: canonical decision engine).
+4. Add source adapters incrementally, prioritizing CTBids/Estate Auctions, ShopGoodwill, HiBid, and other sources where legitimate acquisition is available. — deferred, see item 3.
+5. Connect promising candidates to the existing valuation/comps and CRTC verdict workflow. — deferred, see item 3.
 
 ## Guardrails
 - Do not build anti-bot bypasses or evasion tooling.

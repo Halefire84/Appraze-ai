@@ -25,7 +25,7 @@ over a missing approval.
 import base64
 import io
 import time
-from typing import List, Protocol
+from typing import Any, Dict, List, Protocol
 
 import pandas as pd
 import requests
@@ -212,6 +212,94 @@ class EbayBrowseAdapter:
                 url=item.get("itemWebUrl", ""),
             ))
         return comps
+
+    def fetch_listings(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Rich per-item listing records for Opportunity Radar / listing_normalizer,
+        as a sibling to fetch_comps() rather than a replacement for it.
+
+        fetch_comps() reduces each eBay result to a Comp (price/condition/
+        shipping/title/url only) because that's all comps.py's valuation
+        math needs. That reduction is correct for comps, but it silently
+        discards source_listing_id, description, category, images, seller,
+        and location — fields Opportunity Radar's typo/category-mismatch/
+        hidden-brand detection actually uses (see listing_normalizer.py).
+        Reusing fetch_comps()'s output for Radar scanning was the actual
+        bug: every listing collapsed to the same blank source_listing_id.
+        This method calls the identical Browse `search` endpoint and does
+        the same defensive price parsing, but returns the fuller record
+        instead of a Comp.
+
+        Field names below (categories, shortDescription, itemLocation,
+        seller, image/additionalImages) come from eBay's public Browse API
+        docs, the same source and the same live-schema caveat noted on
+        EbayMarketplaceInsightsAdapter above.
+        """
+        if not query.strip():
+            return []
+        token = _get_ebay_access_token()
+        resp = requests.get(
+            self._SEARCH_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-EBAY-C-MARKETPLACE-ID": self.marketplace_id,
+            },
+            params={"q": query, "limit": min(limit, 50)},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        listings: List[Dict[str, Any]] = []
+        for item in data.get("itemSummaries", []) or []:
+            price_info = item.get("price") or {}
+            try:
+                price = float(price_info.get("value", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if price <= 0:
+                continue
+
+            shipping_options = item.get("shippingOptions") or []
+            shipping_cost = 0.0
+            if shipping_options:
+                shipping_cost = float((shipping_options[0].get("shippingCost") or {}).get("value", 0) or 0)
+
+            categories = item.get("categories") or []
+            category = ""
+            if categories and isinstance(categories[0], dict):
+                category = str(categories[0].get("categoryName", "") or "")
+
+            images = []
+            primary_image = (item.get("image") or {}).get("imageUrl")
+            if primary_image:
+                images.append(primary_image)
+            for extra in item.get("additionalImages") or []:
+                extra_url = extra.get("imageUrl") if isinstance(extra, dict) else None
+                if extra_url:
+                    images.append(extra_url)
+
+            # Same item-identity fallback chain as ebay_holy_grail.py's
+            # auction scan, so a listing missing itemId still gets a
+            # non-empty, stable source_listing_id instead of collapsing
+            # every result to the same blank identifier.
+            item_id = str(item.get("itemId") or item.get("legacyItemId") or item.get("itemWebUrl") or "")
+
+            listings.append({
+                "source": "eBay",
+                "source_listing_id": item_id,
+                "url": item.get("itemWebUrl", "") or "",
+                "title": item.get("title", "") or "",
+                "description": item.get("shortDescription", "") or "",
+                "category": category,
+                "price": price,
+                "condition": item.get("condition", "") or "",
+                "shipping": shipping_cost,
+                "seller": (item.get("seller") or {}).get("username", "") or "",
+                "location": (item.get("itemLocation") or {}).get("city", "") or "",
+                "images": images,
+                "auction_end": item.get("itemEndDate") or None,
+            })
+        return listings
 
 
 class EbayInsightsNotApprovedError(Exception):

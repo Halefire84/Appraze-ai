@@ -35,16 +35,22 @@ def scan_ebay(query: str, *, limit: int = 25, min_score: float = 25.0) -> Source
 
 
 def scan_ebay_active(query: str, *, limit: int = 25, min_score: float = 25.0) -> SourceScan:
-    """Legacy active-listing scan retained for the Market Comps workflow."""
+    """Active-listing scan for the Market Comps / general Radar workflow.
+
+    Uses EbayBrowseAdapter.fetch_listings() (the full per-item record) so
+    source_listing_id, description, category, and images survive into
+    Opportunity Radar's scoring. This previously went through
+    fetch_comps() and rebuilt a raw dict from the resulting Comp objects,
+    which always set source_listing_id to "" (Comp has no such field) and
+    dropped description/category entirely -- every listing scanned this
+    way collapsed onto the same blank identifier. fetch_comps() itself is
+    untouched; comps.py's valuation math still consumes it exactly as
+    before.
+    """
     if not query.strip():
         return SourceScan("eBay", query, 0, [])
-    comps = EbayBrowseAdapter().fetch_comps(query, limit=limit)
-    raw = [{
-        "source": "eBay", "source_listing_id": "", "url": comp.url,
-        "title": comp.title, "description": "", "price": comp.price,
-        "condition": comp.condition, "shipping": comp.shipping,
-    } for comp in comps]
-    normalized = [normalize_listing(item) for item in raw]
+    raw_listings = EbayBrowseAdapter().fetch_listings(query, limit=limit)
+    normalized = [normalize_listing(item) for item in raw_listings]
     return SourceScan("eBay", query, len(normalized), rank_opportunities(normalized, min_score=min_score))
 
 
