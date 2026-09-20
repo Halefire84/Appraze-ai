@@ -763,3 +763,33 @@ Design for a daily beta report covering active users, feature usage, errors, dea
 Telemetry must be minimal and must never capture passwords, secrets, tokens or unnecessary PII. Prefer stable, versioned event names and a thin instrumentation layer separate from business logic.
 
 Roadmap reference: CRTC_COMPETITIVE_INTELLIGENCE_ROADMAP.md → Beta Telemetry & Outcome Intelligence.
+
+
+## 2026-09-20 — Accounts, Quotes & Invoices implementation
+Implemented a focused sales-document layer rather than a full accounting system.
+
+Added:
+- `sales_documents.py` with safe money normalization, quote/invoice totals, fixed or percentage discounts, tax/shipping, account/document numbering, and payment-state calculation.
+- `tests/test_sales_documents.py` covering discounts, tax, shipping, negative-input safety, partial/full payments, and overpayment capping.
+- New **Accounts & Invoices** tab in `app.py`.
+- Persistent customer accounts using the existing storage backend.
+- Customer/business contact details, addresses, payment terms, default discounts and notes.
+- Quote creation with 14-day expiration.
+- Invoice creation with 30-day default due date.
+- Fixed-dollar and percentage discounts.
+- Tax and shipping/delivery inputs.
+- Accounts-receivable view through invoice amount-due data.
+- Manual payment recording with Unpaid / Partially Paid / Paid states.
+- Quote → invoice conversion.
+- Printable/downloadable HTML quote/invoice documents.
+- Stripe-hosted payment links for invoices using the existing POS checkout path.
+- Existing POS checkout now accepts an existing invoice/document ID so payment reconciliation can map back to the invoice instead of generating an unrelated POS number.
+
+Important validation status:
+- GitHub commits were successfully created for the implementation.
+- Full application test execution was **not possible in this environment** because the shell cannot resolve/reach GitHub, and no local repository checkout is available here.
+- Therefore do NOT claim the Streamlit app or full test suite passed yet.
+- A Windows/laptop or CI pass must run `python -m py_compile app.py sales_documents.py tests/test_sales_documents.py` and the relevant pytest suite before treating this as production-ready.
+- The next hardening pass should verify old saved `sales_documents` records migrate cleanly when the new Line Items field is absent, payment-webhook reconciliation updates invoice status correctly, and the browser-printable documents render correctly on mobile/desktop.
+
+Product boundary remains: CRTC handles reseller/customer sales operations, not general-ledger accounting, payroll, or QuickBooks-style bookkeeping.
