@@ -2,7 +2,210 @@
 
 **Canonical repository:** Halefire84/Appraze-ai  
 **Product direction:** CRTC (Cooper River Trading Co.)  
-**Last handoff:** 2026-09-20 (Charge Customer tab wired to pos.py)
+**Last handoff:** 2026-09-20 (P0 hardening: canonical decision engine + webhook correctness)
+
+## 2026-09-20 (later) — P0 hardening: canonical decision engine, webhook correctness, SKU/category fixes
+
+### Where this came from
+Two things converged this session: a "New Master Development Direction" doc
+(a simulation campaign against this codebase found 4 High/5 Medium/7 Low/1
+Info findings, F-01 through F-17) and a separately uploaded
+`CRTC-P0-hardened.zip` — real work from a parallel ChatGPT/Codex session
+(see `CHATGPT_HANDOFF.md`/`CRTC_SESSION_PROMPTS.md`) that had already built
+`decision_policy.py`, `number_normalize.py`, and `tests/test_p0_regression.py`
+against an OLDER snapshot of this repo (it predated this session's PWA fix
+and the `pos.py` Charge Customer wiring above). Neither session had
+visibility into the other's work. This entry is the reconciliation: the
+new modules were pulled in, the parts of `stripe_webhooks.py` and
+`listing_bridge.py` that had diverged were merged (keeping both sides'
+real fixes), and — since the zip's own plan explicitly called for it but
+never did it — `auction_radar.py` and `crtc_opportunity.py` were
+additionally migrated to the canonical engine, which the zip had not
+touched.
+
+### 1. Canonical decision engine (`decision_policy.py`) — NEW
+Single source of truth for BUY/PASS/REVIEW, replacing three independent,
+occasionally-disagreeing copies of the "70% of market value" rule that
+previously lived in `deal_workspace.py`, `auction_radar.py`, and
+`crtc_opportunity.py`.
+
+```
+Acquisition rule:  all-in cost <= 70% of estimated market value
+ROI tiers (after known fees, via finance.calc_deal/five_tier_verdict):
+  STRONG BUY  >= 60%
+  BUY         >= 40%
+  AT CEILING  >= 20%
+  BORDERLINE  >= 5%
+  PASS        < 5%
+```
+A workspace-style acquisition "BUY" at exactly the 70% limit typically
+yields ~24% ROI after a 13% resale fee — that's `AT CEILING` on the ROI
+scale, not `BUY`. `evaluate_deal()` returns BOTH the acquisition decision
+and the ROI tier explicitly (`DealDecision.decision` and `.roi_tier_label`)
+and adds a `warnings` entry when they disagree, rather than picking one
+number and hiding the other. Cost states are explicit
+(`KNOWN`/`UNKNOWN`/`ESTIMATED`/`NOT_APPLICABLE`); a material unknown cost
+(auction buyer premium, required shipping) returns `REVIEW` or
+`CONDITIONAL BUY` with the missing assumption named — it is never
+silently treated as `$0`. Invalid numbers (NaN/Inf/negative) return
+`REVIEW`, never `BUY`/`STRONG BUY`.
+
+Wired in:
+- `deal_workspace.build_deal_workspace()` — now a one-line delegate to
+  `decision_policy.build_deal_workspace_record()`.
+- `crtc_opportunity.build_opportunity()` — delegates via
+  `evaluate_deal(is_auction=False, require_shipping=False)`; explicit
+  `decision`/`max_buy_price`/`reason` override params still work exactly
+  as before (backward compatible for any caller that passes them).
+- `auction_radar.enrich_auction_opportunities()` — delegates via
+  `evaluate_deal(is_auction=True, require_shipping=True)`; the
+  `meta["acquisition_cost"]` dict shape `pages/2_🏷️_Auction_Hunt.py` reads
+  (`.get("all_in_cost")`) is preserved exactly, rebuilt from
+  `decision.cost_components` rather than the old `calculate_auction_cost()`.
+- `finance.calc_deal()` additionally hardened directly (NaN/Inf/negative
+  inputs now return a safe PASS `DealResult` instead of propagating
+  garbage) as defense-in-depth for any caller that reaches it without
+  going through `decision_policy` first.
+
+**Not migrated, deliberately:** `acquisition_hunter.py`'s
+`estimate_max_bid()`/`score_acquisition()` (used by the bulk-liquidation
+`pages/2_📦_Liquidation_Surplus.py` workflow) and `crtc_hunt_engine.py`'s
+composite Radar+acquisition tier score. Both use a genuinely different
+model (recovery-rate-adjusted margin math for salvage lots, and a 0–100
+lead-quality score for "how promising is this to investigate") — not
+another copy of the single-item 70%/ROI rule. Forcing these through
+`decision_policy.evaluate_deal()` would be a category error, not a fix.
+
+### 2. `number_normalize.py` — NEW
+Canonical parser distinguishing dollars vs. percentage points vs.
+fractional percentages: `parse_money("$1,234.50")`, `parse_percent_points("18%")`
+/ `parse_percent_points(0.18)` (both → `18.0`), `parse_number(...)`. Wired
+into `auction_costs.calculate_auction_cost()` and
+`auction_costs.max_bid_for_target_all_in()` — both used to do a bare
+`float(buyer_premium_pct)` cast, which would silently treat a `0.18`
+fraction as `0.18%` (a 100x unit error) instead of `18%`.
+`buyer_premium`/`buyer_premium_pct` are percentage points everywhere in
+this codebase now; `buyer_premium_amount` is the dollar figure.
+
+### 3. Stripe webhook correctness (`stripe_webhooks.py`, `AppsScript_Code.gs`, `webhook_store.py`)
+Merged the zip's more complete rewrite with this session's earlier
+replay-protection work (both had independently built a timestamp
+tolerance check):
+- **Refund accounting was wrong** — `handle_charge_refunded()` used to
+  read Stripe's `refunded` field, which is a **boolean** ("was this
+  charge ever refunded at all," true even for a $0.01 partial refund),
+  and divided it by 100 as if it were a dollar amount. Now reads the
+  actual `amount_refunded` field and distinguishes `"Refunded"` (full)
+  from `"Partially Refunded"`.
+- **Signature rotation** — `verify_stripe_signature()` now accepts ANY
+  matching `v1=` value in the header, not just one; Stripe sends multiple
+  during a signing-secret rotation window.
+- **Non-ASCII / malformed headers** — raise a controlled
+  `StripeWebhookError`, never an unhandled exception.
+- **Stale timestamp is now a raise, not a `False`** — `verify_stripe_signature()`
+  previously returned `False` for a timestamp outside tolerance (same as
+  an ordinary signature mismatch); it now raises `StripeWebhookError`,
+  since a stale-but-otherwise-valid signature is a possible replay, a
+  more specific finding than "didn't match." **Breaking API change** from
+  the 2026-09-18 version of this function: the parameter is also renamed
+  `tolerance_seconds` → `tolerance_sec` to match the merged-in code.
+  Nothing else in this repo passed that kwarg by name except this
+  module's own tests, which were updated.
+- **Out-of-order webhook precedence (F-09) — the part that needed the
+  most care.** `stripe_webhooks.py` gained `STATUS_RANK`/`can_transition()`/
+  an `update_invoice_status()` that refuses to downgrade a status, but
+  **the live webhook path never calls that function** —
+  `stripe_webhook_server.py` calls `webhook_store.update_sales_log_status()`,
+  which calls `AppsScript_Code.gs`'s `handleUpdateSalesLogStatus_` directly.
+  Adding the precedence check only to the Python helper would have left
+  production completely unprotected while the regression test passed —
+  so the same `STATUS_RANK` table was **also** added to
+  `AppsScript_Code.gs` (mirrored, not shared — a `.gs` file can't import
+  Python) inside the same locked read-mutate-write execution that already
+  exists there. `handleUpdateSalesLogStatus_` now returns
+  `{found, applied}` instead of just `{found}`; `webhook_store.update_sales_log_status()`'s
+  `payload` shape changed from a bare bool to `{"found": bool, "applied": bool}`
+  accordingly — `stripe_webhook_server.py`'s `_apply_update()` was updated
+  to read the new shape (the old `elif not result.payload:` check would
+  have silently stopped firing, since a non-empty dict is always truthy
+  regardless of its contents — caught by re-running the test suite, not
+  by inspection).
+- Reminder for whoever deploys this: **`AppsScript_Code.gs` changes only
+  take effect once the Apps Script Web App is manually redeployed** (paste
+  the file into Extensions → Apps Script → Deploy → new deployment) — this
+  repo file is a copy of the source, not the running code.
+
+### 4. Category-mismatch self-validation (F-04)
+`listing_normalizer.normalize_listing()` used to derive `expected_keywords`
+from the listing's own category/title/description when the caller didn't
+supply any — making `opportunity_radar.detect_category_mismatch()`
+self-cancelling (it validated the category against evidence manufactured
+from that same category). Now defaults to an empty tuple; only an
+independently-supplied taxonomy populates it.
+
+This alone would have **silently disabled** category-mismatch detection
+for every real source (nothing in this codebase currently supplies an
+independent taxonomy), since the fallback branch in
+`detect_category_mismatch()` needs *some* evidence to compare against.
+Closed the gap with a second, still-independent check: `opportunity_radar.py`'s
+own fixed `_CATEGORY_TERMS` map (never derived from the listing) is now
+also checked in reverse — if the listing text strongly matches a
+*different* recognized category (≥2 distinct terms, to avoid flagging on
+one incidental word) and the claimed category shares no vocabulary with
+that category, it's flagged as likely miscategorized. A camera listed
+under "Clothing" now fires; a chair mentioned once under "Home & Garden"
+does not (single-term hits don't meet the threshold — false-positive
+guard per the session's explicit "do not raise the clean-listing
+false-positive rate" requirement).
+
+### 5. SKU collision (F-08)
+`listing_bridge.build_master_listing()` used to fall back to the literal
+string `"CRTC-ITEM"` when a flip had neither `sku` nor `source_listing_id`
+— every such flip collapsed onto one SKU, silently overwriting each other
+in `listing_store.upsert_listing()`'s `(sku, marketplace)` keying. New
+`_stable_sku()` fallback hashes the flip's content **plus a fresh random
+component** per call — deliberately not a pure content hash: two
+independently-created flips can have identical `item_name`/`cost_basis`/
+`notes` (two otherwise-identical $5 rings, entered by hand, at the same
+moment), and a pure hash would still collide on those. The tradeoff:
+calling `build_master_listing()` twice for the literal same flip dict now
+produces two different fallback SKUs (two rows, not one updated in
+place) — a duplicate a human can merge, which is a smaller problem than
+two unrelated items silently sharing one identity.
+
+### Tests
+```
+python3 -m pytest tests/test_p0_regression.py -q                 -> 19 passed
+python3 -m pytest tests/test_stripe_webhooks.py tests/test_stripe_webhook_server.py tests/test_webhook_store.py -q -> 88 passed
+python3 -m pytest tests/test_deal_workspace.py tests/test_auction_radar.py tests/test_auction_decision_flow.py tests/test_crtc_opportunity.py -q -> 25 passed
+python3 -m pytest tests/ -q                                       -> 360 passed, 0 failed
+python3 -m compileall -q .                                        -> exit 0
+git diff --check                                                  -> exit 0 (no whitespace/conflict markers)
+python3 -m pip check                                              -> No broken requirements found
+```
+Every number above is from an actual run in this session, not estimated.
+
+### Known limitations / not done this pass
+- `financial_intelligence.py` / `payments_adapter.py` / `crtc_learning.py` /
+  `ebay_image_scan.py` remain unwired (unchanged from the 2026-09-20 file
+  inventory entry above) — none of these are part of the decision-engine
+  surface, out of scope here.
+- The event-id idempotency parameters (`event_id`/`seen_event_ids`) added
+  to `stripe_webhooks.update_invoice_status()` are exercised by tests but
+  **not yet called from `stripe_webhook_server.py`** — the live path
+  still relies on `AppsScript_Code.gs`'s status-precedence check alone
+  for safety, not on event-id deduplication. Adding that would need a
+  persisted "seen event ids" set in the Apps Script sheet (new schema),
+  which is a real design decision, not a small patch — flagged, not done.
+- Multi-tenant data isolation, live Stripe Connect end-to-end, ToS/privacy
+  policy, and the dedicated security-audit pass (P0 items 14 onward in
+  the master direction doc) are not started.
+- Opportunity Radar's fuzzy/arbitrary typo detection (as opposed to its
+  dictionary-based `_COMMON_TYPOS` list) is still basic — not addressed
+  this pass.
+- `AppsScript_Code.gs`'s `STATUS_RANK` table is a hand-mirrored copy of
+  `stripe_webhooks.py`'s — the two must be kept in sync manually if either
+  changes (a `.gs` file has no way to import from the Python module).
 
 ## 2026-09-20 — fix: wire pos.py/billing.py into the live Charge Customer tab
 Follow-up to the same day's file-inventory pass below, which had flagged
