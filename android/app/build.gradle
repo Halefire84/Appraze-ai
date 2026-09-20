@@ -1,0 +1,35 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'com.crtc.app'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.crtc.app'
+        minSdk 23
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            if (project.hasProperty('RELEASE_STORE_FILE')) {
+                signingConfig signingConfigs.create('releaseEnv') {
+                    storeFile file(project.property('RELEASE_STORE_FILE'))
+                    storePassword project.findProperty('RELEASE_STORE_PASSWORD') ?: System.getenv('RELEASE_STORE_PASSWORD')
+                    keyAlias project.findProperty('RELEASE_KEY_ALIAS') ?: System.getenv('RELEASE_KEY_ALIAS')
+                    keyPassword project.findProperty('RELEASE_KEY_PASSWORD') ?: System.getenv('RELEASE_KEY_PASSWORD')
+                }
+            }
+        }
+    }
+
+    lint { abortOnError true }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.3'
+}
