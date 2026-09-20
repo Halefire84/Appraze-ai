@@ -20,9 +20,46 @@ an AI provider is configured, reachable, or healthy -- AI enrichment is an
 optional decoration on top of a listing that is already valid without it.
 """
 
+import hashlib
 import json
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
+
+def _stable_sku(flip: Dict[str, Any]) -> str:
+    """Collision-safe fallback SKU for a flip with no sku/source_listing_id.
+
+    Never returns a constant like the old "CRTC-ITEM" fallback -- 200
+    manual flips with none of their own identifiers used to all collapse
+    onto that one literal string, silently overwriting each other in
+    listing_store.upsert_listing()'s (sku, marketplace) keying (F-08).
+
+    Always includes a fresh random component: two independently created
+    flips can have identical item_name/cost_basis/notes (two otherwise-
+    identical $5 rings from the same source, entered by hand, at the same
+    moment), and must never derive the same SKU just because their
+    content happens to match -- a pure content hash is not collision-safe
+    under concurrent identical-looking creates. This means calling
+    build_master_listing() twice for the very same flip dict produces two
+    different fallback SKUs (two listing_store rows, not one updated in
+    place) -- a real tradeoff, but a duplicate row a human can merge is a
+    far smaller problem than two unrelated items silently sharing one
+    identity. The flip's own content is still hashed in alongside the
+    nonce so the result isn't a bare random string.
+    """
+    payload = {
+        "item_name": flip.get("item_name"),
+        "cost_basis": flip.get("cost_basis"),
+        "source": flip.get("source"),
+        "notes": flip.get("notes"),
+        "created_at": flip.get("created_at"),
+        "id": flip.get("id"),
+        "_nonce": uuid.uuid4().hex,
+    }
+    raw = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    digest = hashlib.sha256(raw).hexdigest()[:12].upper()
+    return f"CRTC-{digest}"
 
 
 def build_master_listing(flip: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,7 +74,7 @@ def build_master_listing(flip: Dict[str, Any]) -> Dict[str, Any]:
     if list_price <= 0:
         raise ValueError("A positive list price is required before listing")
     return {
-        "sku": str(flip.get("sku") or flip.get("source_listing_id") or "CRTC-ITEM"),
+        "sku": str(flip.get("sku") or flip.get("source_listing_id") or _stable_sku(flip)),
         "title": title,
         "description": str(flip.get("description") or flip.get("notes") or ""),
         "category": str(flip.get("category") or ""),
