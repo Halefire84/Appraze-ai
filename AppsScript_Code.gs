@@ -82,9 +82,9 @@ function handleRequest(e) {
       case "login":
         return handleLogin_(getUsersSheet_(), params);
       case "save_data":
-        return handleSaveData_(getStorageSheet_(), params);
+        return handleSaveData_(getStorageSheet_(), getUsersSheet_(), params);
       case "load_data":
-        return handleLoadData_(getStorageSheet_(), params);
+        return handleLoadData_(getStorageSheet_(), getUsersSheet_(), params);
       case "update_sales_log_status":
         return handleUpdateSalesLogStatus_(getStorageSheet_(), params);
       case "set_paid":
@@ -260,19 +260,23 @@ function handleSetPaid_(sheet, params) {
 // DATA STORAGE (shared admin workspace + per-tester isolated storage)
 // ---------------------------------------------------------------------------
 
-function resolveOwnerKey_(params) {
-  // Admins all share one workspace row; everyone else is isolated by username.
-  const isAdmin = String(params.is_admin || "").toLowerCase() === "true";
-  if (isAdmin) return "admin_shared";
+function resolveOwnerKey_(usersSheet, params) {
+  // Admins all share one workspace row; everyone else is isolated by
+  // username. Admin status is looked up from the Users sheet by username --
+  // it is NEVER taken from a client-supplied is_admin param, since that
+  // would let anyone read/write the shared admin workspace just by sending
+  // is_admin=true.
   const username = String(params.username || "").trim().toLowerCase();
+  const user = username ? findUser_(usersSheet, username) : null;
+  if (user && user.isAdmin) return "admin_shared";
   return "tester_" + username;
 }
 
-function handleSaveData_(sheet, params) {
+function handleSaveData_(sheet, usersSheet, params) {
   // migrateStorageSheetIfNeeded_ (called from getStorageSheet_, before this
   // ever runs) guarantees every row already has a real "table" value, so
   // there's no legacy-row case left to special-case here.
-  const ownerKey = resolveOwnerKey_(params);
+  const ownerKey = resolveOwnerKey_(usersSheet, params);
   const table = String(params.table || "deals");
   const payload = String(params.payload || "{}");
 
@@ -294,8 +298,8 @@ function handleSaveData_(sheet, params) {
   }
 }
 
-function handleLoadData_(sheet, params) {
-  const ownerKey = resolveOwnerKey_(params);
+function handleLoadData_(sheet, usersSheet, params) {
+  const ownerKey = resolveOwnerKey_(usersSheet, params);
   const table = String(params.table || "deals");
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
@@ -338,9 +342,21 @@ function salesLogStatusRank_(status) {
 // locked execution, so two webhook deliveries arriving close together
 // can't race and silently clobber each other's status update the way a
 // separate load-then-save round trip from the caller could.
+//
+// Durable event-id idempotency: when the caller passes event_id, the last
+// Stripe event id that was actually applied to this invoice is persisted
+// in the row itself (_last_event_id -- no new sheet/schema needed, since
+// sales_log rows are already free-form JSON). Stripe guarantees
+// at-least-once delivery, so the same event can arrive more than once,
+// including after this process has restarted or across multiple instances
+// of stripe_webhook_server.py -- an in-memory "seen events" set would not
+// survive either of those, but this row field does. A redelivery of an
+// event_id already recorded on the row is a no-op duplicate, distinct from
+// the ordinary status-precedence downgrade check below.
 function handleUpdateSalesLogStatus_(sheet, params) {
   const invoiceId = String(params.invoice_id || "");
   const newStatus = String(params.new_status || "");
+  const eventId = String(params.event_id || "");
   const force = String(params.force || "") === "true";
   if (!invoiceId || !newStatus) {
     return jsonResponse({ success: false, error: "invoice_id and new_status are required" });
@@ -362,13 +378,21 @@ function handleUpdateSalesLogStatus_(sheet, params) {
         }
         let found = false;
         let applied = false;
+        let duplicate = false;
         let currentStatus = null;
         for (let j = 0; j < rows.length; j++) {
           if (rows[j]["Invoice #"] === invoiceId) {
             found = true;
             currentStatus = rows[j]["Status"];
+            if (eventId && rows[j]["_last_event_id"] === eventId) {
+              // Same Stripe event redelivered -- already applied, skip
+              // entirely so a replay can never produce a duplicate effect.
+              duplicate = true;
+              break;
+            }
             if (force || salesLogStatusRank_(newStatus) >= salesLogStatusRank_(currentStatus)) {
               rows[j]["Status"] = newStatus;
+              if (eventId) rows[j]["_last_event_id"] = eventId;
               applied = true;
             }
             break;
@@ -376,6 +400,9 @@ function handleUpdateSalesLogStatus_(sheet, params) {
         }
         if (!found) {
           return jsonResponse({ success: true, found: false });
+        }
+        if (duplicate) {
+          return jsonResponse({ success: true, found: true, applied: false, duplicate: true, current_status: currentStatus });
         }
         if (!applied) {
           // Found the row but refused to downgrade it -- not an error,
@@ -443,11 +470,11 @@ function handleReserveAiUsage_(usersSheet, usageSheet, params) {
   const username = String(params.username || "").trim().toLowerCase();
   if (!username) return jsonResponse({success:false,error:"account identity is unavailable"});
   const user = findUser_(usersSheet, username);
-  const requestedAdmin = String(params.is_admin || "").toLowerCase() === "true";
-  const isAdmin = requestedAdmin || (user && user.isAdmin);
-  if (!user && !requestedAdmin) return jsonResponse({success:false,error:"account is not recognized"});
-  if (user && !user.isPaid && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
-  if (!user && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
+  // Admin status is authoritative from the Users sheet only -- a
+  // client-supplied is_admin param is never trusted for quota decisions.
+  if (!user) return jsonResponse({success:false,error:"account is not recognized"});
+  const isAdmin = user.isAdmin;
+  if (!user.isPaid && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
   const monthlyLimit = isAdmin ? AI_ADMIN_MONTHLY_LIMIT : AI_CUSTOMER_MONTHLY_LIMIT;
   const dailyLimit = isAdmin ? AI_ADMIN_DAILY_LIMIT : AI_CUSTOMER_DAILY_LIMIT;
   const period = aiPeriodKeys_();
@@ -507,9 +534,11 @@ function handleReleaseAiUsage_(usageSheet, params) {
 function handleGetAiUsage_(usersSheet, usageSheet, params) {
   const username=String(params.username||"").trim().toLowerCase(); if(!username)return jsonResponse({success:false,error:"account identity is unavailable"});
   const user=findUser_(usersSheet,username);
-  const requestedAdmin=String(params.is_admin||"").toLowerCase()==="true";
-  const isAdmin=requestedAdmin||(user&&user.isAdmin);
-  if((!user&&!requestedAdmin)|| (user&&!user.isPaid&&!isAdmin))return jsonResponse({success:false,error:"active subscription required"});
+  // Admin status is authoritative from the Users sheet only -- a
+  // client-supplied is_admin param is never trusted for quota decisions.
+  if(!user) return jsonResponse({success:false,error:"account is not recognized"});
+  const isAdmin=user.isAdmin;
+  if(!user.isPaid && !isAdmin)return jsonResponse({success:false,error:"active subscription required"});
   const monthlyLimit=isAdmin?AI_ADMIN_MONTHLY_LIMIT:AI_CUSTOMER_MONTHLY_LIMIT, dailyLimit=isAdmin?AI_ADMIN_DAILY_LIMIT:AI_CUSTOMER_DAILY_LIMIT, period=aiPeriodKeys_();
   const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey);
   if(!rowNum)return jsonResponse({success:true,monthly_used:0,monthly_limit:monthlyLimit,daily_used:0,daily_limit:dailyLimit,monthly_cost_usd:0,input_tokens:0,output_tokens:0});
