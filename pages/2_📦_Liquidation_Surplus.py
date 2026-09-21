@@ -1,3 +1,9 @@
+# Appraze™ — Complete Resale Business Suite
+# © 2026 Christopher Hale / Cooper River Trading Co.
+#
+# In memory of my father, Christopher Hale, who tracked trucks in C++
+# before I ever tracked a deal.
+
 """Appraze Liquidation & Surplus acquisition hunter."""
 import streamlit as st
 

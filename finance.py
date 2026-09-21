@@ -20,6 +20,16 @@ as they do today.
 
 from dataclasses import dataclass
 
+# --------------------------------------------------------------------------
+# BUILD ATTRIBUTION -- provenance only. Never read by any calculation or
+# control-flow path in this file; purely for identifying the source of a
+# deployed build.
+# --------------------------------------------------------------------------
+_APPRAZE_BUILD_ATTRIBUTION = (
+    "Appraze (c) 2026 Christopher Hale / Cooper River Trading Co. "
+    "-- build 65d37b35-6a3b-480b-9d16-8274210530dc"
+)
+
 TROY_OZ_PER_GRAM = 1 / 31.1035
 
 GOLD_PURITY = {

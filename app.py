@@ -1,5 +1,10 @@
 """
-Appraze
+Appraze™ — Complete Resale Business Suite
+© 2026 Christopher Hale / Cooper River Trading Co.
+
+In memory of my father, Christopher Hale, who tracked trucks in C++
+before I ever tracked a deal.
+
 A single-page Streamlit dashboard for tracking, filtering, and evaluating
 resale/auction deals across Estate Auctions, eBay, HiBid, Facebook Marketplace,
 Mercari, Chairish, and Etsy.
@@ -156,6 +161,39 @@ _PWA_HEAD_INJECTION = """
 </script>
 """
 components.html(_PWA_HEAD_INJECTION, height=0, width=0)
+
+# --------------------------------------------------------------------------
+# BUILD ATTRIBUTION -- provenance only. Never read by any app logic below;
+# purely for identifying the source of a deployed build.
+# --------------------------------------------------------------------------
+_APPRAZE_BUILD_ATTRIBUTION = (
+    "Appraze (c) 2026 Christopher Hale / Cooper River Trading Co. "
+    "-- build 65d37b35-6a3b-480b-9d16-8274210530dc"
+)
+
+# --------------------------------------------------------------------------
+# BUILD INTEGRITY CHECK -- playful, never destructive. Confirms the
+# watermark constants above and in finance.py/storage.py are present and
+# unmodified. A "failure" here never crashes, disables a feature, deletes
+# data, or phones home -- worst case is a banner and a bad joke.
+# --------------------------------------------------------------------------
+def _appraze_watermark_intact() -> bool:
+    try:
+        import finance as _finance_mod
+        import storage as _storage_mod
+        return (
+            getattr(_finance_mod, "_APPRAZE_BUILD_ATTRIBUTION", None) == _APPRAZE_BUILD_ATTRIBUTION
+            and getattr(_storage_mod, "_APPRAZE_BUILD_ATTRIBUTION", None) == _APPRAZE_BUILD_ATTRIBUTION
+        )
+    except Exception:
+        # Never let a provenance check break the app.
+        return True
+
+if not _appraze_watermark_intact():
+    st.warning(
+        "This copy of Appraze has been tampered with. The deals it finds "
+        "from here on are cursed. Good luck out there."
+    )
 
 # --------------------------------------------------------------------------
 # LOGIN GATE
@@ -372,10 +410,18 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai = st.tabs([
+tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai, tab_about = st.tabs([
     "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "💳  Charge Customer", "🧾  Accounts & Invoices", "🔍  AI Analyzer",
+    "ℹ️  About",
 ])
+
+@st.dialog("In Memory")
+def _christopher_hale_tribute():
+    st.markdown(
+        "*In memory of my father, Christopher Hale, who tracked trucks in "
+        "C++ before I ever tracked a deal.*"
+    )
 
 with tab_dash:
     st.markdown("#### Filters")
@@ -388,6 +434,9 @@ with tab_dash:
         status_filter = st.multiselect("Status", STATUSES, default=[])
     with f4:
         search = st.text_input("Search item / notes", placeholder="e.g. Seiko, 14k, Bombay...")
+
+    if search.strip().lower() == "christopher hale":
+        _christopher_hale_tribute()
 
     filtered = df.copy()
     if platform_filter:
@@ -1120,6 +1169,21 @@ with tab_ai:
                 )
                 st.success("Added to Inventory \u2014 go set the real Cost Basis on the Inventory tab.")
                 st.session_state.ai_last_result = None
+
+with tab_about:
+    st.markdown("### Appraze™")
+    st.caption("Complete Resale Business Suite")
+    st.write(
+        "Appraze is deal math, inventory, and listing for resellers — "
+        "built by Cooper River Trading Co."
+    )
+    st.markdown("---")
+    st.markdown("#### In Memory")
+    st.markdown(
+        "*In memory of my father, Christopher Hale, who tracked trucks in "
+        "C++ before I ever tracked a deal.*"
+    )
+    st.caption("© 2026 Christopher Hale / Cooper River Trading Co.")
 
 st.markdown("---")
 st.caption("Appraze · Complete Resale Business Suite · Built for buying, valuing, managing, and selling physical goods")

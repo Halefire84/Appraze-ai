@@ -1,4 +1,4 @@
-# Deploying Appraze
+# Deploying Appraze™
 
 Appraze is a Streamlit app. This covers getting it live on Streamlit
 Community Cloud (free) and every secret it recognizes. No terminal is

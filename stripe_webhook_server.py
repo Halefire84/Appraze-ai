@@ -1,3 +1,9 @@
+# Appraze™ — Complete Resale Business Suite
+# © 2026 Christopher Hale / Cooper River Trading Co.
+#
+# In memory of my father, Christopher Hale, who tracked trucks in C++
+# before I ever tracked a deal.
+
 """
 stripe_webhook_server.py — small standalone FastAPI service that receives
 Stripe webhook events and reconciles POS sales automatically, so a sale
