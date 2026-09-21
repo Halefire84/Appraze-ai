@@ -1,6 +1,6 @@
-# Appraze — Brand Record
+# Appraze — Brand Source of Truth
 
-**Product-facing name:** Appraze
+**Product:** Appraze
 
 **Tagline:** Complete Resale Business Suite
 
@@ -8,12 +8,30 @@
 
 **Company:** Cooper River Trading Co. (CRTC)
 
-**Brand relationship:** Appraze is the product. Cooper River Trading Co. is the company behind it. CRTC is not the product name.
-
 **Repository:** `Halefire84/Appraze-ai` remains unchanged for technical continuity.
 
-**Brand guardrails:** Do not use BUSINESS OS, LLAVE, or TURNKEY as customer-facing product names. Do not rename the repository solely for branding.
+## Customer-facing rules
 
-**Visual direction:** Retain the dark navy and rich-gold product identity; gold is an accent, not the dominant field.
+- Use **Appraze** as the product name.
+- Use **Complete Resale Business Suite** as the tagline.
+- Use **deal math, inventory, and listing for resellers** as the current descriptor.
+- Do not introduce retired product names or retired tier names into customer-facing UI, marketing, documentation, or tests.
+- Internal technical identifiers may retain historical names only where changing them would create a real compatibility risk; they must not surface in the customer experience.
 
-**Scope:** This record governs customer-facing product branding. Internal technical identifiers may retain historical CRTC names where changing them would create unnecessary risk.
+## Visual direction
+
+The current UI direction is **bright, clean, modern, and commercial**:
+
+- White/light surfaces
+- Navy structural and text accents
+- Gold used as an accent
+- High contrast and clear typography
+- Modern Windows-like polish
+- Clean dashboards and device presentation
+- Avoid a dark-dashboard or prototype appearance
+
+## Product scope
+
+Appraze is a resale business suite centered on deal math, inventory, listing, sales operations, and related business workflows. Keep the current working product stable and release-ready before adding major new capabilities.
+
+This file is the authoritative brand reference for future development sessions.
