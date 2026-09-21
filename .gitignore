@@ -1,3 +1,8 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
+
+# Session reports can contain live credentials generated during a session
+# (e.g. beta invite codes) -- same reasoning as secrets.toml above, never
+# committed to git history.
+reports/
