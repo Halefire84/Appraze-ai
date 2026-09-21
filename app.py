@@ -38,8 +38,8 @@ st.set_page_config(
 
 DARK_CSS = """
 <style>
-    .llave-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
-    .llave-brand { padding: 6px 0 4px; }
+    .business-os-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
+    .business-os-brand { padding: 6px 0 4px; }
     /* ---- base ---- */
     .stApp {
         background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
@@ -134,8 +134,8 @@ _PWA_HEAD_INJECTION = """
         if (head.querySelector('[data-crtc-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/llave-logo.svg', sizes: '192x192', type: 'image/png'}],
-            ['link', {rel: 'apple-touch-icon', href: './app/static/llave-logo.svg'}],
+            ['link', {rel: 'icon', href: './app/static/business-os-logo.svg', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/business-os-logo.svg'}],
             ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
@@ -255,7 +255,7 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="llave-brand"><img src="./app/static/business-os-logo.svg" alt="BUSINESS OS"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="business-os-brand"><img src="./app/static/business-os-logo.svg" alt="BUSINESS OS"></div>', unsafe_allow_html=True)
     st.markdown("### 🔑 BUSINESS OS")
     st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
