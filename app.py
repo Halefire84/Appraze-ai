@@ -49,7 +49,7 @@ DARK_CSS = """
         background: #071b36;
         border-right: 1px solid #d9a321;
     }
-    h1, h2, h3, h4 { color: #172230 !important; letter-spacing: -0.02em; }
+    h1, h2, h3, h4 { color: #ffffff !important; letter-spacing: -0.02em; }
 
     /* ---- KPI cards ---- */
     .kpi-card {
@@ -71,8 +71,8 @@ DARK_CSS = """
         font-weight: 700;
         color: #ffffff;
     }
-    .kpi-sub { font-size: 0.8rem; color: #16804b; margin-top: 2px; }
-    .kpi-sub.neg { color: #c62f4a; }
+    .kpi-sub { font-size: 0.8rem; color: #35d07f; margin-top: 2px; }
+    .kpi-sub.neg { color: #ff6b7a; }
 
     /* ---- pills / badges ---- */
     .badge {
@@ -197,8 +197,7 @@ if WORKSPACE not in st.session_state.deals_by_ws:
                 "Notes": "Sample row \u2014 edit or delete me",
             }
         ])
-    else:        # Any future separate workspace starts clean and empty        st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame(columns=[
-            "Date Added", "Item", "Platform", "Category", "Cost",
+    else:        # Any future separate workspace starts clean and empty        st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame(columns=[            "Date Added", "Item", "Platform", "Category", "Cost",
             "Est. Resale Value", "Status", "Notes",
         ])
 
@@ -398,7 +397,6 @@ with tab_dash:
         s = search.lower()        filtered = filtered[
             filtered["Item"].str.lower().str.contains(s, na=False)            | filtered["Notes"].str.lower().str.contains(s, na=False)
         ]
-
     st.markdown(f"#### Deals ({len(filtered)})")
     st.caption("Edit any cell directly. Add rows with the ➕ button in the sidebar, delete by selecting a row and pressing the trash icon.")
 
@@ -598,7 +596,6 @@ with tab_inv:
             "List Price": st.column_config.NumberColumn(format="$%.2f"),        },
     )
     st.session_state.inventory_by_ws[WORKSPACE] = edited_inv
-
     if len(edited_inv):
         disp = edited_inv.copy()
         disp["Cost Basis"] = pd.to_numeric(disp["Cost Basis"], errors="coerce").fillna(0)
@@ -797,8 +794,7 @@ with tab_charge:
                         if check_payment_status(row["session_id"]):                            for r in sales_log:
                                 if r.get("Invoice #") == row["Invoice #"]:
                                     r["Status"] = "Paid (Card)"
-                            save_table(pd.DataFrame(sales_log), "sales_log", shared=True)
-                            st.success(f"{row['Invoice #']} is paid!")
+                            save_table(pd.DataFrame(sales_log), "sales_log", shared=True)                            st.success(f"{row['Invoice #']} is paid!")
                             st.rerun()
                         else:
                             st.info("Not paid yet.")
@@ -997,8 +993,7 @@ with tab_ai:
                 content = []
                 if photo is not None:
                     img_bytes = photo.read()
-                    img_b64 = base64.b64encode(img_bytes).decode()
-                    media_type = "image/png" if photo.type == "image/png" else "image/jpeg"
+                    img_b64 = base64.b64encode(img_bytes).decode()                    media_type = "image/png" if photo.type == "image/png" else "image/jpeg"
                     content.append({
                         "type": "image",
                         "source": {"type": "base64", "media_type": media_type, "data": img_b64},
