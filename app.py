@@ -30,8 +30,8 @@ from storage import load_table, save_table
 # PAGE CONFIG + GLOBAL STYLE
 # --------------------------------------------------------------------------
 st.set_page_config(
-    page_title="LLAVE Business OS",
-    page_icon="🔑",
+    page_title="BUSINESS OS",
+    page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -42,7 +42,7 @@ DARK_CSS = """
     .llave-brand { padding: 6px 0 4px; }
     /* ---- base ---- */
     .stApp {
-        background: linear-gradient(180deg, #f7f9fc 0%, #eef3f8 100%);
+        background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
         color: #172230;
     }
     section[data-testid="stSidebar"] {
@@ -100,7 +100,7 @@ DARK_CSS = """
         color: #0b2548;
         font-weight: 600;
     }
-    .stButton>button:hover { border-color: #2563eb; color: #2563eb; }
+    .stButton>button:hover { border-color: #0b2548; color: #0b2548; }
 
     /* dataframe */
     div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
@@ -255,9 +255,9 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="llave-brand"><img src="./app/static/llave-logo.svg" alt="LLAVE Business OS"></div>', unsafe_allow_html=True)
-    st.markdown("### 🔑 LLAVE")
-    st.caption("Your whole business. One key.")
+    st.markdown('<div class="llave-brand"><img src="./app/static/business-os-logo.svg" alt="BUSINESS OS"></div>', unsafe_allow_html=True)
+    st.markdown("### 🔑 BUSINESS OS")
+    st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
         logout()
@@ -339,8 +339,8 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## 🔑 LLAVE Business OS")
-st.caption("Your whole business. One key.")
+st.markdown("## 🔑 BUSINESS OS")
+st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
 df = recalc(st.session_state.deals)
@@ -1122,4 +1122,4 @@ with tab_ai:
                 st.session_state.ai_last_result = None
 
 st.markdown("---")
-st.caption("LLAVE Business OS · Your whole business. One key. · Built for buying, valuing, managing, and selling physical goods")
+st.caption("BUSINESS OS · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
