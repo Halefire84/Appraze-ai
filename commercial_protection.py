@@ -15,9 +15,9 @@ COPYRIGHT = "© 2026 Cooper River Trading Co. — Proprietary Commercial Softwar
 def render_proprietary_watermark() -> None:
     """Render a subtle, persistent provenance notice in the app UI."""
     st.markdown(
-        f'''<div style="margin-top:1.5rem;padding:8px 12px;border-top:1px solid #d8e0ea;\n'
-        'font-size:.72rem;color:#5b6b7f;text-align:center;letter-spacing:.02em;">\n'
-        f'{COPYRIGHT} · {PRODUCT} · Unauthorized copying or redistribution is not permitted.\n'
-        '</div>''',
+        f"""<div style="margin-top:1.5rem;padding:8px 12px;border-top:1px solid #d8e0ea;
+font-size:.72rem;color:#5b6b7f;text-align:center;letter-spacing:.02em;">
+{COPYRIGHT} · {PRODUCT} · Unauthorized copying or redistribution is not permitted.
+</div>""",
         unsafe_allow_html=True,
     )
