@@ -935,7 +935,7 @@ with tab_accounts:
         else: st.info("No quotes or invoices yet.")
 
 
-# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
+BETA_AI_ACCESS = True  # Free beta accounts may use AI; disable when paid gating begins.\n\n# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
 # ==========================================================================
 with tab_ai:
     st.markdown("#### AI Item Analyzer")
@@ -944,7 +944,7 @@ with tab_ai:
         "Your own profit math (not the AI) still decides buy/pass \u2014 review everything before saving."
     )
 
-    if st.session_state.get("user_is_paid", False):
+    if st.session_state.get("user_is_paid", False) or BETA_AI_ACCESS:
         current_usage = usage_summary(st.session_state.get("username", ""), st.session_state.get("user_is_admin", False))
         if current_usage.get("success"):
             st.caption(
@@ -968,7 +968,7 @@ with tab_ai:
         photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
 
         if st.button("Analyze"):
-            if not st.session_state.get("user_is_paid", False):
+            if not (st.session_state.get("user_is_paid", False) or BETA_AI_ACCESS):
                 st.warning("AI features require an active Appraze subscription.")
             elif not photo and not text_desc.strip():
                 st.warning("Add a photo or a description first.")
