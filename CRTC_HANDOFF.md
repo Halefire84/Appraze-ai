@@ -16,23 +16,7 @@
    is the natural fit for in-person card POS) and build a real adapter
    behind that interface — don't attempt a generic "any merchant" layer,
    every processor's API shape is genuinely different.
-2. **Bring-your-own Anthropic API key.** Owner wants a business owner to
-   optionally supply their own `ANTHROPIC_API_KEY` for the AI
-   Analyzer/listing-enrichment features instead of relying on the shared
-   platform key. Blocked on architecture today: this is a single shared
-   Streamlit deployment (one global key), not multi-tenant. Two options,
-   different sizes of lift:
-   - Lighter: a per-session override field in the app UI, stored via the
-     existing Apps-Script-backed table (per-login, not truly multi-tenant
-     secrets).
-   - Heavier: real multi-tenant secret storage — a bigger architecture
-     change, see "Multi-tenant data isolation" under known limitations
-     below, which is already an open item for unrelated reasons.
-   Hard constraint either way: every AI feature must keep failing safe
-   with zero API calls when no key is configured (already true for
-   `enrich_listing_with_ai()` and the AI Analyzer — preserve this), and
-   nothing should call the API speculatively when a deterministic path
-   already answers the question.
+2. **Platform-managed Anthropic API key + subscription usage controls.** Appraze will use Cooper River Trading Co.'s server-side `ANTHROPIC_API_KEY` for customer AI features. Customers are not expected to supply their own provider key. The subscription model should control access/usage at the Appraze layer, with hard usage limits/quotas and cost monitoring so one customer or runaway workflow cannot consume the shared AI budget. The key must remain server-side and must never be exposed in UI, telemetry, URLs, logs, or client-side code. AI features must fail safe with zero API calls when the platform key is not configured, and deterministic paths must not call the API speculatively. A future enterprise/BYO-key option is explicitly deferred and is not part of the current beta scope.
 
 ## 2026-09-20 (later) — P0 hardening: canonical decision engine, webhook correctness, SKU/category fixes
 
