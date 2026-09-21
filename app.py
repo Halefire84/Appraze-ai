@@ -30,7 +30,7 @@ from storage import load_table, save_table
 # PAGE CONFIG + GLOBAL STYLE
 # --------------------------------------------------------------------------
 st.set_page_config(
-    page_title="BUSINESS OS",
+    page_title="Appraze",
     page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -38,8 +38,8 @@ st.set_page_config(
 
 DARK_CSS = """
 <style>
-    .business-os-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
-    .business-os-brand { padding: 6px 0 4px; }
+    .appraze-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
+    .appraze-brand { padding: 6px 0 4px; }
     /* ---- base ---- */
     .stApp {
         background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
@@ -131,11 +131,11 @@ _PWA_HEAD_INJECTION = """
 (function () {
     try {
         var head = window.parent.document.head;
-        if (head.querySelector('[data-crtc-pwa]')) return;
+        if (head.querySelector('[data-appraze-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/business-os-logo.svg', sizes: '192x192', type: 'image/png'}],
-            ['link', {rel: 'apple-touch-icon', href: './app/static/business-os-logo.svg'}],
+            ['link', {rel: 'icon', href: './app/static/appraze-logo.svg', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/appraze-logo.svg'}],
             ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
@@ -143,7 +143,7 @@ _PWA_HEAD_INJECTION = """
         ];
         tags.forEach(function (t) {
             var el = window.parent.document.createElement(t[0]);
-            el.setAttribute('data-crtc-pwa', '1');
+            el.setAttribute('data-appraze-pwa', '1');
             for (var k in t[1]) el.setAttribute(k, t[1][k]);
             head.appendChild(el);
         });
@@ -197,8 +197,7 @@ if WORKSPACE not in st.session_state.deals_by_ws:
                 "Notes": "Sample row \u2014 edit or delete me",
             }
         ])
-    else:
-        # Any future separate workspace starts clean and empty
+    else:        # Any future separate workspace starts clean and empty
         st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame(columns=[
             "Date Added", "Item", "Platform", "Category", "Cost",
             "Est. Resale Value", "Status", "Notes",
@@ -255,8 +254,8 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="business-os-brand"><img src="./app/static/business-os-logo.svg" alt="BUSINESS OS"></div>', unsafe_allow_html=True)
-    st.markdown("### 🔑 BUSINESS OS")
+    st.markdown('<div class="appraze-brand"><img src="./app/static/appraze-logo.svg" alt="Appraze"></div>', unsafe_allow_html=True)
+    st.markdown("### 🔑 Appraze")
     st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
@@ -339,7 +338,7 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## 🔑 BUSINESS OS")
+st.markdown("## 🔑 Appraze")
 st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
@@ -397,8 +396,7 @@ with tab_dash:
     if status_filter:
         filtered = filtered[filtered["Status"].isin(status_filter)]
     if search:
-        s = search.lower()
-        filtered = filtered[
+        s = search.lower()        filtered = filtered[
             filtered["Item"].str.lower().str.contains(s, na=False)
             | filtered["Notes"].str.lower().str.contains(s, na=False)
         ]
@@ -597,8 +595,7 @@ with tab_inv:
         st.session_state.inventory_by_ws[WORKSPACE],
         num_rows="dynamic",
         use_container_width=True,
-        key=f"inv_editor_{WORKSPACE}",
-        column_config={
+        key=f"inv_editor_{WORKSPACE}",        column_config={
             "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
             "List Price": st.column_config.NumberColumn(format="$%.2f"),
         },
@@ -797,8 +794,7 @@ with tab_charge:
                     "The webhook service reconciles these automatically if it's deployed (see "
                     "DEPLOY.md). This button does the same check manually, right now."
                 )
-                for row in awaiting[-5:]:  # most recent few - avoid an unbounded button list
-                    c1, c2 = st.columns([3, 1])
+                for row in awaiting[-5:]:  # most recent few - avoid an unbounded button list                    c1, c2 = st.columns([3, 1])
                     c1.write(f"**{row.get('Invoice #')}** \u2014 {row.get('Description', '')} (${float(row.get('Amount', 0)):,.2f})")
                     if c2.button("Check Status", key=f"check_{row['Invoice #']}", use_container_width=True):
                         if check_payment_status(row["session_id"]):
@@ -997,8 +993,7 @@ with tab_ai:
             "Secret named `ANTHROPIC_API_KEY` in Streamlit Cloud's app Settings \u2192 Secrets, then reload."
         )
     else:
-        photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])
-        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
+        photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
 
         if st.button("Analyze"):
             if not photo and not text_desc.strip():
@@ -1122,4 +1117,4 @@ with tab_ai:
                 st.session_state.ai_last_result = None
 
 st.markdown("---")
-st.caption("BUSINESS OS · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
+st.caption("Appraze · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
