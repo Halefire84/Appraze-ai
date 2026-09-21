@@ -96,7 +96,7 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
             body = resp.json()
             self.assertTrue(body["handled"])
             self.assertEqual(body["new_status"], "Paid (Card)")
-            mock_update.assert_called_once_with("POS-2026-09-07-abc123", "Paid (Card)")
+            mock_update.assert_called_once_with("POS-2026-09-07-abc123", "Paid (Card)", event_id="")
 
     def test_charge_succeeded_with_no_matching_row_does_not_crash(self):
         event = {

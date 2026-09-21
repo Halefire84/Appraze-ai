@@ -167,7 +167,10 @@ if WORKSPACE not in st.session_state.deals_by_ws:
                 "Notes": "Sample row \u2014 edit or delete me",
             }
         ])
-    else:        # Any future separate workspace starts clean and empty        st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame(columns=[            "Date Added", "Item", "Platform", "Category", "Cost",
+    else:
+        # Any future separate workspace starts clean and empty
+        st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame(columns=[
+            "Date Added", "Item", "Platform", "Category", "Cost",
             "Est. Resale Value", "Status", "Notes",
         ])
 
@@ -365,8 +368,10 @@ with tab_dash:
     if status_filter:
         filtered = filtered[filtered["Status"].isin(status_filter)]
     if search:
-        s = search.lower()        filtered = filtered[
-            filtered["Item"].str.lower().str.contains(s, na=False)            | filtered["Notes"].str.lower().str.contains(s, na=False)
+        s = search.lower()
+        filtered = filtered[
+            filtered["Item"].str.lower().str.contains(s, na=False)
+            | filtered["Notes"].str.lower().str.contains(s, na=False)
         ]
     st.markdown(f"#### Deals ({len(filtered)})")
     st.caption("Edit any cell directly. Add rows with the ➕ button in the sidebar, delete by selecting a row and pressing the trash icon.")
@@ -759,20 +764,23 @@ with tab_charge:
                     "The webhook service reconciles these automatically if it's deployed (see "
                     "DEPLOY.md). This button does the same check manually, right now."
                 )
-                for row in awaiting[-5:]:  # most recent few - avoid an unbounded button list                    c1, c2 = st.columns([3, 1])
+                for row in awaiting[-5:]:  # most recent few - avoid an unbounded button list
+                    c1, c2 = st.columns([3, 1])
                     c1.write(f"**{row.get('Invoice #')}** \u2014 {row.get('Description', '')} (${float(row.get('Amount', 0)):,.2f})")
                     if c2.button("Check Status", key=f"check_{row['Invoice #']}", use_container_width=True):
-                        if check_payment_status(row["session_id"]):                            for r in sales_log:
+                        if check_payment_status(row["session_id"]):
+                            for r in sales_log:
                                 if r.get("Invoice #") == row["Invoice #"]:
                                     r["Status"] = "Paid (Card)"
-                            save_table(pd.DataFrame(sales_log), "sales_log", shared=True)                            st.success(f"{row['Invoice #']} is paid!")
+                            save_table(pd.DataFrame(sales_log), "sales_log", shared=True)
+                            st.success(f"{row['Invoice #']} is paid!")
                             st.rerun()
                         else:
                             st.info("Not paid yet.")
         else:
             st.info("No charges created yet.")
 
-# ==========================================================================# ===========================================================================
+# ==========================================================================
 # ACCOUNTS / QUOTES / INVOICES
 # ===========================================================================
 with tab_accounts:
@@ -965,7 +973,8 @@ with tab_ai:
             "AI is temporarily unavailable; your account never supplies or exposes the platform API key."
         )
     else:
-        photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
+        photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])
+        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
 
         if st.button("Analyze"):
             if not (st.session_state.get("user_is_paid", False) or BETA_AI_ACCESS):
