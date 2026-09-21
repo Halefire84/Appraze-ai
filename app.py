@@ -28,7 +28,7 @@ from storage import load_table, save_table
 from commercial_protection import render_proprietary_watermark
 from ai_usage import (
     MAX_DESCRIPTION_CHARS, MAX_IMAGE_BYTES, reserve_ai_call,
-    finalize_ai_call, release_ai_call,
+    finalize_ai_call, release_ai_call, usage_summary,
 )
 
 # --------------------------------------------------------------------------
@@ -943,6 +943,15 @@ with tab_ai:
         "Upload a photo and/or describe an item. Claude identifies it and estimates a value range. "
         "Your own profit math (not the AI) still decides buy/pass \u2014 review everything before saving."
     )
+
+    if st.session_state.get("user_is_paid", False):
+        current_usage = usage_summary(st.session_state.get("username", ""))
+        if current_usage.get("success"):
+            st.caption(
+                f"AI usage: {current_usage.get('monthly_used', 0)}/{current_usage.get('monthly_limit', 0)} "
+                f"this month · {current_usage.get('daily_used', 0)}/{current_usage.get('daily_limit', 0)} today "
+                f"· estimated platform cost ${float(current_usage.get('monthly_cost_usd', 0) or 0):.4f}"
+            )
 
     anthropic_key = None
     try:
