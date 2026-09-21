@@ -945,7 +945,7 @@ with tab_ai:
     )
 
     if st.session_state.get("user_is_paid", False):
-        current_usage = usage_summary(st.session_state.get("username", ""))
+        current_usage = usage_summary(st.session_state.get("username", ""), st.session_state.get("user_is_admin", False))
         if current_usage.get("success"):
             st.caption(
                 f"AI usage: {current_usage.get('monthly_used', 0)}/{current_usage.get('monthly_limit', 0)} "
@@ -991,7 +991,7 @@ with tab_ai:
                 prompt_text = text_desc.strip() if text_desc.strip() else "Identify and value this item."
                 content.append({"type": "text", "text": prompt_text})
 
-                usage_decision = reserve_ai_call(st.session_state.get("username", ""))
+                usage_decision = reserve_ai_call(st.session_state.get("username", ""), st.session_state.get("user_is_admin", False))
                 if not usage_decision.allowed:
                     st.warning(usage_decision.reason)
                     st.stop()
