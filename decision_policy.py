@@ -141,6 +141,7 @@ def evaluate_deal(
     buyer_premium_pct: Optional[float] = None,
     shipping: Optional[float] = None,
     other_fees: Optional[float] = None,
+    purchase_tax: Optional[float] = None,
     resale_fee_pct: float = DEFAULT_RESALE_FEE_PCT,
     require_shipping: bool = True,
 ) -> DealDecision:
@@ -150,7 +151,17 @@ def evaluate_deal(
     price: current bid (auction) or asking price (fixed-price)
     market_value: estimated resale / comps value (before resale fees)
     buyer_premium_pct: percentage points (18 means 18%), never dollars
-    shipping / other_fees: absolute USD amounts
+    shipping / other_fees / purchase_tax: absolute USD amounts
+
+    purchase_tax: sales tax charged on the PURCHASE (many auction houses
+    charge tax on hammer price + premium unless the buyer has a resale
+    exemption certificate on file -- see DEAL-MATH.md). Added 2026-09-21
+    as its own named, explicitly-optional cost component rather than
+    something a caller had to silently fold into other_fees -- omitting
+    it (the default) marks it NOT_APPLICABLE, identical to every existing
+    caller's behavior before this parameter existed; it only becomes a
+    tracked KNOWN cost when a caller actually supplies a value, so no
+    existing call site's decision changes.
     """
     warnings: List[str] = []
     assumptions: List[str] = []
@@ -226,6 +237,7 @@ def evaluate_deal(
     premium_pct = _safe_float(buyer_premium_pct)
     ship = _safe_float(shipping)
     fees = _safe_float(other_fees)
+    tax = _safe_float(purchase_tax)
 
     if is_auction:
         if premium_pct is None:
@@ -252,6 +264,15 @@ def evaluate_deal(
     else:
         components.append(CostComponent("other_fees", 0.0, COST_NA, "USD"))
 
+    # Not required by default (omitting it stays NOT_APPLICABLE, matching
+    # every caller's behavior before this parameter existed) -- but once a
+    # caller does supply it, it's tracked as its own line, not blended into
+    # other_fees. See the purchase_tax docstring above.
+    if tax is not None:
+        components.append(CostComponent("purchase_tax", round(tax, 2), COST_KNOWN, "USD"))
+    else:
+        components.append(CostComponent("purchase_tax", 0.0, COST_NA, "USD"))
+
     material_unknown = [c for c in components if c.is_material_unknown()]
     premium_unknown = is_auction and premium_pct is None
 
@@ -269,7 +290,7 @@ def evaluate_deal(
         if premium_pct is None:
             max_bid_or_price = None
         else:
-            fixed = (ship or 0.0) + (fees or 0.0)
+            fixed = (ship or 0.0) + (fees or 0.0) + (tax or 0.0)
             # When shipping is unknown we still compute a bid ceiling that
             # assumes $0 shipping, but the decision will be REVIEW/CONDITIONAL.
             if ship is None:
@@ -288,12 +309,12 @@ def evaluate_deal(
         # Fold known shipping into an equivalent pre-premium cost so calc_deal stays consistent,
         # or apply after. Simpler: compute true_cost ourselves.
         pass
-    true_cost = price_f * (1 + effective_premium / 100.0) + (ship or 0.0) + (fees or 0.0)
+    true_cost = price_f * (1 + effective_premium / 100.0) + (ship or 0.0) + (fees or 0.0) + (tax or 0.0)
     deal = calc_deal(cost=price_f, resale_value=value_f, fee_pct=resale_fee_pct, premium_pct=effective_premium)
-    # Adjust ROI if shipping was known (calc_deal does not include shipping)
-    if ship is not None or fees is not None:
+    # Adjust ROI if shipping/fees/tax were known (calc_deal does not include them)
+    if ship is not None or fees is not None or tax is not None:
         net_resale = value_f * (1 - resale_fee_pct / 100.0)
-        true_cost_adj = price_f * (1 + effective_premium / 100.0) + (ship or 0.0) + (fees or 0.0)
+        true_cost_adj = price_f * (1 + effective_premium / 100.0) + (ship or 0.0) + (fees or 0.0) + (tax or 0.0)
         if true_cost_adj > 0:
             roi_pct = (net_resale - true_cost_adj) / true_cost_adj * 100.0
         elif net_resale > 0:
@@ -417,6 +438,7 @@ def build_deal_workspace_record(
         buyer_premium_pct=premium,
         shipping=listing.get("shipping"),
         other_fees=listing.get("other_fees"),
+        purchase_tax=listing.get("purchase_tax"),
         require_shipping=is_auction,
     )
     out = decision.to_dict()

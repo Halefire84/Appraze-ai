@@ -2,12 +2,25 @@ from flip_ledger import build_flip_record, calculate_flip_profit, update_flip
 
 
 def test_profit_accounts_for_fee_and_shipping():
+    # fee is charged on (sale + shipping_charged) = 260, not sale alone --
+    # see DEAL-MATH.md / the fee-basis fix in calculate_flip_profit.
+    # fee = 260 * 13% = 33.8; net_proceeds = 250+10-33.8-15 = 211.2
     result = calculate_flip_profit(100, 250, fee_pct=13, shipping_out=15, shipping_charged=10)
-    assert result["platform_fee"] == 32.5
-    assert result["net_proceeds"] == 212.5
-    assert result["profit"] == 112.5
-    assert result["margin_pct"] == 45.0
-    assert result["roi_pct"] == 112.5
+    assert result["platform_fee"] == 33.8
+    assert result["net_proceeds"] == 211.2
+    assert result["profit"] == 111.2
+    assert result["margin_pct"] == 44.48
+    assert result["roi_pct"] == 111.2
+
+
+def test_fee_basis_includes_buyer_paid_shipping_not_just_sale_price():
+    # Regression test for the 2026-09-21 audit finding: charging the fee
+    # on sale price alone (ignoring buyer-paid shipping) understates the
+    # real platform fee and overstates profit. With shipping_charged=100
+    # and sale=0, a sale-price-only fee basis would compute $0 fee --
+    # the fix must still charge fee_pct against the shipping amount.
+    result = calculate_flip_profit(0, 0, fee_pct=13, shipping_charged=100)
+    assert result["platform_fee"] == 13.0
 
 
 def test_free_find_has_infinite_roi_when_profitable():
