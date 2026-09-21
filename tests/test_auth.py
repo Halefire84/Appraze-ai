@@ -12,6 +12,7 @@ mock_st.stop.side_effect / mock_st.rerun.side_effect to raise, the same way
 production Streamlit actually behaves, and asserts on which one fires.
 """
 
+import json
 import unittest
 from unittest import mock
 
@@ -19,6 +20,10 @@ from auth import (
     AuthResult,
     _admin_credentials_configured,
     _admin_login,
+    _beta_enabled,
+    _beta_login,
+    _beta_signup,
+    get_visit_count,
     logout,
     mark_paid,
     require_auth,
@@ -214,6 +219,205 @@ class TestBcryptAdminAuth(unittest.TestCase):
         self.assertTrue(result.success)
 
 
+class TestBetaInviteSignup(unittest.TestCase):
+    """2026-09-21 beta access: CRTC_BETA_INVITE_CODES gates a separate,
+    single-use-code signup path that reuses the Apps Script
+    save_data/load_data backend for account storage (see
+    auth._load_beta_accounts/_save_beta_accounts) instead of a new local
+    store, and always grants free full access (never touches Stripe)."""
+
+    def _beta_secrets(self, codes="ABC123,DEF456", admin_password="correct horse battery staple"):
+        secrets = _real_admin_secrets(admin_password)
+        secrets["CRTC_BETA_INVITE_CODES"] = codes
+        secrets["APPS_SCRIPT_URL"] = "https://script.example/exec"
+        secrets["APPS_SCRIPT_TOKEN"] = "tok"
+        return secrets
+
+    @mock.patch("auth.st")
+    def test_beta_disabled_when_no_codes_configured(self, mock_st):
+        mock_st.secrets.get.side_effect = lambda k, d="": {}.get(k, d)
+        self.assertFalse(_beta_enabled())
+
+    @mock.patch("auth.st")
+    def test_beta_enabled_when_codes_configured(self, mock_st):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        self.assertTrue(_beta_enabled())
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_valid_code_creates_account_with_free_access(self, mock_st, mock_requests):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {"success": True, "payload": None}
+        save_resp = mock.Mock()
+        save_resp.raise_for_status.return_value = None
+        save_resp.json.return_value = {"success": True}
+        mock_requests.post.side_effect = [load_resp, save_resp]
+
+        result = _beta_signup("newuser", "somepassword", "New User", "abc123")
+
+        self.assertTrue(result.success)
+        self.assertTrue(result.is_paid)
+        self.assertEqual(result.plan, "beta")
+        self.assertFalse(result.is_admin)
+
+        saved_payload = json.loads(mock_requests.post.call_args_list[1].kwargs["data"]["payload"])
+        self.assertEqual(saved_payload[0]["invite_code"], "ABC123")
+        self.assertEqual(saved_payload[0]["username"], "newuser")
+        # password must never be stored in the clear
+        self.assertNotEqual(saved_payload[0]["password_hash"], "somepassword")
+
+    @mock.patch("auth.st")
+    def test_invalid_code_rejected(self, mock_st):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        result = _beta_signup("newuser", "somepassword", "New User", "not-a-real-code")
+        self.assertFalse(result.success)
+        self.assertIn("Invalid invite code", result.error)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_already_used_code_rejected(self, mock_st, mock_requests):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": json.dumps([{"username": "firstuser", "invite_code": "ABC123", "password_hash": "x"}]),
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_signup("seconduser", "somepassword", "Second User", "abc123")
+
+        self.assertFalse(result.success)
+        self.assertIn("already been used", result.error)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_duplicate_username_rejected(self, mock_st, mock_requests):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": json.dumps([{"username": "newuser", "invite_code": "DEF456", "password_hash": "x"}]),
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_signup("newuser", "somepassword", "New User", "abc123")
+
+        self.assertFalse(result.success)
+        self.assertIn("already taken", result.error)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_login_with_correct_password_succeeds(self, mock_st, mock_requests):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        import bcrypt as real_bcrypt
+        stored_hash = real_bcrypt.hashpw(b"somepassword", real_bcrypt.gensalt()).decode()
+
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": json.dumps([{
+                "username": "newuser", "display_name": "New User",
+                "invite_code": "ABC123", "password_hash": stored_hash,
+            }]),
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_login("newuser", "somepassword")
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result.success)
+        self.assertTrue(result.is_paid)
+        self.assertEqual(result.plan, "beta")
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_login_with_wrong_password_fails(self, mock_st, mock_requests):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        import bcrypt as real_bcrypt
+        stored_hash = real_bcrypt.hashpw(b"somepassword", real_bcrypt.gensalt()).decode()
+
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": json.dumps([{"username": "newuser", "invite_code": "ABC123", "password_hash": stored_hash}]),
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_login("newuser", "wrongpassword")
+
+        self.assertIsNotNone(result)
+        self.assertFalse(result.success)
+
+    @mock.patch("auth.st")
+    def test_login_returns_none_when_beta_not_configured(self, mock_st):
+        mock_st.secrets.get.side_effect = lambda k, d="": {}.get(k, d)
+        self.assertIsNone(_beta_login("anyone", "anything"))
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_login_returns_none_when_username_unknown(self, mock_st, mock_requests):
+        secrets = self._beta_secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {"success": True, "payload": None}
+        mock_requests.post.return_value = load_resp
+
+        self.assertIsNone(_beta_login("nosuchuser", "anything"))
+
+
+class TestVisitCounter(unittest.TestCase):
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_get_visit_count_reads_stored_total(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, d="": {
+            "APPS_SCRIPT_URL": "https://script.example/exec",
+            "APPS_SCRIPT_TOKEN": "tok",
+        }.get(k, d)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True, "payload": json.dumps([{"count": 42}])}
+        mock_requests.post.return_value = resp
+
+        self.assertEqual(get_visit_count(), 42)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_get_visit_count_defaults_to_zero_when_nothing_saved_yet(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, d="": {
+            "APPS_SCRIPT_URL": "https://script.example/exec",
+            "APPS_SCRIPT_TOKEN": "tok",
+        }.get(k, d)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True, "payload": None}
+        mock_requests.post.return_value = resp
+
+        self.assertEqual(get_visit_count(), 0)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_get_visit_count_fails_quiet_on_error(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = Exception("No secrets found")
+        self.assertEqual(get_visit_count(), 0)
+
+
 class TestRequireAuth(unittest.TestCase):
     def _configured_mock(self, mock_st, password="correct horse battery staple"):
         secrets = _real_admin_secrets(password)
@@ -289,6 +493,96 @@ class TestRequireAuth(unittest.TestCase):
         with self.assertRaises(_Stopped):
             require_auth()
         mock_st.warning.assert_called()
+        mock_st.rerun.assert_not_called()
+
+
+class TestRequireAuthBetaSignupTab(unittest.TestCase):
+    """require_auth()'s "Beta Sign Up" tab only appears when
+    CRTC_BETA_INVITE_CODES is configured, and only a matching, unused code
+    can ever create an account through it."""
+
+    def _configured_mock(self, mock_st, admin_password="correct horse battery staple", beta_codes="ABC123"):
+        secrets = _real_admin_secrets(admin_password)
+        secrets["CRTC_BETA_INVITE_CODES"] = beta_codes
+        secrets["APPS_SCRIPT_URL"] = "https://script.example/exec"
+        secrets["APPS_SCRIPT_TOKEN"] = "tok"
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        mock_st.stop.side_effect = _Stopped
+        mock_st.rerun.side_effect = _Reran
+        mock_st.tabs.return_value = [mock.MagicMock(), mock.MagicMock()]
+        return secrets
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_beta_tab_rendered_when_codes_configured(self, mock_st, mock_requests):
+        mock_st.session_state.get.return_value = False
+        self._configured_mock(mock_st)
+        mock_st.form_submit_button.return_value = False
+
+        with self.assertRaises(_Stopped):
+            require_auth()
+
+        mock_st.tabs.assert_called_once_with(["Log In", "Beta Sign Up"])
+
+    @mock.patch("auth.st")
+    def test_no_beta_tab_when_codes_not_configured(self, mock_st):
+        # Same as plain TestRequireAuth: no CRTC_BETA_INVITE_CODES secret.
+        mock_st.session_state.get.return_value = False
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        mock_st.stop.side_effect = _Stopped
+        mock_st.form_submit_button.return_value = False
+
+        with self.assertRaises(_Stopped):
+            require_auth()
+
+        mock_st.tabs.assert_not_called()
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_valid_invite_code_signs_up_and_reruns(self, mock_st, mock_requests):
+        mock_st.session_state.get.return_value = False
+        self._configured_mock(mock_st)
+        # Login form isn't submitted; the beta signup form is.
+        mock_st.form_submit_button.side_effect = [False, True]
+        mock_st.text_input.side_effect = [
+            "", "",  # login form fields (unused, submitted=False)
+            "New User", "newuser", "somepassword", "somepassword", "ABC123",  # signup fields
+        ]
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {"success": True, "payload": None}
+        save_resp = mock.Mock()
+        save_resp.raise_for_status.return_value = None
+        save_resp.json.return_value = {"success": True}
+        # require_auth() also calls _record_visit_once() first (2 POSTs:
+        # load then save the shared counter), before _beta_signup's own
+        # load-then-save (2 more) -- same response shapes work for both.
+        mock_requests.post.side_effect = [load_resp, save_resp, load_resp, save_resp]
+
+        with self.assertRaises(_Reran):
+            require_auth()
+
+        mock_st.success.assert_called()
+        self.assertEqual(mock_st.session_state.user_plan, "beta")
+        self.assertTrue(mock_st.session_state.user_is_paid)
+        self.assertFalse(mock_st.session_state.user_is_admin)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_invalid_invite_code_shows_error_and_stops(self, mock_st, mock_requests):
+        mock_st.session_state.get.return_value = False
+        self._configured_mock(mock_st)
+        mock_st.form_submit_button.side_effect = [False, True]
+        mock_st.text_input.side_effect = [
+            "", "",
+            "New User", "newuser", "somepassword", "somepassword", "WRONG-CODE",
+        ]
+
+        with self.assertRaises(_Stopped):
+            require_auth()
+
+        mock_st.error.assert_called()
         mock_st.rerun.assert_not_called()
 
 
