@@ -335,9 +335,10 @@ st.write("")
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai = st.tabs([
+tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai, tab_about = st.tabs([
     "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "💳  Charge Customer", "🧾  Accounts & Invoices", "🔍  AI Analyzer",
+    "ℹ️  About",
 ])
 
 with tab_dash:
@@ -1071,6 +1072,36 @@ with tab_ai:
                 )
                 st.success("Added to Inventory \u2014 go set the real Cost Basis on the Inventory tab.")
                 st.session_state.ai_last_result = None
+
+with tab_about:
+    st.markdown("### Appraze™")
+    st.caption("Complete Resale Business Suite")
+    st.write(
+        "Appraze is deal math, inventory, and listing for resellers — "
+        "built by Cooper River Trading Co."
+    )
+    st.markdown("---")
+    st.markdown("#### In Memory")
+    mem_col1, mem_col2 = st.columns([1, 3])
+    with mem_col1:
+        st.image("static/christopher-hale.png", width=180)
+    with mem_col2:
+        st.markdown(
+            "*In memory of my father, Christopher Hale, who tracked trucks "
+            "in C++ before I ever tracked a deal.*"
+        )
+        st.caption("© 2026 Christopher Hale / Cooper River Trading Co.")
+
+    st.markdown("---")
+    st.markdown("#### For the Future")
+    fut_col1, fut_col2 = st.columns([1, 3])
+    with fut_col1:
+        st.image("static/family.jpg", width=180)
+    with fut_col2:
+        st.markdown(
+            "*Built for my family, and for the next generation of Cooper "
+            "River Trading Co.*"
+        )
 
 st.markdown("---")
 st.caption("Appraze · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
