@@ -1,4 +1,4 @@
-"""TURNKEY Flip Ledger — the operating layer after a BUY decision."""
+"""Appraze Flip Ledger — the operating layer after a BUY decision."""
 import pandas as pd
 import streamlit as st
 
@@ -6,10 +6,10 @@ from flip_ledger import build_flip_record, update_flip
 from listing_bridge import build_master_listing
 from storage import load_table, save_table
 
-st.set_page_config(page_title="TURNKEY — Flip Ledger", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Appraze — Flip Ledger", page_icon="📊", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("📊 TURNKEY Flip Ledger")
+st.title("📊 Appraze Flip Ledger")
 st.caption("BUY → PURCHASED → LISTED → SOLD → REALIZED PROFIT")
 
 if "crtc_flip_ledger" not in st.session_state:
