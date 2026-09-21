@@ -1,4 +1,4 @@
-"""CRTC Cross-List — marketplace-neutral listing workspace.
+"""TURNKEY Cross-List — marketplace-neutral listing workspace.
 
 The page reuses the same master listing created by Flip Ledger. Publishing remains
 an approved-API adapter concern; this page only prepares, persists, and exports
@@ -14,10 +14,10 @@ import streamlit as st
 from listing_store import upsert_listing, transition_listing
 from storage import load_table, save_table
 
-st.set_page_config(page_title="CRTC — Cross-List", page_icon="🔗", layout="wide")
+st.set_page_config(page_title="TURNKEY — Cross-List", page_icon="🔗", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("🔗 CRTC Cross-List")
+st.title("🔗 TURNKEY Cross-List")
 st.caption("ONE MASTER LISTING → marketplace-ready drafts → approved publishing")
 
 MASTER_TABLE = "listing_masters"

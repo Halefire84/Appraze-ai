@@ -1,13 +1,13 @@
-"""CRTC Liquidation & Surplus acquisition hunter."""
+"""TURNKEY Liquidation & Surplus acquisition hunter."""
 import streamlit as st
 
 from acquisition_hunter import PROFILES, estimate_max_bid, score_acquisition
 
-st.set_page_config(page_title="CRTC — Liquidation & Surplus", page_icon="📦", layout="wide")
+st.set_page_config(page_title="TURNKEY — Liquidation & Surplus", page_icon="📦", layout="wide")
 from auth import require_auth
 require_auth()
 
-st.title("📦 CRTC Liquidation & Surplus")
+st.title("📦 TURNKEY Liquidation & Surplus")
 st.caption("Government surplus • computers • phones • Amazon/retail returns • pallets • IT liquidation")
 st.info("CRTC evaluates the economics and risk of a lot. It does not assume every pallet is profitable: recovery rate, freight, repairs, locks, missing parts, and buyer costs matter.")
 

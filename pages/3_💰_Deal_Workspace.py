@@ -1,14 +1,14 @@
-"""CRTC Deal Workspace — verify a lead before buying."""
+"""TURNKEY Deal Workspace — verify a lead before buying."""
 import pandas as pd
 import streamlit as st
 
 from deal_workspace import build_deal_workspace
 from inventory_bridge import build_inventory_intake
 
-st.set_page_config(page_title="CRTC — Deal Workspace", page_icon="💰", layout="wide")
+st.set_page_config(page_title="TURNKEY — Deal Workspace", page_icon="💰", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("💰 CRTC Deal Workspace")
+st.title("💰 TURNKEY Deal Workspace")
 st.caption("Verify value, account for real acquisition costs, make the decision, then prepare a BUY for inventory intake.")
 
 saved = st.session_state.setdefault("saved_opportunities", [])
