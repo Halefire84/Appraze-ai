@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="200" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12335f"/>
+      <stop offset="1" stop-color="#0b2548"/>
+    </linearGradient>
+  </defs>
+  <rect width="200" height="200" rx="42" fill="url(#bg)"/>
+  <g stroke="#f5a524" fill="none" stroke-linecap="round">
+    <circle cx="100" cy="100" r="87" stroke-width="2.5" opacity="0.55"/>
+    <line x1="100.0" y1="8.0" x2="100.0" y2="18.0" stroke-width="3.4"/>
+    <line x1="123.8" y1="11.1" x2="121.2" y2="20.8" stroke-width="1.6"/>
+    <line x1="146.0" y1="20.3" x2="141.0" y2="29.0" stroke-width="1.6"/>
+    <line x1="165.1" y1="34.9" x2="158.0" y2="42.0" stroke-width="1.6"/>
+    <line x1="179.7" y1="54.0" x2="171.0" y2="59.0" stroke-width="1.6"/>
+    <line x1="188.9" y1="76.2" x2="179.2" y2="78.8" stroke-width="1.6"/>
+    <line x1="192.0" y1="100.0" x2="182.0" y2="100.0" stroke-width="3.4"/>
+    <line x1="188.9" y1="123.8" x2="179.2" y2="121.2" stroke-width="1.6"/>
+    <line x1="179.7" y1="146.0" x2="171.0" y2="141.0" stroke-width="1.6"/>
+    <line x1="165.1" y1="165.1" x2="158.0" y2="158.0" stroke-width="1.6"/>
+    <line x1="146.0" y1="179.7" x2="141.0" y2="171.0" stroke-width="1.6"/>
+    <line x1="123.8" y1="188.9" x2="121.2" y2="179.2" stroke-width="1.6"/>
+    <line x1="100.0" y1="192.0" x2="100.0" y2="182.0" stroke-width="3.4"/>
+    <line x1="76.2" y1="188.9" x2="78.8" y2="179.2" stroke-width="1.6"/>
+    <line x1="54.0" y1="179.7" x2="59.0" y2="171.0" stroke-width="1.6"/>
+    <line x1="34.9" y1="165.1" x2="42.0" y2="158.0" stroke-width="1.6"/>
+    <line x1="20.3" y1="146.0" x2="29.0" y2="141.0" stroke-width="1.6"/>
+    <line x1="11.1" y1="123.8" x2="20.8" y2="121.2" stroke-width="1.6"/>
+    <line x1="8.0" y1="100.0" x2="18.0" y2="100.0" stroke-width="3.4"/>
+    <line x1="11.1" y1="76.2" x2="20.8" y2="78.8" stroke-width="1.6"/>
+    <line x1="20.3" y1="54.0" x2="29.0" y2="59.0" stroke-width="1.6"/>
+    <line x1="34.9" y1="34.9" x2="42.0" y2="42.0" stroke-width="1.6"/>
+    <line x1="54.0" y1="20.3" x2="59.0" y2="29.0" stroke-width="1.6"/>
+    <line x1="76.2" y1="11.1" x2="78.8" y2="20.8" stroke-width="1.6"/>
+  </g>
+  <path d="M100 60 L133 146 M100 60 L67 146 M80 121 L120 121"
+        stroke="#f5a524" stroke-width="12" fill="none"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -57,9 +57,17 @@ on the mark exclusively.
 
 ## Visual direction
 
-Existing dark/gold-accented UI theme is kept. New wordmark + app icon
-assets were referenced as "available and will be supplied" but were not
-attached to this session — the PWA manifest/sidebar currently use the
-pre-existing generic `icon-192.png` / `icon-512.png` / `icon-512-maskable.png`
-files as placeholders. Wire in the real Appraze logo assets into
-`static/` and `static/manifest.json` when they are provided.
+Existing dark/gold-accented UI theme is kept. As of 2026-09-21, the mark
+is an original SVG — a gauge/dial ring of tick marks around a bold
+monoline "A" monogram, navy (`#0b2548`/`#12335f`) background with a gold
+(`#f5a524`) mark — deliberately chosen to read as a precision valuation
+instrument rather than the retired TURNKEY-era key iconography. Source
+vectors: `static/appraze-mark.svg` (rounded-square badge, used for the
+sidebar/header lockup and as the source for the PWA icon PNGs) and
+`static/appraze-mark-maskable.svg` (full-bleed variant with extra
+padding for Android's adaptive-icon safe zone). `static/icon-192.png`,
+`icon-512.png`, and `icon-512-maskable.png` are rendered from those SVGs
+— regenerate them from the SVG source (don't hand-edit the PNGs) if the
+mark ever changes. The landing-page artifact inlines the same mark as
+raw SVG rather than referencing these files, since an Artifact can't
+reach into this repo's `static/` folder.

@@ -45,6 +45,9 @@ DARK_CSS = """
 <style>
     .appraze-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
     .appraze-brand { padding: 6px 0 4px; }
+    .appraze-header { display: flex; align-items: center; gap: 12px; margin: 4px 0 0; }
+    .appraze-header img { width: 40px; height: 40px; border-radius: 9px; }
+    .appraze-header h2 { margin: 0 !important; font-size: 1.7rem !important; }
     /* ---- base ---- */
     .stApp {
         background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
@@ -294,7 +297,7 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.markdown('<div class="appraze-brand"><img src="./app/static/icon-192.png" alt="Appraze"></div>', unsafe_allow_html=True)
-    st.markdown("### 🔑 Appraze™")
+    st.markdown("### Appraze™")
     st.caption("Complete Resale Business Suite")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
@@ -377,7 +380,11 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## 🔑 Appraze™")
+st.markdown(
+    '<div class="appraze-header"><img src="./app/static/icon-192.png" alt="Appraze">'
+    '<h2>Appraze™</h2></div>',
+    unsafe_allow_html=True,
+)
 st.caption("Complete Resale Business Suite")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
