@@ -8,7 +8,7 @@ mocked, same convention as comps_adapters.py.
 import unittest
 from unittest import mock
 
-from billing import verify_checkout_session
+from billing import plan_payment_link, verify_checkout_session
 
 
 class TestVerifyCheckoutSession(unittest.TestCase):
@@ -78,6 +78,26 @@ class TestVerifyCheckoutSession(unittest.TestCase):
         result = verify_checkout_session("cs_test_123")
         self.assertFalse(result.paid)
         self.assertIn("connection error", result.error)
+
+
+class TestPlanPaymentLink(unittest.TestCase):
+    @mock.patch("billing.st")
+    def test_reads_the_upper_cased_per_plan_secret(self, mock_st):
+        secrets = {"STRIPE_PAYMENT_LINK_HUNTER": "https://buy.stripe.com/hunter"}
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        self.assertEqual(plan_payment_link("hunter"), "https://buy.stripe.com/hunter")
+        mock_st.secrets.get.assert_called_with("STRIPE_PAYMENT_LINK_HUNTER", "")
+
+    @mock.patch("billing.st")
+    def test_lower_case_plan_key_still_resolves(self, mock_st):
+        secrets = {"STRIPE_PAYMENT_LINK_SCOUT": "https://buy.stripe.com/scout"}
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        self.assertEqual(plan_payment_link("scout"), "https://buy.stripe.com/scout")
+
+    @mock.patch("billing.st")
+    def test_missing_secret_returns_empty_string_not_none(self, mock_st):
+        mock_st.secrets.get.side_effect = lambda k, d="": d
+        self.assertEqual(plan_payment_link("operator"), "")
 
 
 if __name__ == "__main__":

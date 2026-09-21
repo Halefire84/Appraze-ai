@@ -42,30 +42,64 @@ launching:
 
 - **Point-of-Sale ("Charge Customer" tab)** — fully wired and working
   today (creates a real Stripe Checkout Session per sale, no card data
-  touches Appraze). This is what needs to go live.
-- **Subscription Pricing page** (`pages/8_💳_Pricing.py`) — **display
-  only right now.** It shows plan tiers but has no working purchase
-  button and nothing in the app actually gates a feature by paid status.
-  Don't advertise "$49/mo" anywhere public until this is either wired up
-  (a real feature to build later) or the page is edited to say "coming
-  soon."
+  touches Appraze). This is what needs to go live for you to charge your
+  own resale customers.
+- **Subscription Pricing page** (`pages/8_💳_Pricing.py`) — **now has
+  real Subscribe buttons** (added 2026-09-21), one per paid plan, each
+  driven by its own Stripe Payment Link — see DEPLOY.md's "Card
+  payments" section for exact setup steps and the new
+  `STRIPE_PAYMENT_LINK_<PLAN>` secrets it needs. A plan with no secret
+  configured shows a disabled "Not yet available" button instead of a
+  broken link, so you can launch with just Hunter live and add the rest
+  later.
 
-Steps to take POS live:
+  **Important gap found while wiring this up:** the login gate every
+  page actually uses (`auth.require_auth()`) only supports the one
+  shared Admin account (you + Ashley) — there is currently no way for a
+  member of the public to create their own account at all. The
+  tester-signup code path (`auth.signup()` / `render_login_gate()`)
+  exists and is fully wired to the Apps Script backend, but nothing
+  calls it. **In practice, today, the only account that can click
+  Subscribe is the shared Admin account** — which already has full
+  access and nothing to gain from subscribing. If the plan is to sell
+  Appraze to other resellers as a SaaS product (which the whole Pricing
+  page and the public landing page imply), wiring public signup into the
+  real entry point is the next concrete step, and it's a meaningful
+  scope of its own (deciding what a new signup's workspace/data
+  isolation looks like, whether "Free" accounts need any limits actually
+  enforced, etc.) — worth its own session rather than folding into this
+  one. Until then, treat the Pricing page as ready-to-demo and
+  ready-for-the-admin-account-to-test, not yet ready for a stranger to
+  actually use end-to-end.
+- Also not yet built: nothing in the app currently checks a user's plan
+  to gate a feature (`subscription_plans.feature_enabled()` exists and
+  is unit-tested, but nothing calls it). Buying Hunter today records
+  "hunter" as your plan; it doesn't unlock anything extra yet.
+
+Steps to take Stripe live (POS and/or subscriptions):
 1. In your Stripe Dashboard, toggle out of test mode (or use a separate
    live-mode API key set if you're keeping test mode for future dev).
 2. Streamlit app secrets (⋮ → Settings → Secrets): change
    `STRIPE_SECRET_KEY` from `sk_test_...` to `sk_live_...`, and set
    `APP_URL` to the real production URL.
-3. (Recommended, optional) Deploy `stripe_webhook_server.py` so payments
-   made on a customer's own device reconcile automatically instead of
-   needing a manual "Check Status" click — see `DEPLOY.md`'s "Automatic
-   payment reconciliation" section for the exact steps. **Free hosting
-   option:** Render's free web-service tier or Fly.io's free allowance
-   both work; the free tiers sleep after inactivity, so the first webhook
-   after a quiet period can be slow (10-30s) — acceptable for a solo/beta
-   operation, not for high volume.
-4. Test with one small real charge to yourself before taking a real
-   customer's card.
+3. For subscriptions: create each plan's Payment Link and set its
+   `STRIPE_PAYMENT_LINK_<PLAN>` secret — see DEPLOY.md.
+4. **Re-deploy `AppsScript_Code.gs`** (paste the current version into
+   your Apps Script project, Deploy → Manage deployments → new version)
+   so it can store which plan a user is on — the old deployed version
+   doesn't have this yet. This can't be verified from this environment;
+   test it yourself with a real Stripe test-mode Payment Link before
+   trusting it with real money.
+5. (Recommended, optional) Deploy `stripe_webhook_server.py` so POS
+   payments made on a customer's own device reconcile automatically
+   instead of needing a manual "Check Status" click — see `DEPLOY.md`'s
+   "Automatic payment reconciliation" section for the exact steps.
+   **Free hosting option:** Render's free web-service tier or Fly.io's
+   free allowance both work; the free tiers sleep after inactivity, so
+   the first webhook after a quiet period can be slow (10-30s) —
+   acceptable for a solo/beta operation, not for high volume.
+6. Test with one small real charge to yourself before taking a real
+   customer's card or advertising a subscription publicly.
 
 ## 3. Marketing / launch link (free)
 

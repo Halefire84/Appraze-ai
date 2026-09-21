@@ -33,6 +33,7 @@ class AuthResult:
     is_paid: bool = False
     username: str = ""
     error: str = ""
+    plan: str = "free"
 
 
 def _hash_password(password: str) -> str:
@@ -109,6 +110,7 @@ def _admin_login(username: str, password: str) -> AuthResult | None:
         is_admin=True,
         is_paid=True,
         username=configured_username,
+        plan="admin",
     )
 
 
@@ -133,7 +135,7 @@ def signup(username: str, password: str, display_name: str = "", admin_code: str
         resp.raise_for_status()
         data = resp.json()
         if data.get("success"):
-            return AuthResult(True, data.get("display_name", username), data.get("is_admin", False), data.get("is_paid", False), username=data.get("username", username.lower()))
+            return AuthResult(True, data.get("display_name", username), data.get("is_admin", False), data.get("is_paid", False), username=data.get("username", username.lower()), plan=data.get("plan", "free"))
         return AuthResult(False, error=data.get("error", "signup failed"))
     except Exception as e:
         return AuthResult(False, error=f"connection error: {e}")
@@ -161,21 +163,23 @@ def login(username: str, password: str) -> AuthResult:
         resp.raise_for_status()
         data = resp.json()
         if data.get("success"):
-            return AuthResult(True, data.get("display_name", username), data.get("is_admin", False), data.get("is_paid", False), username=data.get("username", username.lower()))
+            return AuthResult(True, data.get("display_name", username), data.get("is_admin", False), data.get("is_paid", False), username=data.get("username", username.lower()), plan=data.get("plan", "free"))
         return AuthResult(False, error=data.get("error", "login failed"))
     except Exception as e:
         return AuthResult(False, error=f"connection error: {e}")
 
 
-def mark_paid(username: str) -> bool:
+def mark_paid(username: str, plan: str = "") -> bool:
     """Called once a Stripe Checkout Session is verified as paid — persists it
-    so the person doesn't have to pay again on their next login."""
+    so the person doesn't have to pay again on their next login. `plan` is
+    one of subscription_plans.PLANS' keys (e.g. "hunter"); omit it to mark
+    paid without changing which plan is on file (kept for any existing
+    caller that only cares about the boolean)."""
     try:
-        resp = requests.post(
-            _apps_script_url(),
-            data={"token": _token(), "action": "set_paid", "username": username},
-            timeout=15,
-        )
+        payload = {"token": _token(), "action": "set_paid", "username": username}
+        if plan:
+            payload["plan"] = plan
+        resp = requests.post(_apps_script_url(), data=payload, timeout=15)
         resp.raise_for_status()
         return bool(resp.json().get("success"))
     except Exception:
@@ -211,6 +215,7 @@ def render_login_gate() -> bool:
                         st.session_state.user_display_name = result.display_name
                         st.session_state.user_is_admin = result.is_admin
                         st.session_state.user_is_paid = result.is_paid
+                        st.session_state.user_plan = result.plan
                         st.session_state.username = result.username
                         st.rerun()
                     else:
@@ -243,6 +248,7 @@ def render_login_gate() -> bool:
                         st.session_state.user_display_name = result.display_name
                         st.session_state.user_is_admin = result.is_admin
                         st.session_state.user_is_paid = result.is_paid
+                        st.session_state.user_plan = result.plan
                         st.session_state.username = result.username
                         st.success(f"Welcome, {result.display_name}!")
                         st.rerun()
@@ -256,7 +262,7 @@ def logout() -> None:
     """Clear every session key an authenticated session sets. The one place
     both app.py's sidebar and any future page should call to sign out, so
     logout can never leave a stale key behind for a page that checks it."""
-    for key in ("authenticated", "user_display_name", "user_is_admin", "user_is_paid", "username"):
+    for key in ("authenticated", "user_display_name", "user_is_admin", "user_is_paid", "user_plan", "username"):
         st.session_state.pop(key, None)
 
 
@@ -314,6 +320,8 @@ def require_auth() -> None:
                     st.session_state.authenticated = True
                     st.session_state.user_display_name = result.display_name
                     st.session_state.user_is_admin = result.is_admin
+                    st.session_state.user_is_paid = result.is_paid
+                    st.session_state.user_plan = result.plan
                     st.session_state.username = result.username
                     st.rerun()
                 else:

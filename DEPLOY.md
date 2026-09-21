@@ -57,19 +57,59 @@ locally or skipping auth). Every table (Deal Dashboard, Inventory) is
 stored server-side under its own key, so admins share one workspace and
 every other account gets its own private, isolated storage row per table.
 
-### Card payments — subscription paywall + POS
+### Card payments — subscription Pricing page + POS
 
 ```toml
 STRIPE_SECRET_KEY = "sk_live_... or sk_test_..."
-STRIPE_PAYMENT_LINK_URL = "the Payment Link URL for app-access subscriptions"
 APP_URL = "https://your-app-name.streamlit.app"
+
+# One Payment Link per paid plan (Free needs none). Plan keys are defined
+# in subscription_plans.py: scout, hunter, operator, pro.
+STRIPE_PAYMENT_LINK_SCOUT = "the Payment Link URL for the Scout plan"
+STRIPE_PAYMENT_LINK_HUNTER = "the Payment Link URL for the Hunter plan"
+STRIPE_PAYMENT_LINK_OPERATOR = "the Payment Link URL for the Operator plan"
+STRIPE_PAYMENT_LINK_PRO = "the Payment Link URL for the Pro plan"
 ```
 
-`STRIPE_PAYMENT_LINK_URL` gates the paywall (Payment Links only — this app
-never touches raw card data, only checks payment status after the fact via
-Stripe's read-only session lookup). `APP_URL` is used to build redirect URLs
-for the Point-of-Sale tab's one-off checkout sessions; POS still works
-without it, just with a generic redirect target.
+Only Payment Links, never raw card data — this app never touches a card
+number, only checks payment status after the fact via Stripe's read-only
+session lookup. Any plan whose secret is left blank shows a disabled
+"Not yet available" button on the Pricing page instead of a broken link,
+so you can launch with just Hunter configured and add the rest later.
+
+Setting up each plan's Payment Link, once per plan, in the Stripe
+Dashboard:
+1. Products → Add product → set the plan's monthly price (see
+   `subscription_plans.py` for the dollar amounts) → Create payment link.
+2. In that Payment Link's own settings → **After payment** → redirect to
+   a URL, and set it to (replacing `<plan_key>` with that plan's lowercase
+   key, e.g. `hunter`):
+   `{APP_URL}/?sub_plan=<plan_key>&sub_session_id={CHECKOUT_SESSION_ID}`
+3. Copy the Payment Link's URL into the matching
+   `STRIPE_PAYMENT_LINK_<PLAN_KEY>` secret above.
+
+When someone clicks "Subscribe" and pays, Stripe redirects them back with
+that plan/session in the URL; the app verifies the session actually paid
+(never trusts the URL alone), records the plan against their logged-in
+account, and shows a welcome message. See app.py's "SUBSCRIPTION
+CHECKOUT RETURN" block for exactly what that does.
+
+**Also required:** `AppsScript_Code.gs` was updated 2026-09-21 to store
+which plan a user is on (a new trailing `plan` column on the `Users`
+sheet, auto-added the first time the updated script runs — no manual
+spreadsheet edit needed). If you deployed an earlier version of this
+file, **re-paste the current `AppsScript_Code.gs` into your Apps
+Script project and re-deploy** (Deploy → Manage deployments → edit → new
+version) before subscription purchases will actually save anyone's plan.
+This can't be verified from this environment — no live Apps Script/Stripe
+account to test against — so smoke-test it yourself: subscribe as a test
+user with a real Stripe test-mode Payment Link, confirm the welcome
+message appears, and confirm the Pricing page shows the new plan after a
+fresh login.
+
+`APP_URL` is also used to build redirect URLs for the Point-of-Sale tab's
+one-off checkout sessions; POS still works without it, just with a
+generic redirect target.
 
 ### Automatic payment reconciliation (optional — POS tab works fine without it)
 

@@ -20,6 +20,7 @@ from auth import (
     _admin_credentials_configured,
     _admin_login,
     logout,
+    mark_paid,
     require_auth,
 )
 
@@ -104,6 +105,64 @@ class TestAdminLogin(unittest.TestCase):
         mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
         result = _admin_login("OWNER", "correct horse battery staple")
         self.assertTrue(result.success)
+
+    @mock.patch("auth.st")
+    def test_admin_login_carries_admin_plan(self, mock_st):
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        result = _admin_login("owner", "correct horse battery staple")
+        self.assertEqual(result.plan, "admin")
+        self.assertTrue(result.is_paid)
+
+
+class TestMarkPaid(unittest.TestCase):
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_sends_plan_when_given(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, d="": {
+            "APPS_SCRIPT_URL": "https://script.example/exec",
+            "APPS_SCRIPT_TOKEN": "tok",
+        }.get(k, d)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True}
+        mock_requests.post.return_value = resp
+
+        result = mark_paid("alice", plan="hunter")
+
+        self.assertTrue(result)
+        sent = mock_requests.post.call_args.kwargs["data"]
+        self.assertEqual(sent["plan"], "hunter")
+        self.assertEqual(sent["username"], "alice")
+        self.assertEqual(sent["action"], "set_paid")
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_omits_plan_key_entirely_when_not_given(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, d="": {
+            "APPS_SCRIPT_URL": "https://script.example/exec",
+            "APPS_SCRIPT_TOKEN": "tok",
+        }.get(k, d)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True}
+        mock_requests.post.return_value = resp
+
+        mark_paid("alice")
+
+        sent = mock_requests.post.call_args.kwargs["data"]
+        self.assertNotIn("plan", sent)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_connection_failure_returns_false_not_a_crash(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, d="": {
+            "APPS_SCRIPT_URL": "https://script.example/exec",
+            "APPS_SCRIPT_TOKEN": "tok",
+        }.get(k, d)
+        mock_requests.post.side_effect = Exception("network down")
+
+        self.assertFalse(mark_paid("alice", plan="hunter"))
 
 
 class TestRequireAuth(unittest.TestCase):
@@ -193,6 +252,7 @@ class TestLogout(unittest.TestCase):
             "user_display_name": "CRTC Admin",
             "user_is_admin": True,
             "user_is_paid": True,
+            "user_plan": "hunter",
             "username": "owner",
             "unrelated_app_state": "should survive logout",
         }
@@ -203,6 +263,7 @@ class TestLogout(unittest.TestCase):
         self.assertNotIn("user_display_name", state)
         self.assertNotIn("user_is_admin", state)
         self.assertNotIn("user_is_paid", state)
+        self.assertNotIn("user_plan", state)
         self.assertNotIn("username", state)
         self.assertIn("unrelated_app_state", state)
 

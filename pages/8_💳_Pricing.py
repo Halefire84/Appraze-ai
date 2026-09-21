@@ -12,8 +12,18 @@ st.set_page_config(page_title="Appraze Pricing", page_icon="💳", layout="wide"
 from auth import require_auth
 require_auth()
 
+from billing import plan_payment_link
+
 st.title("💳 Appraze™ Pricing")
 st.caption("Pay for opportunity intelligence — not another spreadsheet.")
+
+_current_plan = st.session_state.get("user_plan", "free")
+if st.session_state.get("user_is_admin"):
+    st.success("You're on the Admin account — full access, nothing to buy.")
+elif _current_plan and _current_plan != "free":
+    st.success(f"Your current plan: **{_current_plan.title()}**")
+else:
+    st.info("You're on the Free plan.")
 
 st.info("Launch strategy: keep the Free tier useful, make Hunter the obvious flagship, and add higher-volume tiers only as real demand appears.")
 
@@ -39,10 +49,21 @@ for col, plan in zip(cols, PLANS):
         if plan.team_seats > 1:
             st.write(f"✅ {plan.team_seats} team seats")
 
+        if plan.key == _current_plan:
+            st.button("Current plan", disabled=True, use_container_width=True, key=f"current_{plan.key}")
+        elif plan.monthly_price == 0:
+            st.caption("No signup needed — this is what you start with.")
+        else:
+            link = plan_payment_link(plan.key)
+            if link:
+                st.link_button(f"Subscribe to {plan.name}", link, use_container_width=True)
+            else:
+                st.button("Not yet available", disabled=True, use_container_width=True, key=f"unavail_{plan.key}")
+
 st.divider()
 st.subheader("Why Hunter is the flagship")
 st.markdown("""
-**$49/month** is designed around the feature that makes CRTC different: finding opportunities the market overlooked.
+**$49/month** is designed around the feature that makes Appraze different: finding opportunities the market overlooked.
 
 - Holy Grail opportunity hunting
 - Information-failure scoring
@@ -55,4 +76,4 @@ st.markdown("""
 The goal is simple: **one profitable find should be capable of paying for the subscription.**
 """)
 
-st.caption("Payment links are configured separately through Stripe. No card data is handled by CRTC source code.")
+st.caption("Payment links are configured separately through Stripe. No card data is handled by Appraze source code.")
