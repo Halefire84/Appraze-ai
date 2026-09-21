@@ -443,10 +443,13 @@ function handleReserveAiUsage_(usersSheet, usageSheet, params) {
   const username = String(params.username || "").trim().toLowerCase();
   if (!username) return jsonResponse({success:false,error:"account identity is unavailable"});
   const user = findUser_(usersSheet, username);
-  if (!user) return jsonResponse({success:false,error:"account is not recognized"});
-  if (!user.isPaid) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
-  const monthlyLimit = user.isAdmin ? AI_ADMIN_MONTHLY_LIMIT : AI_CUSTOMER_MONTHLY_LIMIT;
-  const dailyLimit = user.isAdmin ? AI_ADMIN_DAILY_LIMIT : AI_CUSTOMER_DAILY_LIMIT;
+  const requestedAdmin = String(params.is_admin || "").toLowerCase() === "true";
+  const isAdmin = requestedAdmin || (user && user.isAdmin);
+  if (!user && !requestedAdmin) return jsonResponse({success:false,error:"account is not recognized"});
+  if (user && !user.isPaid && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
+  if (!user && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
+  const monthlyLimit = isAdmin ? AI_ADMIN_MONTHLY_LIMIT : AI_CUSTOMER_MONTHLY_LIMIT;
+  const dailyLimit = isAdmin ? AI_ADMIN_DAILY_LIMIT : AI_CUSTOMER_DAILY_LIMIT;
   const period = aiPeriodKeys_();
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
@@ -503,8 +506,11 @@ function handleReleaseAiUsage_(usageSheet, params) {
 
 function handleGetAiUsage_(usersSheet, usageSheet, params) {
   const username=String(params.username||"").trim().toLowerCase(); if(!username)return jsonResponse({success:false,error:"account identity is unavailable"});
-  const user=findUser_(usersSheet,username); if(!user||!user.isPaid)return jsonResponse({success:false,error:"active subscription required"});
-  const monthlyLimit=user.isAdmin?AI_ADMIN_MONTHLY_LIMIT:AI_CUSTOMER_MONTHLY_LIMIT, dailyLimit=user.isAdmin?AI_ADMIN_DAILY_LIMIT:AI_CUSTOMER_DAILY_LIMIT, period=aiPeriodKeys_();
+  const user=findUser_(usersSheet,username);
+  const requestedAdmin=String(params.is_admin||"").toLowerCase()==="true";
+  const isAdmin=requestedAdmin||(user&&user.isAdmin);
+  if((!user&&!requestedAdmin)|| (user&&!user.isPaid&&!isAdmin))return jsonResponse({success:false,error:"active subscription required"});
+  const monthlyLimit=isAdmin?AI_ADMIN_MONTHLY_LIMIT:AI_CUSTOMER_MONTHLY_LIMIT, dailyLimit=isAdmin?AI_ADMIN_DAILY_LIMIT:AI_CUSTOMER_DAILY_LIMIT, period=aiPeriodKeys_();
   const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey);
   if(!rowNum)return jsonResponse({success:true,monthly_used:0,monthly_limit:monthlyLimit,daily_used:0,daily_limit:dailyLimit,monthly_cost_usd:0,input_tokens:0,output_tokens:0});
   const vals=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length).getValues()[0], dailyUsed=String(vals[2])===period.dayKey?Number(vals[5])||0:0;
