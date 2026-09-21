@@ -100,7 +100,7 @@ def save_sales_log(rows: list) -> WebhookStoreResult:
         return WebhookStoreResult(False, error=f"connection error: {e}")
 
 
-def update_sales_log_status(invoice_id: str, new_status: str, *, force: bool = False) -> WebhookStoreResult:
+def update_sales_log_status(invoice_id: str, new_status: str, *, event_id: str = "", force: bool = False) -> WebhookStoreResult:
     """
     Atomic single-row update, preferred over load_sales_log() +
     save_sales_log() for reconciling one invoice: those two are separate
@@ -122,6 +122,12 @@ def update_sales_log_status(invoice_id: str, new_status: str, *, force: bool = F
     exists but the update was refused as a downgrade -- not an error,
     Stripe still gets acknowledged. Pass force=True only for an explicit
     manual override (never from the automatic webhook path).
+
+    event_id: the Stripe event id (event["id"]), when known. Passed through
+    to AppsScript_Code.gs, which persists it on the row (_last_event_id) so
+    a redelivery of the same event is a durable no-op even across restarts
+    or multiple instances of this service -- not just an in-memory check.
+    payload.duplicate is True when the update was skipped for this reason.
     """
     url = os.environ.get("APPS_SCRIPT_URL")
     token = os.environ.get("APPS_SCRIPT_TOKEN")
@@ -135,6 +141,7 @@ def update_sales_log_status(invoice_id: str, new_status: str, *, force: bool = F
                 "action": "update_sales_log_status",
                 "invoice_id": invoice_id,
                 "new_status": new_status,
+                "event_id": event_id or "",
                 "force": "true" if force else "false",
             },
             timeout=_REQUEST_TIMEOUT_SECONDS,
@@ -145,7 +152,11 @@ def update_sales_log_status(invoice_id: str, new_status: str, *, force: bool = F
             return WebhookStoreResult(False, error=data.get("error", "update failed"))
         return WebhookStoreResult(
             True,
-            payload={"found": bool(data.get("found")), "applied": bool(data.get("applied", data.get("found")))},
+            payload={
+                "found": bool(data.get("found")),
+                "applied": bool(data.get("applied", data.get("found"))),
+                "duplicate": bool(data.get("duplicate")),
+            },
         )
     except Exception as e:
         return WebhookStoreResult(False, error=f"connection error: {e}")

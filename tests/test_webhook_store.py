@@ -34,7 +34,7 @@ class TestUpdateSalesLogStatus(unittest.TestCase):
 
         result = webhook_store.update_sales_log_status("POS-1", "Paid (Card)")
         self.assertTrue(result.success)
-        self.assertEqual(result.payload, {"found": True, "applied": True})
+        self.assertEqual(result.payload, {"found": True, "applied": True, "duplicate": False})
 
     @mock.patch("webhook_store.requests")
     def test_found_but_downgrade_refused(self, mock_requests):
@@ -45,7 +45,7 @@ class TestUpdateSalesLogStatus(unittest.TestCase):
 
         result = webhook_store.update_sales_log_status("POS-1", "Paid (Card)")
         self.assertTrue(result.success)  # not an error -- Stripe still gets a clean ack
-        self.assertEqual(result.payload, {"found": True, "applied": False})
+        self.assertEqual(result.payload, {"found": True, "applied": False, "duplicate": False})
 
     @mock.patch("webhook_store.requests")
     def test_row_not_found(self, mock_requests):
@@ -56,7 +56,20 @@ class TestUpdateSalesLogStatus(unittest.TestCase):
 
         result = webhook_store.update_sales_log_status("POS-DOES-NOT-EXIST", "Paid (Card)")
         self.assertTrue(result.success)
-        self.assertEqual(result.payload, {"found": False, "applied": False})
+        self.assertEqual(result.payload, {"found": False, "applied": False, "duplicate": False})
+
+    @mock.patch("webhook_store.requests")
+    def test_duplicate_event_id_reported(self, mock_requests):
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True, "found": True, "applied": False, "duplicate": True, "current_status": "Paid (Card)"}
+        mock_requests.post.return_value = resp
+
+        result = webhook_store.update_sales_log_status("POS-1", "Paid (Card)", event_id="evt_123")
+        self.assertTrue(result.success)
+        self.assertEqual(result.payload, {"found": True, "applied": False, "duplicate": True})
+        call_kwargs = mock_requests.post.call_args.kwargs
+        self.assertEqual(call_kwargs["data"]["event_id"], "evt_123")
 
     @mock.patch("webhook_store.requests")
     def test_force_flag_is_sent_to_apps_script(self, mock_requests):

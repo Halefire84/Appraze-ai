@@ -95,17 +95,22 @@ def _apply_update(update: dict) -> None:
     handleUpdateSalesLogStatus_) rather than a separate load-then-save
     round trip, which would let two webhook deliveries arriving close
     together race and silently clobber each other's update. Safe to call
-    more than once for the same event either way (Stripe retries/
-    duplicates deliveries) — it only ever sets a status, so replaying it
-    is a no-op once the row already matches."""
-    result = update_sales_log_status(update["invoice_id"], update["new_status"])
+    more than once for the same event (Stripe retries/duplicates
+    deliveries): the event id is persisted on the row server-side
+    (_last_event_id), so a redelivery of an already-applied event is a
+    durable no-op even across process restarts, not just because setting
+    the same status value twice happens to be harmless."""
+    result = update_sales_log_status(update["invoice_id"], update["new_status"], event_id=update.get("event_id", ""))
     if not result.success:
         logger.warning("Could not update sales_log for invoice_id=%s: %s", update["invoice_id"], result.error)
         return
     found = bool((result.payload or {}).get("found"))
     applied = bool((result.payload or {}).get("applied"))
+    duplicate = bool((result.payload or {}).get("duplicate"))
     if not found:
         logger.info("No sales_log row found for invoice_id=%s yet (event may have arrived before the row was saved).", update["invoice_id"])
+    elif duplicate:
+        logger.info("Duplicate delivery of event_id=%s for invoice_id=%s -- already applied, skipped.", update.get("event_id"), update["invoice_id"])
     elif not applied:
         # Found the row but the status-precedence check in AppsScript_Code.gs
         # refused it as a downgrade (e.g. a delayed charge.succeeded arriving
