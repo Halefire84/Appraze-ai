@@ -30,7 +30,7 @@ from storage import load_table, save_table
 # PAGE CONFIG + GLOBAL STYLE
 # --------------------------------------------------------------------------
 st.set_page_config(
-    page_title="BUSINESS OS",
+    page_title="Appraze",
     page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -38,23 +38,23 @@ st.set_page_config(
 
 DARK_CSS = """
 <style>
-    .business-os-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
-    .business-os-brand { padding: 6px 0 4px; }
+    .appraze-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
+    .appraze-brand { padding: 6px 0 4px; }
     /* ---- base ---- */
     .stApp {
-        background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
-        color: #172230;
+        background: linear-gradient(180deg, #071b36 0%, #0b2548 100%);
+        color: #ffffff;
     }
     section[data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid #d9e1ea;
+        background: #071b36;
+        border-right: 1px solid #d9a321;
     }
     h1, h2, h3, h4 { color: #172230 !important; letter-spacing: -0.02em; }
 
     /* ---- KPI cards ---- */
     .kpi-card {
-        background: linear-gradient(145deg, #ffffff, #f3f6fa);
-        border: 1px solid #d7e0ea;
+        background: linear-gradient(145deg, #0b2548, #102d50);
+        border: 1px solid #294766;
         border-radius: 14px;
         padding: 18px 20px;
         box-shadow: 0 4px 18px rgba(31,52,73,0.10);
@@ -63,13 +63,13 @@ DARK_CSS = """
         font-size: 0.78rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: #5d6b7a;
+        color: #b8c6d9;
         margin-bottom: 6px;
     }
     .kpi-value {
         font-size: 1.6rem;
         font-weight: 700;
-        color: #172230;
+        color: #ffffff;
     }
     .kpi-sub { font-size: 0.8rem; color: #16804b; margin-top: 2px; }
     .kpi-sub.neg { color: #c62f4a; }
@@ -95,12 +95,12 @@ DARK_CSS = """
     /* buttons */
     .stButton>button {
         border-radius: 10px;
-        border: 1px solid #cbd5e1;
-        background: #ffffff;
-        color: #0b2548;
+        border: 1px solid #405674;
+        background: #071b36;
+        color: #ffffff;
         font-weight: 600;
     }
-    .stButton>button:hover { border-color: #0b2548; color: #0b2548; }
+    .stButton>button:hover { border-color: #ffffff; color: #ffffff; }
 
     /* dataframe */
     div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
@@ -108,7 +108,7 @@ DARK_CSS = """
     /* metric containers spacing */
     .block-container { padding-top: 1.6rem; }
 
-    hr { border-color: #d7e0ea; }
+    hr { border-color: #d9a321; }
 </style>
 """
 st.markdown(DARK_CSS, unsafe_allow_html=True)
@@ -131,19 +131,19 @@ _PWA_HEAD_INJECTION = """
 (function () {
     try {
         var head = window.parent.document.head;
-        if (head.querySelector('[data-crtc-pwa]')) return;
+        if (head.querySelector('[data-appraze-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/business-os-logo.svg', sizes: '192x192', type: 'image/png'}],
-            ['link', {rel: 'apple-touch-icon', href: './app/static/business-os-logo.svg'}],
-            ['meta', {name: 'theme-color', content: '#f7f9fc'}],
+            ['link', {rel: 'icon', href: './app/static/appraze-logo.svg', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/appraze-logo.svg'}],
+            ['meta', {name: 'theme-color', content: '#0b2548'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'default'}],
         ];
         tags.forEach(function (t) {
             var el = window.parent.document.createElement(t[0]);
-            el.setAttribute('data-crtc-pwa', '1');
+            el.setAttribute('data-appraze-pwa', '1');
             for (var k in t[1]) el.setAttribute(k, t[1][k]);
             head.appendChild(el);
         });
@@ -197,9 +197,7 @@ if WORKSPACE not in st.session_state.deals_by_ws:
                 "Notes": "Sample row \u2014 edit or delete me",
             }
         ])
-    else:
-        # Any future separate workspace starts clean and empty
-        st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame(columns=[
+    else:        # Any future separate workspace starts clean and empty        st.session_state.deals_by_ws[WORKSPACE] = pd.DataFrame(columns=[
             "Date Added", "Item", "Platform", "Category", "Cost",
             "Est. Resale Value", "Status", "Notes",
         ])
@@ -255,8 +253,8 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="business-os-brand"><img src="./app/static/business-os-logo.svg" alt="BUSINESS OS"></div>', unsafe_allow_html=True)
-    st.markdown("### 🔑 BUSINESS OS")
+    st.markdown('<div class="appraze-brand"><img src="./app/static/appraze-logo.svg" alt="Appraze"></div>', unsafe_allow_html=True)
+    st.markdown("### 🔑 Appraze")
     st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
@@ -339,7 +337,7 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## 🔑 BUSINESS OS")
+st.markdown("## 🔑 Appraze")
 st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
@@ -397,10 +395,8 @@ with tab_dash:
     if status_filter:
         filtered = filtered[filtered["Status"].isin(status_filter)]
     if search:
-        s = search.lower()
-        filtered = filtered[
-            filtered["Item"].str.lower().str.contains(s, na=False)
-            | filtered["Notes"].str.lower().str.contains(s, na=False)
+        s = search.lower()        filtered = filtered[
+            filtered["Item"].str.lower().str.contains(s, na=False)            | filtered["Notes"].str.lower().str.contains(s, na=False)
         ]
 
     st.markdown(f"#### Deals ({len(filtered)})")
@@ -597,11 +593,9 @@ with tab_inv:
         st.session_state.inventory_by_ws[WORKSPACE],
         num_rows="dynamic",
         use_container_width=True,
-        key=f"inv_editor_{WORKSPACE}",
-        column_config={
+        key=f"inv_editor_{WORKSPACE}",        column_config={
             "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
-            "List Price": st.column_config.NumberColumn(format="$%.2f"),
-        },
+            "List Price": st.column_config.NumberColumn(format="$%.2f"),        },
     )
     st.session_state.inventory_by_ws[WORKSPACE] = edited_inv
 
@@ -797,12 +791,10 @@ with tab_charge:
                     "The webhook service reconciles these automatically if it's deployed (see "
                     "DEPLOY.md). This button does the same check manually, right now."
                 )
-                for row in awaiting[-5:]:  # most recent few - avoid an unbounded button list
-                    c1, c2 = st.columns([3, 1])
+                for row in awaiting[-5:]:  # most recent few - avoid an unbounded button list                    c1, c2 = st.columns([3, 1])
                     c1.write(f"**{row.get('Invoice #')}** \u2014 {row.get('Description', '')} (${float(row.get('Amount', 0)):,.2f})")
                     if c2.button("Check Status", key=f"check_{row['Invoice #']}", use_container_width=True):
-                        if check_payment_status(row["session_id"]):
-                            for r in sales_log:
+                        if check_payment_status(row["session_id"]):                            for r in sales_log:
                                 if r.get("Invoice #") == row["Invoice #"]:
                                     r["Status"] = "Paid (Card)"
                             save_table(pd.DataFrame(sales_log), "sales_log", shared=True)
@@ -997,13 +989,11 @@ with tab_ai:
             "Secret named `ANTHROPIC_API_KEY` in Streamlit Cloud's app Settings \u2192 Secrets, then reload."
         )
     else:
-        photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])
-        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
+        photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
 
         if st.button("Analyze"):
             if not photo and not text_desc.strip():
-                st.warning("Add a photo or a description first.")
-            else:
+                st.warning("Add a photo or a description first.")            else:
                 content = []
                 if photo is not None:
                     img_bytes = photo.read()
@@ -1122,4 +1112,4 @@ with tab_ai:
                 st.session_state.ai_last_result = None
 
 st.markdown("---")
-st.caption("BUSINESS OS · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
+st.caption("Appraze · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")

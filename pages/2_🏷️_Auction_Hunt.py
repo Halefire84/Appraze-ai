@@ -1,4 +1,4 @@
-"""BUSINESS OS Auction Hunt — import permitted auction catalogs and verify leads."""
+"""Appraze Auction Hunt — import permitted auction catalogs and verify leads."""
 import json
 
 import pandas as pd
@@ -13,10 +13,10 @@ SOURCES = {
     "HiBid": "hibid",
 }
 
-st.set_page_config(page_title="BUSINESS OS — Auction Hunt", page_icon="🏷️", layout="wide")
+st.set_page_config(page_title="Appraze — Auction Hunt", page_icon="🏷️", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("🏷️ BUSINESS OS Auction Hunt")
+st.title("🏷️ Appraze Auction Hunt")
 st.caption("Import a permitted auction catalog/export, then verify the strongest leads with market evidence.")
 st.markdown("**SOURCE → NORMALIZE → RADAR → VALUE → ALL-IN COST → DECIDE**")
 

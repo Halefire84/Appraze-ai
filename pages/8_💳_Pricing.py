@@ -2,51 +2,28 @@ import streamlit as st
 
 from subscription_plans import PLANS
 
-st.set_page_config(page_title="TURNKEY Pricing", page_icon="💳", layout="wide")
+st.set_page_config(page_title="Appraze Pricing", page_icon="💳", layout="wide")
 from auth import require_auth
 require_auth()
 
-st.title("💳 TURNKEY Pricing")
-st.caption("Pay for opportunity intelligence — not another spreadsheet.")
+st.title("💳 Appraze Pricing")
+st.caption("Complete Resale Business Suite — deal math, inventory, and listing.")
 
-st.info("Launch strategy: keep the Free tier useful, make Hunter the obvious flagship, and add higher-volume tiers only as real demand appears.")
-
-cols = st.columns(len(PLANS))
-for col, plan in zip(cols, PLANS):
-    with col:
-        if plan.key == "hunter":
-            st.markdown("### 🏆 MOST POPULAR")
+for plan in PLANS:
+    with st.container(border=True):
         st.subheader(plan.name)
-        if plan.monthly_price == 0:
-            st.markdown("# Free")
-        else:
-            st.markdown(f"# ${plan.monthly_price}/mo")
+        st.markdown("Free" if plan.monthly_price == 0 else f"${plan.monthly_price}/mo")
         st.caption(plan.tagline)
         st.write(f"**{plan.analyses_per_month:,}** AI analyses / month")
-        st.write("✅ Holy Grail hunting" if plan.hunt_enabled else "• Manual analysis")
-        st.write("✅ Alerts" if plan.alerts_enabled else "• Basic results")
-        st.write("✅ Advanced sources" if plan.advanced_sources else "• Core sources")
-        st.write("✅ Liquidation & surplus" if plan.liquidation else "• —")
-        st.write("✅ Financial intelligence" if plan.financial_intelligence else "• —")
-        st.write("✅ Batch analysis" if plan.batch_analysis else "• —")
-        st.write("✅ Priority hunting" if plan.priority else "• Standard priority")
+        st.write("AI hunting" if plan.hunt_enabled else "Manual analysis")
+        st.write("Alerts" if plan.alerts_enabled else "Basic results")
+        st.write("Advanced sources" if plan.advanced_sources else "Core sources")
+        st.write("Liquidation & surplus" if plan.liquidation else "—")
+        st.write("Financial intelligence" if plan.financial_intelligence else "—")
+        st.write("Batch analysis" if plan.batch_analysis else "—")
+        st.write("Priority" if plan.priority else "Standard")
         if plan.team_seats > 1:
-            st.write(f"✅ {plan.team_seats} team seats")
+            st.write(f"{plan.team_seats} team seats")
 
 st.divider()
-st.subheader("Why Hunter is the flagship")
-st.markdown("""
-**$49/month** is designed around the feature that makes CRTC different: finding opportunities the market overlooked.
-
-- Holy Grail opportunity hunting
-- Information-failure scoring
-- Max-bid intelligence
-- Auction and liquidation research
-- Opportunity alerts
-- AI valuation and listing intelligence
-- Financial intelligence as that layer comes online
-
-The goal is simple: **one profitable find should be capable of paying for the subscription.**
-""")
-
-st.caption("Payment links are configured separately through Stripe. No card data is handled by CRTC source code.")
+st.caption("Appraze is the product of Cooper River Trading Co. Payment links are configured separately through Stripe.")

@@ -6,7 +6,7 @@ from crtc_hunt_engine import analyze_listing
 from opportunity_sources import scan_ebay
 from source_profiles import get_hunt_profile
 
-st.set_page_config(page_title="TURNKEY — Government Electronics", page_icon="🏛️", layout="wide")
+st.set_page_config(page_title="Appraze — Government Electronics", page_icon="🏛️", layout="wide")
 from auth import require_auth
 require_auth()
 

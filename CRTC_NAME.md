@@ -1,19 +1,19 @@
-# BUSINESS OS — Brand Record
+# Appraze — Brand Record
 
-**Product-facing name:** BUSINESS OS
+**Product-facing name:** Appraze
 
-**Short product name:** BUSINESS OS
+**Tagline:** Complete Resale Business Suite
 
-**Positioning:** A modern operating system for the way your business works.
+**Descriptor:** deal math, inventory, and listing for resellers
 
-**Supporting line:** Built for business. Configurable for your workflow.
+**Company:** Cooper River Trading Co. (CRTC)
 
-**Operational line:** Buy. Track. Value. List. Sell. Get Paid. Grow.
+**Brand relationship:** Appraze is the product. Cooper River Trading Co. is the company behind it. CRTC is not the product name.
 
-**Current capabilities:** Inventory, purchasing, valuation, listings, POS and checkout, payments, customers, orders, reporting, analytics, automation, AI capabilities, and configurable workflows.
+**Repository:** `Halefire84/Appraze-ai` remains unchanged for technical continuity.
 
-**Brand guardrail:** Do not position BUSINESS OS as only reseller software, and do not claim every industry is already supported.
+**Brand guardrails:** Do not use BUSINESS OS, LLAVE, or TURNKEY as customer-facing product names. Do not rename the repository solely for branding.
 
-**Repository:** `Halefire84/Appraze-ai` remains unchanged for technical continuity. Internal module names, database keys, package identifiers, historical handoff filenames, and existing deployment URLs may retain legacy identifiers until separately migrated and tested.
+**Visual direction:** Retain the dark navy and rich-gold product identity; gold is an accent, not the dominant field.
 
-**Trademark status:** Working brand only. Exact-name and broader trademark clearance has not been completed.
+**Scope:** This record governs customer-facing product branding. Internal technical identifiers may retain historical CRTC names where changing them would create unnecessary risk.
