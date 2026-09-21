@@ -97,7 +97,7 @@ DARK_CSS = """
         border-radius: 10px;
         border: 1px solid #cbd5e1;
         background: #ffffff;
-        color: #e6e9ef;
+        color: #0b2548;
         font-weight: 600;
     }
     .stButton>button:hover { border-color: #2563eb; color: #2563eb; }
@@ -257,6 +257,7 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 with st.sidebar:
     st.markdown('<div class="llave-brand"><img src="./app/static/llave-logo.svg" alt="LLAVE Business OS"></div>', unsafe_allow_html=True)
     st.markdown("### 🔑 LLAVE")
+    st.caption("Your whole business. One key.")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
         logout()
@@ -339,6 +340,7 @@ with st.sidebar:
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
 st.markdown("## 🔑 LLAVE Business OS")
+st.caption("Your whole business. One key.")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
 df = recalc(st.session_state.deals)
@@ -1120,4 +1122,4 @@ with tab_ai:
                 st.session_state.ai_last_result = None
 
 st.markdown("---")
-st.caption("LLAVE Business OS · built for buying, valuing, managing, and selling physical goods")
+st.caption("LLAVE Business OS · Your whole business. One key. · Built for buying, valuing, managing, and selling physical goods")
