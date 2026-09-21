@@ -1,24 +1,19 @@
-# LLAVE Business OS — Brand Record
+# BUSINESS OS — Brand Record
 
-**Product-facing name:** LLAVE Business OS
+**Product-facing name:** BUSINESS OS
 
-**Short product name:** LLAVE
+**Short product name:** BUSINESS OS
 
-**Meaning:** *Llave* is Spanish for “key.” The brand represents the key to running the business from one connected system.
+**Positioning:** A modern operating system for the way your business works.
 
-**Tagline:** *Your whole business. One key.*
+**Supporting line:** Built for business. Configurable for your workflow.
 
-**Operational line:** *Buy it. Track it. Value it. Sell it.*
+**Operational line:** Buy. Track. Value. List. Sell. Get Paid. Grow.
 
-**Positioning:** Commercial-grade business operating software for resellers, estate-sale operators, independent retailers, and small businesses.
+**Current capabilities:** Inventory, purchasing, valuation, listings, POS and checkout, payments, customers, orders, reporting, analytics, automation, AI capabilities, and configurable workflows.
 
-**Core promise:** Buy it. Track it. Value it. Sell it.
+**Brand guardrail:** Do not position BUSINESS OS as only reseller software, and do not claim every industry is already supported.
 
-**Core capabilities:** POS and checkout, inventory, purchasing, AI item analysis and valuation, pricing, listings/crosslisting, customers, payments, invoices, reporting, analytics, automation, and opportunity intelligence.
+**Repository:** `Halefire84/Appraze-ai` remains unchanged for technical continuity. Internal module names, database keys, package identifiers, historical handoff filenames, and existing deployment URLs may retain legacy identifiers until separately migrated and tested.
 
-**Signature feature:** Holy Grail Finder — identifies potential listing errors, pricing anomalies, overlooked value, and other opportunity signals.
-
-**Repository:** `Halefire84/Appraze-ai` remains unchanged for continuity. Internal module names, database keys, package identifiers, historical handoff filenames, and existing deployment URLs may retain legacy identifiers until separately migrated and tested.
-
-**Trademark status:** Working brand only. Exact-name and broader trademark clearance has not been completed. USPTO guidance recommends a comprehensive clearance search for similar marks before filing or relying on a mark exclusively.
-\n**Clearance note (2026-09-21):** Web research found multiple unrelated uses of LLAVE in software, apps, security, and business contexts, including a U.S.-based software company using LLAVE and multiple app products. No obvious exact-match “LLAVE Business OS” result was found in the initial web search, but this is **not** a legal clearance opinion. The USPTO says clearance should include exact wording, similar wording, alternative spellings/pronunciations, related goods/services, and similar commercial impressions, and recommends considering a trademark attorney for comprehensive clearance.\n
+**Trademark status:** Working brand only. Exact-name and broader trademark clearance has not been completed.
