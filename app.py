@@ -948,8 +948,8 @@ with tab_ai:
 
     if not anthropic_key:
         st.warning(
-            "AI Analyzer not configured yet. Add your Anthropic API key (starts with `sk-ant-`) as a "
-            "Secret named `ANTHROPIC_API_KEY` in Streamlit Cloud's app Settings \u2192 Secrets, then reload."
+            "The Appraze AI service is not configured for this deployment. "
+            "AI is temporarily unavailable; your account never supplies or exposes the platform API key."
         )
     else:
         photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
@@ -1008,7 +1008,8 @@ with tab_ai:
                     # make the button click silently do nothing.
                     st.session_state.ai_last_result = parsed
                 except urllib.error.HTTPError as e:
-                    st.error(f"Claude API error: {e.read().decode()[:300]}")
+                    # Do not surface provider response bodies to customers.
+                    st.error(f"Appraze AI service error (HTTP {e.code}). Please try again later.")
                 except json.JSONDecodeError:
                     st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
                 except Exception as e:
