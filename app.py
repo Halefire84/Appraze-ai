@@ -25,6 +25,7 @@ from auth import require_auth, logout
 from pos import create_pos_checkout, check_payment_status
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
+from commercial_protection import render_proprietary_watermark
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -1073,3 +1074,4 @@ with tab_ai:
 
 st.markdown("---")
 st.caption("Appraze · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
+render_proprietary_watermark()
