@@ -30,7 +30,7 @@ from storage import load_table, save_table
 # PAGE CONFIG + GLOBAL STYLE
 # --------------------------------------------------------------------------
 st.set_page_config(
-    page_title="TURNKEY Business Ledger",
+    page_title="LLAVE Business OS",
     page_icon="🔑",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -38,8 +38,8 @@ st.set_page_config(
 
 DARK_CSS = """
 <style>
-    .turnkey-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
-    .turnkey-brand { padding: 6px 0 4px; }
+    .llave-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
+    .llave-brand { padding: 6px 0 4px; }
     /* ---- base ---- */
     .stApp {
         background: linear-gradient(180deg, #f7f9fc 0%, #eef3f8 100%);
@@ -134,8 +134,8 @@ _PWA_HEAD_INJECTION = """
         if (head.querySelector('[data-crtc-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/turnkey-logo.svg', sizes: '192x192', type: 'image/png'}],
-            ['link', {rel: 'apple-touch-icon', href: './app/static/turnkey-logo.svg'}],
+            ['link', {rel: 'icon', href: './app/static/llave-logo.svg', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/llave-logo.svg'}],
             ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
@@ -255,8 +255,8 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="turnkey-brand"><img src="./app/static/turnkey-logo.svg" alt="TURNKEY Business Ledger"></div>', unsafe_allow_html=True)
-    st.markdown("### 🔑 TURNKEY")
+    st.markdown('<div class="llave-brand"><img src="./app/static/llave-logo.svg" alt="LLAVE Business OS"></div>', unsafe_allow_html=True)
+    st.markdown("### 🔑 LLAVE")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
         logout()
@@ -338,7 +338,7 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## 🔑 TURNKEY Business Ledger")
+st.markdown("## 🔑 LLAVE Business OS")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
 df = recalc(st.session_state.deals)
@@ -1120,4 +1120,4 @@ with tab_ai:
                 st.session_state.ai_last_result = None
 
 st.markdown("---")
-st.caption("TURNKEY Business Ledger · built for buying, valuing, managing, and selling physical goods")
+st.caption("LLAVE Business OS · built for buying, valuing, managing, and selling physical goods")
