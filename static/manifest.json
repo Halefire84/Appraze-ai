@@ -5,8 +5,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#071b36",
-  "theme_color": "#0b2548",
+  "background_color": "#f7f9fc",
+  "theme_color": "#f7f9fc",
   "icons": [
     {"src":"appraze-logo.svg","sizes":"192x192","type":"image/svg+xml","purpose":"any"},
     {"src":"appraze-logo.svg","sizes":"512x512","type":"image/svg+xml","purpose":"any"},
