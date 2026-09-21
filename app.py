@@ -26,6 +26,10 @@ from pos import create_pos_checkout, check_payment_status
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
 from commercial_protection import render_proprietary_watermark
+from ai_usage import (
+    MAX_DESCRIPTION_CHARS, MAX_IMAGE_BYTES, reserve_ai_call,
+    finalize_ai_call, release_ai_call,
+)
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
@@ -955,18 +959,33 @@ with tab_ai:
         photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])        text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
 
         if st.button("Analyze"):
-            if not photo and not text_desc.strip():
-                st.warning("Add a photo or a description first.")            else:
+            if not st.session_state.get("user_is_paid", False):
+                st.warning("AI features require an active Appraze subscription.")
+            elif not photo and not text_desc.strip():
+                st.warning("Add a photo or a description first.")
+            elif len(text_desc.strip()) > MAX_DESCRIPTION_CHARS:
+                st.warning(f"Description is limited to {MAX_DESCRIPTION_CHARS:,} characters.")
+            else:
                 content = []
+                img_bytes = None
                 if photo is not None:
                     img_bytes = photo.read()
-                    img_b64 = base64.b64encode(img_bytes).decode()                    media_type = "image/png" if photo.type == "image/png" else "image/jpeg"
+                    if len(img_bytes) > MAX_IMAGE_BYTES:
+                        st.warning("That image is too large for the Appraze AI analyzer. Use an image under 3 MB.")
+                        st.stop()
+                    img_b64 = base64.b64encode(img_bytes).decode()
+                    media_type = "image/png" if photo.type == "image/png" else "image/jpeg"
                     content.append({
                         "type": "image",
                         "source": {"type": "base64", "media_type": media_type, "data": img_b64},
                     })
                 prompt_text = text_desc.strip() if text_desc.strip() else "Identify and value this item."
                 content.append({"type": "text", "text": prompt_text})
+
+                usage_decision = reserve_ai_call(st.session_state.get("username", ""))
+                if not usage_decision.allowed:
+                    st.warning(usage_decision.reason)
+                    st.stop()
 
                 system_prompt = (
                     "You identify resale items for an estate-cleanout and flip business, and draft "
@@ -985,6 +1004,8 @@ with tab_ai:
                     "2-4 sentences, honest about condition, and written in the tone typical of that "
                     "platform (eBay: detailed and structured; Facebook/Mercari: casual and direct)."
                 )
+                provider_response_received = False
+                usage_recorded = False
                 try:
                     body = json.dumps({
                         "model": "claude-sonnet-5",
@@ -998,6 +1019,14 @@ with tab_ai:
                     req.add_header("content-type", "application/json")
                     with urllib.request.urlopen(req, timeout=30) as resp:
                         result = json.loads(resp.read().decode())
+                    provider_response_received = True
+                    usage = result.get("usage", {}) if isinstance(result, dict) else {}
+                    finalize_ai_call(
+                        st.session_state.get("username", ""),
+                        usage.get("input_tokens", 0),
+                        usage.get("output_tokens", 0),
+                    )
+                    usage_recorded = True
                     raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
                     parsed = json.loads(raw_text)
                     if not isinstance(parsed, dict):
