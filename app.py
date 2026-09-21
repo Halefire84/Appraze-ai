@@ -36,82 +36,47 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DARK_CSS = """
+LIGHT_CSS = """
 <style>
     .appraze-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
     .appraze-brand { padding: 6px 0 4px; }
-    /* ---- base ---- */
-    .stApp {
-        background: linear-gradient(180deg, #071b36 0%, #0b2548 100%);
-        color: #ffffff;
-    }
-    section[data-testid="stSidebar"] {
-        background: #071b36;
-        border-right: 1px solid #d9a321;
-    }
-    h1, h2, h3, h4 { color: #ffffff !important; letter-spacing: -0.02em; }
-
-    /* ---- KPI cards ---- */
+    .stApp { background: #f7f9fc; color: #172033; }
+    section[data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #d9a321; }
+    h1, h2, h3, h4 { color: #102a43 !important; letter-spacing: -0.02em; }
     .kpi-card {
-        background: linear-gradient(145deg, #0b2548, #102d50);
-        border: 1px solid #294766;
+        background: #ffffff;
+        border: 1px solid #d8e0ea;
         border-radius: 14px;
         padding: 18px 20px;
-        box-shadow: 0 4px 18px rgba(31,52,73,0.10);
+        box-shadow: 0 4px 18px rgba(31,52,73,0.08);
     }
-    .kpi-label {
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #b8c6d9;
-        margin-bottom: 6px;
-    }
-    .kpi-value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #ffffff;
-    }
-    .kpi-sub { font-size: 0.8rem; color: #35d07f; margin-top: 2px; }
-    .kpi-sub.neg { color: #ff6b7a; }
-
-    /* ---- pills / badges ---- */
-    .badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 999px;
-        font-size: 0.72rem;
-        font-weight: 600;
-        letter-spacing: 0.03em;
-    }
-    .badge-strongbuy { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-buy { background: #10331a; color: #4ade80; border: 1px solid #4ade8040;}
-    .badge-ceiling { background: #142a37; color: #38bdf8; border: 1px solid #38bdf840;}
-    .badge-borderline { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-passverdict { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-    .badge-hot { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-good { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-pass { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-
-    /* buttons */
+    .kpi-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: #5b6b7f; margin-bottom: 6px; }
+    .kpi-value { font-size: 1.6rem; font-weight: 700; color: #102a43; }
+    .kpi-sub { font-size: 0.8rem; color: #16834b; margin-top: 2px; }
+    .kpi-sub.neg { color: #c62845; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; }
+    .badge-strongbuy { background: #e8f7ef; color: #137a45; border: 1px solid #9bd8b5; }
+    .badge-buy { background: #eaf8ee; color: #21843d; border: 1px solid #a9ddb7; }
+    .badge-ceiling { background: #eaf6fb; color: #176b8f; border: 1px solid #a6d9ec; }
+    .badge-borderline { background: #fff6df; color: #996b00; border: 1px solid #e7c66a; }
+    .badge-passverdict { background: #fdebed; color: #b4233c; border: 1px solid #efabb7; }
+    .badge-hot { background: #fff6df; color: #996b00; border: 1px solid #e7c66a; }
+    .badge-good { background: #e8f7ef; color: #137a45; border: 1px solid #9bd8b5; }
+    .badge-pass { background: #fdebed; color: #b4233c; border: 1px solid #efabb7; }
     .stButton>button {
         border-radius: 10px;
-        border: 1px solid #405674;
-        background: #071b36;
-        color: #ffffff;
+        border: 1px solid #b8c5d4;
+        background: #ffffff;
+        color: #102a43;
         font-weight: 600;
     }
-    .stButton>button:hover { border-color: #ffffff; color: #ffffff; }
-
-    /* dataframe */
-    div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
-
-    /* metric containers spacing */
+    .stButton>button:hover { border-color: #d9a321; color: #102a43; }
+    div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; border: 1px solid #d8e0ea; }
     .block-container { padding-top: 1.6rem; }
-
     hr { border-color: #d9a321; }
 </style>
 """
-st.markdown(DARK_CSS, unsafe_allow_html=True)
+st.markdown(LIGHT_CSS, unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------
 # PWA HEAD INJECTION
@@ -136,7 +101,7 @@ _PWA_HEAD_INJECTION = """
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
             ['link', {rel: 'icon', href: './app/static/appraze-logo.svg', sizes: '192x192', type: 'image/png'}],
             ['link', {rel: 'apple-touch-icon', href: './app/static/appraze-logo.svg'}],
-            ['meta', {name: 'theme-color', content: '#0b2548'}],
+            ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'default'}],
