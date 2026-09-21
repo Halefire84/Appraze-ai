@@ -5,6 +5,28 @@
 **Company:** Cooper River Trading Co. (CRTC)  
 **Last handoff:** 2026-09-21 (Appraze brand lock + beta hardening)
 
+## 2026-09-21 — app.py syntax fix, Apps Script admin-trust fix, Stripe event-idempotency wired
+
+Full detail, evidence table, and current test commands now live in
+`.agent/HANDOFF.md` (current-state snapshot — read that first). Summary:
+fixed 5 collapsed-line syntax errors in `app.py`; fixed a real
+authorization bug in `AppsScript_Code.gs` where admin status (shared
+workspace access + AI quota tier) was derived from client-supplied
+`is_admin` instead of the `Users` sheet — note `CRTC_GAP_CLOSURE_REPORT.md`'s
+claim that this was already fixed refers to an external zip that was
+never actually pushed to this source tree, the bug was live here; cross-
+checked the 8 P0 items from the "Unresolved issues" list below against
+current source — all 8 are implemented and covered by
+`tests/test_p0_regression.py` (F-01…F-13), with one real gap closed this
+session (durable Stripe webhook event-id idempotency, previously built
+in `stripe_webhooks.py` but never called from the live
+`stripe_webhook_server.py` path — now wired via a `_last_event_id` field
+persisted per `sales_log` row, no new sheet schema needed). The referenced
+`crtc-audit/claude-code-implementation-brief-2026-09-20.md` file does not
+exist anywhere in this repository (checked both branches and full git
+history) — see `.agent/HANDOFF.md` for what that means for verification.
+`python3 -m pytest -q` → 371 passed, 0 failed (run in this session).
+
 ## OPEN PRODUCT REQUIREMENTS (owner-requested 2026-09-20, not started — check this before closing out any "done" milestone)
 
 1. **Pluggable payment processor — not Stripe-only.** Owner wants the POS
