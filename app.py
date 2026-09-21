@@ -134,8 +134,8 @@ _PWA_HEAD_INJECTION = """
         if (head.querySelector('[data-crtc-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/icon-192.png', sizes: '192x192', type: 'image/png'}],
-            ['link', {rel: 'apple-touch-icon', href: './app/static/icon-192.png'}],
+            ['link', {rel: 'icon', href: './app/static/turnkey-logo.svg', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/turnkey-logo.svg'}],
             ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
