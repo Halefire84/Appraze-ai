@@ -858,3 +858,95 @@ Every Admin section should explain:
 
 ### Claude Code handoff
 Before implementation, Claude must inspect the current repo and existing settings/profile/account/payment code, then implement this requirement without breaking existing functionality. Run actual syntax/tests after changes and report exact commands/results. Update this handoff with the implementation and validation status. Do not claim tests passed unless they were actually executed.
+
+
+## 2026-09-21 — Final rebrand to Appraze™ + trademark/memorial/watermark pass
+
+### Where this came from
+Continuing from yesterday's branding saga (TURNKEY → LLAVE Business OS →
+BUSINESS OS, none of it fully settled or consistently applied — TURNKEY
+was still live in every `pages/*.py` title). The owner supplied two
+explicit Claude Code prompts this session: a final rebrand decision
+("Appraze", tagline "Complete Resale Business Suite", company stays
+Cooper River Trading Co.) and a trademark-marking + memorial-tribute +
+watermark pass. See `APPRAZE_BRAND.md` for the canonical brand record —
+it supersedes `CRTC_NAME.md` (LLAVE) and `BUSINESS_OS_BRAND.md` (kept for
+history, marked superseded).
+
+### What changed — rebrand (commit `66e016d`)
+- `app.py`: page title, sidebar brand block, main header, footer, PWA
+  head-injection script (icon links + manifest reference), CSS hooks and
+  `data-*` attributes all renamed off "BUSINESS OS"/"llave"/"crtc" onto
+  Appraze.
+- `auth.py`: both login-screen headers (`render_login_gate` and the
+  actually-used `require_auth` gate) now say "Appraze™". Left
+  `CRTC_ADMIN_USERNAME` / `CRTC_ADMIN_PASSWORD_HASH` secret/env-var names
+  untouched — not user-facing, and renaming them would break every
+  existing Streamlit Secrets configuration without any visible benefit.
+- All nine `pages/*.py`: page_title/st.title renamed from TURNKEY to
+  Appraze.
+- `static/manifest.json`: name/short_name/description updated; icons now
+  point at the pre-existing generic `icon-192.png`/`icon-512.png`/
+  `icon-512-maskable.png` files. The retired `business-os-logo.svg` and
+  `llave-logo.svg` were deleted (nothing referenced them anymore). **New
+  Appraze wordmark/icon assets were referenced as "available and will be
+  supplied" but were not attached to this session — wire the real logo
+  into `static/` and `static/manifest.json` when it arrives.**
+- `README.md` title + "Complete Resale Business Suite" subtitle.
+
+### What changed — trademark/memorial/watermark (commit `b26b46b`)
+- Appraze™ on the first/most prominent mention per screen (app header,
+  sidebar, login, README, DEPLOY.md heading, every page title, PWA
+  manifest `name`); plain "Appraze" elsewhere.
+- Memorial header block ("In memory of my father, Christopher Hale, who
+  tracked trucks in C++ before I ever tracked a deal.") added to
+  `app.py`'s docstring and prepended as a comment block to every other
+  Streamlit entry point (`pages/*.py`, all nine) and to
+  `stripe_webhook_server.py` (the one other standalone runnable service).
+  A new **About** tab in `app.py` shows the same line under "In Memory"
+  for end users.
+- Non-functional `_APPRAZE_BUILD_ATTRIBUTION` provenance constants (same
+  build UUID `65d37b35-6a3b-480b-9d16-8274210530dc`) added to
+  `finance.py`, `storage.py`, and `app.py`. `app.py` checks at startup
+  that all three match; on mismatch it shows a playful, non-blocking
+  banner ("...cursed. Good luck out there.") and otherwise fails open —
+  it never disables a feature, deletes data, or phones home.
+- Easter egg: typing "christopher hale" into the Deal Dashboard's main
+  search box pops an `st.dialog` with the dedication line.
+
+### Validation status
+- `python3 -m pytest -v` → **367 passed, 0 failed** (run twice: once after
+  the rebrand commit, once after the trademark/memorial/watermark
+  commit). 11 pre-existing `DeprecationWarning`s from `starlette`/`httpx2`
+  dependencies, unrelated to this change.
+- `python3 -m py_compile` on every touched file — clean.
+- **Actually launched the app** (`streamlit run app.py`) against a
+  throwaway local `.streamlit/secrets.toml` (gitignored, deleted after
+  the test) and drove it with Playwright/Chromium: logged in, confirmed
+  the sidebar/header/login screen read "Appraze™", opened the new About
+  tab and confirmed the In Memory section renders, typed "christopher
+  hale" into the search box and confirmed the tribute dialog pops, and
+  navigated to a sub-page to confirm its browser-tab `<title>` reads
+  "Appraze — Opportunity Radar". No tracebacks in the server log; no
+  tamper banner shown (watermark intact, as expected).
+
+### Known limitations / next return point
+- Real Appraze wordmark/app-icon assets are still outstanding — current
+  PWA/sidebar icon is the old generic placeholder PNG. Wire in the real
+  logo (and update `APPRAZE_BRAND.md`'s "Visual direction" section) when
+  it's supplied.
+- Trademark clearance has not been performed (same caveat that applied to
+  the retired LLAVE name) — working brand only.
+- This was a branding-only pass per the owner's explicit prompts; no
+  functional/financial logic was touched. The P0/P1 hardening findings
+  from the 2026-09-20 "New Master Development Direction" simulation
+  campaign (canonical decision engine, Stripe webhook replay/refund
+  correctness, category-mismatch pipeline fix, SKU integrity, financial
+  input validation, buyer-premium unit normalization) already have a
+  dedicated regression suite at `tests/test_p0_regression.py` (F01–F13,
+  all currently passing) from the prior session — that work was **not**
+  re-verified end-to-end as part of this branding pass beyond confirming
+  its tests still pass; a full audit against the master-direction
+  checklist (security review, mobile/desktop deployment readiness,
+  `.agent/HANDOFF.md` architecture doc) is still open. See
+  `.agent/HANDOFF.md` (new, this session) for that summary.
