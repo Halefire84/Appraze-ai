@@ -418,6 +418,7 @@ tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai, tab_abou
 
 @st.dialog("In Memory")
 def _christopher_hale_tribute():
+    st.image("static/christopher-hale.png", width=160)
     st.markdown(
         "*In memory of my father, Christopher Hale, who tracked trucks in "
         "C++ before I ever tracked a deal.*"
@@ -1179,11 +1180,26 @@ with tab_about:
     )
     st.markdown("---")
     st.markdown("#### In Memory")
-    st.markdown(
-        "*In memory of my father, Christopher Hale, who tracked trucks in "
-        "C++ before I ever tracked a deal.*"
-    )
-    st.caption("© 2026 Christopher Hale / Cooper River Trading Co.")
+    mem_col1, mem_col2 = st.columns([1, 3])
+    with mem_col1:
+        st.image("static/christopher-hale.png", width=180)
+    with mem_col2:
+        st.markdown(
+            "*In memory of my father, Christopher Hale, who tracked trucks "
+            "in C++ before I ever tracked a deal.*"
+        )
+        st.caption("© 2026 Christopher Hale / Cooper River Trading Co.")
+
+    st.markdown("---")
+    st.markdown("#### For the Future")
+    fut_col1, fut_col2 = st.columns([1, 3])
+    with fut_col1:
+        st.image("static/family.jpg", width=180)
+    with fut_col2:
+        st.markdown(
+            "*Built for my family, and for the next generation of Cooper "
+            "River Trading Co.*"
+        )
 
 st.markdown("---")
 st.caption("Appraze · Complete Resale Business Suite · Built for buying, valuing, managing, and selling physical goods")
