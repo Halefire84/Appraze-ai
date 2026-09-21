@@ -99,7 +99,7 @@ _PWA_HEAD_INJECTION = """
         if (head.querySelector('[data-appraze-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/appraze-logo.svg', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'icon', href: './app/static/appraze-logo.svg', sizes: '192x192', type: 'image/svg+xml'}],
             ['link', {rel: 'apple-touch-icon', href: './app/static/appraze-logo.svg'}],
             ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
