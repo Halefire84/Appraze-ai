@@ -2,8 +2,29 @@
 
 Read this first. It is meant to stand on its own, without conversation
 history. For deep narrative detail on any item below, see
-`CRTC_HANDOFF.md` (chronological session log, ~900 lines) and
-`APPRAZE_BRAND.md` (brand record).
+`CRTC_HANDOFF.md` (chronological session log, ~900 lines),
+`APPRAZE_BRAND.md` (brand record), `COMPETITIVE-GAPS.md` (sourced
+market research), and `DOMINANCE-ROADMAP.md` (proposed differentiators,
+not yet built).
+
+## Repo visibility
+
+The GitHub repo was public through 2026-09-21 and the owner was advised
+to switch it to private (source contains real competitive-advantage
+logic now) — **confirm it's actually private** before assuming any
+secrecy about pricing logic, decision math, or the roadmap doc holds.
+Note: private repos get a limited monthly GitHub Actions minutes
+allowance vs. unlimited on public — relevant to the Android CI issue
+below.
+
+## Business/monetization posture — read before touching Pricing or auth
+
+The owner's explicit instruction (2026-09-21): **do not take this live
+for real customers or push monetization until the product is verified
+"better than good."** Nothing today enables public signup or removes
+that gate — see "Subscription billing" below, which is *still* blocked
+on the same auth-gate issue as before. Don't wire public signup as a
+side effect of some other task without this being the explicit ask.
 
 ## What this product is
 
@@ -148,6 +169,40 @@ Two separate things, don't conflate them:
   repo. See `legal/README.md`.
 
 Both are explicitly marked as starting templates, not legal advice.
+
+## Pricing tiers, competitive research, and UI theme — 2026-09-21 (second half of the day)
+
+- Pricing renamed/restructured: "Hunter" → **"Appraiser"** (flagship,
+  now $59/mo, key `"appraiser"` not `"hunter"` in `subscription_plans.py`
+  — if you're grepping for the old key you'll find nothing), and a new
+  **"Analyst"** tier ($35/mo) added between Scout and Appraiser. Round-
+  dollar pricing (no `.99`) is a deliberate, documented brand choice —
+  see the module docstring in `subscription_plans.py` before "fixing"
+  it back to `.99` pricing.
+- `COMPETITIVE-GAPS.md` — sourced research on 7 named competitors
+  (pricing, features, complaints, core user), plus a ranked "where they
+  all bleed" section. Every claim is sourced or marked UNKNOWN. Use this
+  before making any other pricing/positioning claim rather than
+  guessing.
+- `DOMINANCE-ROADMAP.md` — 5 proposed differentiators (ranked
+  recommendation: Outcome Learning Loop → Photo-to-Verdict Loop →
+  Probabilistic Profit Distributions, with Estate-Sale Field Mode and an
+  AI Sourcing Agent queued behind those). **Proposal only — not built.**
+  Don't start building any of it without the owner picking a direction
+  first; three major unreviewed features going in at once is exactly
+  the risk this repo's P0-first pattern exists to avoid.
+- **`ui_theme.py`** is now the one place app-wide styling lives —
+  `inject_theme()`, called right after `st.set_page_config()` on every
+  page including `app.py` itself. There *was* a real bug here: styling
+  used to live only in `app.py`'s own script, so any page opened
+  directly (a bookmark, a shared link, a fresh tab) — never having run
+  `app.py` first — got none of it. Confirmed both the bug and the fix
+  with a direct-navigation Playwright test. If you add a new page, call
+  `inject_theme()` on it or it'll look like unstyled default Streamlit.
+- `.streamlit/config.toml` now sets `toolbarMode = "minimal"` (hides
+  Streamlit's own Deploy button/hamburger menu) and a `[theme]` block
+  matching the brand palette — this is most of what stopped the app
+  from reading as "a webpage."
 
 ## Test commands
 
