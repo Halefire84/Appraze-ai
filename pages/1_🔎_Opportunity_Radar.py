@@ -1,4 +1,4 @@
-"""TURNKEY Opportunity Radar command center."""
+"""BUSINESS OS Opportunity Radar command center."""
 import pandas as pd
 import streamlit as st
 
@@ -9,10 +9,10 @@ from opportunity_store import save_opportunity, remove_opportunity
 from source_registry import default_source_registry
 from source_search import public_search_url
 
-st.set_page_config(page_title="TURNKEY — Opportunity Radar", page_icon="🔎", layout="wide")
+st.set_page_config(page_title="BUSINESS OS — Opportunity Radar", page_icon="🔎", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("🔎 TURNKEY Opportunity Radar")
+st.title("🔎 BUSINESS OS Opportunity Radar")
 st.caption("Find overlooked value, rank the leads, verify the economics, and save the ones worth hunting.")
 
 registry = default_source_registry()
