@@ -34,10 +34,22 @@ class _Reran(Exception):
 
 
 def _real_admin_secrets(password: str) -> dict:
+    """Legacy-format secrets (SHA-256) -- exercises the backward-compat
+    path every already-deployed CRTC_ADMIN_PASSWORD_HASH secret uses."""
     import hashlib
     return {
         "CRTC_ADMIN_USERNAME": "owner",
         "CRTC_ADMIN_PASSWORD_HASH": hashlib.sha256(password.encode()).hexdigest(),
+    }
+
+
+def _bcrypt_admin_secrets(password: str) -> dict:
+    """New-format secrets (bcrypt) -- what AUTH_SETUP.md now tells a
+    deployer to generate."""
+    import bcrypt
+    return {
+        "CRTC_ADMIN_USERNAME": "owner",
+        "CRTC_ADMIN_PASSWORD_HASH": bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
     }
 
 
@@ -163,6 +175,43 @@ class TestMarkPaid(unittest.TestCase):
         mock_requests.post.side_effect = Exception("network down")
 
         self.assertFalse(mark_paid("alice", plan="hunter"))
+
+
+class TestBcryptAdminAuth(unittest.TestCase):
+    """2026-09-21 auth hardening: bcrypt is the new format,
+    SHA-256 stays supported for already-deployed secrets."""
+
+    @mock.patch("auth.st")
+    def test_bcrypt_secret_is_recognized_as_configured(self, mock_st):
+        secrets = _bcrypt_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        self.assertTrue(_admin_credentials_configured())
+
+    @mock.patch("auth.st")
+    def test_bcrypt_correct_password_succeeds(self, mock_st):
+        secrets = _bcrypt_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        result = _admin_login("owner", "correct horse battery staple")
+        self.assertTrue(result.success)
+        self.assertEqual(result.plan, "admin")
+
+    @mock.patch("auth.st")
+    def test_bcrypt_wrong_password_fails(self, mock_st):
+        secrets = _bcrypt_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        result = _admin_login("owner", "wrong password")
+        self.assertFalse(result.success)
+
+    @mock.patch("auth.st")
+    def test_legacy_sha256_secret_still_works_unchanged(self, mock_st):
+        # Backward compatibility: an already-deployed secret in the old
+        # format must keep authenticating exactly as before -- migrating
+        # to bcrypt must never lock an existing deployment's owner out.
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        self.assertTrue(_admin_credentials_configured())
+        result = _admin_login("owner", "correct horse battery staple")
+        self.assertTrue(result.success)
 
 
 class TestRequireAuth(unittest.TestCase):

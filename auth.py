@@ -13,16 +13,44 @@ Production model:
 - Optional tester signup/login remains available for future paid users.
 
 Passwords are SHA-256 hashed client-side before ever leaving the app for
-Apps Script authentication. The production Admin password is compared
-against a SHA-256 hash stored in Streamlit secrets.
+Apps Script authentication (the tester signup/login path -- see the
+2026-09-21 note below, this path is currently unreachable dead code, no
+page calls it). The production Admin password (the only password path
+actually reachable today) is checked with bcrypt -- see
+_admin_login()/_admin_credentials_configured() below.
+
+2026-09-21 auth hardening: migrated the Admin account's password check
+from unsalted SHA-256 (vulnerable to rainbow-table attacks if the stored
+hash ever leaked) to bcrypt (per-hash random salt, tunable work factor).
+Scoped to the Admin path only because it's the only one any live page
+actually calls -- render_login_gate()/login()/signup() below are real,
+tested code but nothing imports or calls them from app.py or any
+pages/*.py file today, so their SHA-256 usage, while still worth fixing
+before public signup ever gets wired in, isn't reachable by an attacker
+right now. See BACKLOG.md / .agent/HANDOFF.md.
+
+_admin_credentials_configured() accepts EITHER a bcrypt hash (the new
+format, starts with $2a$/$2b$/$2y$) OR a legacy 64-char SHA-256 hex
+hash, so an existing deployment's CRTC_ADMIN_PASSWORD_HASH secret keeps
+working unchanged -- migrating to bcrypt requires the deployment owner
+to regenerate that secret (see AUTH_SETUP.md), and forcing that
+regeneration by shipping a bcrypt-only check would have locked the
+owner out of their own app the moment this deployed. Legacy SHA-256
+verification is still constant-time (hmac.compare_digest) and still
+works; it's just not what new secrets should be generated with.
 """
 
 import hashlib
 import hmac
+import re
+import time
 from dataclasses import dataclass
 
+import bcrypt
 import requests
 import streamlit as st
+
+_BCRYPT_HASH_RE = re.compile(r"^\$2[aby]\$\d{2}\$.{53}$")
 
 
 @dataclass
@@ -70,6 +98,10 @@ def _token() -> str:
     return token
 
 
+def _is_legacy_sha256_hash(value: str) -> bool:
+    return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
 def _admin_credentials_configured() -> bool:
     """Return True when the dedicated shared Admin login is configured.
 
@@ -77,13 +109,16 @@ def _admin_credentials_configured() -> bool:
       CRTC_ADMIN_USERNAME
       CRTC_ADMIN_PASSWORD_HASH
 
-    CRTC_ADMIN_PASSWORD_HASH must be SHA-256 of the desired password.
+    CRTC_ADMIN_PASSWORD_HASH is either a bcrypt hash (new, preferred --
+    see AUTH_SETUP.md) or a legacy 64-char SHA-256 hex hash (still
+    accepted so an existing deployment's secret keeps working unchanged).
     Keeping the hash in deployment secrets means the password is never
-    committed to GitHub. A setup helper is documented in AUTH_SETUP.md.
+    committed to GitHub.
     """
     username = _secret("CRTC_ADMIN_USERNAME").strip()
-    password_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
-    return bool(username and len(password_hash) == 64)
+    password_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip()
+    valid_format = bool(_BCRYPT_HASH_RE.match(password_hash)) or _is_legacy_sha256_hash(password_hash.lower())
+    return bool(username and valid_format)
 
 
 def _admin_login(username: str, password: str) -> AuthResult | None:
@@ -96,12 +131,22 @@ def _admin_login(username: str, password: str) -> AuthResult | None:
         return None
 
     configured_username = _secret("CRTC_ADMIN_USERNAME").strip().lower()
-    configured_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
+    # NOT lowercased here -- a bcrypt hash's alphabet is case-sensitive
+    # (unlike hex SHA-256, where case never mattered). Branch on format
+    # before touching case.
+    configured_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip()
     supplied_username = str(username).strip().lower()
 
     if supplied_username != configured_username:
         return None
-    if not hmac.compare_digest(_hash_password(password), configured_hash):
+
+    if _BCRYPT_HASH_RE.match(configured_hash):
+        password_ok = bcrypt.checkpw(password.encode("utf-8"), configured_hash.encode("utf-8"))
+    else:
+        # Legacy path -- still constant-time, still works, just not what
+        # a freshly-generated secret should use. See AUTH_SETUP.md.
+        password_ok = hmac.compare_digest(_hash_password(password), configured_hash.lower())
+    if not password_ok:
         return AuthResult(False, error="incorrect password")
 
     return AuthResult(

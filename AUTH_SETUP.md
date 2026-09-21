@@ -12,16 +12,27 @@ Configure these in the Streamlit deployment's secrets. **Do not put the password
 
 ```toml
 CRTC_ADMIN_USERNAME = "admin"
-CRTC_ADMIN_PASSWORD_HASH = "<SHA-256 hash of your chosen production password>"
+CRTC_ADMIN_PASSWORD_HASH = "<bcrypt hash of your chosen production password>"
 ```
 
-Generate the hash on a trusted device, then paste only the resulting hash into the Streamlit secret. Example with Python/Termux:
+Generate the hash on a trusted device, then paste only the resulting hash into the Streamlit secret:
 
 ```bash
-python -c "import hashlib; print(hashlib.sha256(b'YOUR_NEW_PASSWORD').hexdigest())"
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'YOUR_NEW_PASSWORD', bcrypt.gensalt()).decode())"
 ```
 
+(needs `pip install bcrypt` on whatever machine you run this on — it's
+already in `requirements.txt` for the deployed app itself.)
+
 Use a unique production password and do not reuse a password from another service. The development/demo bootstrap password discussed during development is **not a production credential and is intentionally not recorded in this repository**.
+
+**Migrating an existing deployment (2026-09-21):** the Admin password
+check now uses bcrypt instead of unsalted SHA-256, which is meaningfully
+safer if the stored hash ever leaked. This is backward compatible — an
+already-configured `CRTC_ADMIN_PASSWORD_HASH` secret (the old SHA-256
+hex format) keeps working exactly as before, nothing breaks on deploy.
+When convenient, regenerate it with the bcrypt command above and update
+the secret to get the stronger hash; there's no forced cutover date.
 
 ## Demo
 
