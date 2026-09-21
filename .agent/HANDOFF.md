@@ -135,26 +135,77 @@ re-pasted/re-deployed from the current `AppsScript_Code.gs` first**, or
 the old deployed version won't understand the new `plan` parameter at
 all).
 
-**The real gap: `auth.require_auth()` — the login gate every page
-actually calls — only supports the single shared Admin account.** There
-is no live way for a member of the public to sign up for their own
-account today. `auth.signup()` / `render_login_gate()` (public
-signup/tester login) exist, are unit-tested, and talk to the same Apps
-Script backend, but nothing calls them from any page. So right now the
-Pricing page's Subscribe buttons are reachable, and will correctly
-record a plan against whoever's logged in — but that's only ever the
-shared Admin account, which already has full access and nothing to
-gain. If the intent is a real multi-tenant SaaS (which the Pricing
-page, the public landing artifact, and `pages/9_📜_Legal.py`'s Terms of
-Service all already assume), **wiring public signup into the real entry
-point is the next concrete step** — and it's its own scope (workspace/
-data isolation for a new signup, whether Free-tier limits are actually
-enforced anywhere, etc.), not something to bolt on casually. See
-`LAUNCH_CHECKLIST.md` section 2 for the full writeup.
+**Update, 2026-09-21 late (beta-access sprint): `require_auth()` now
+also supports a second, narrower path — invite-code-gated beta signup —
+see the new section below. `auth.signup()` / `render_login_gate()`
+(the original public tester signup/login) are still real, unit-tested,
+dead code — still nothing calls them from any page.** Beta accounts are
+a deliberately smaller mechanism (ten single-use codes, not an open
+public signup form) built to unblock a specific 10-person beta with a
+hard next-day deadline; they are NOT the same thing as real multi-tenant
+public signup. If the intent afterward is a real public SaaS signup
+(which the Pricing page, the public landing artifact, and
+`pages/9_📜_Legal.py`'s Terms of Service all already assume), **wiring
+`auth.signup()`/`render_login_gate()` (or a hardened equivalent) into
+the real entry point is still the next concrete step** — and it's its
+own scope (workspace/data isolation for a new signup, whether Free-tier
+limits are actually enforced anywhere, rate-limiting/abuse prevention
+now that anyone with the URL could reach a signup form, etc.), not
+something to bolt on casually. See `LAUNCH_CHECKLIST.md` section 2 for
+the full writeup.
 
 Also still true: `subscription_plans.feature_enabled()` exists and is
 unit-tested, but nothing in the app calls it — buying a plan today
 records the purchase but doesn't unlock or restrict anything yet.
+
+## Beta access, feedback, visit counter — 2026-09-21 late (beta-access sprint)
+
+Built same-night for a 2026-09-22 beta with 10 real users, on top of an
+Admin-only bcrypt-hardened login (see previous section's history and
+`AUTH_SETUP.md` for the SHA-256→bcrypt migration, backward compatible,
+no forced cutover).
+
+- **Beta invite codes**: `CRTC_BETA_INVITE_CODES` secret (comma-separated)
+  turns on a "Beta Sign Up" tab in `require_auth()`. Each code is
+  single-use. Accounts persist to a shared `beta_accounts` table via the
+  same Apps Script `save_data`/`load_data` backend `storage.py` already
+  uses — no new external dependency. bcrypt passwords from the start (no
+  legacy path needed, these are new accounts). Beta accounts get
+  `is_paid=True`/`plan="beta"` and never call `mark_paid()`/touch
+  Stripe — full free access, and since there's no plan-based feature
+  gating anywhere in the app yet, that's sufficient on its own. See
+  `auth._beta_signup()`/`_beta_login()`/`_beta_enabled()`.
+- **Why invite codes and not wiring the existing public `signup()`**:
+  smaller blast radius under time pressure — only someone holding one of
+  ten codes can ever create an account, versus opening a signup form (with
+  its own unaudited-tonight SHA-256 path) to the whole internet. Reuses
+  proven storage instead of inventing a new persistence mechanism.
+- **Known limitation**: two people redeeming different codes in the same
+  instant could race on the shared accounts table (last-write-wins, same
+  tradeoff `storage.py`'s own docstring already accepts for a
+  solo/small-team tool) — fine for 10 people over one day, not for real
+  scale. If beta signup needs to stay open longer or scale up, this
+  should move to something with real write serialization.
+- **Visit counter**: `auth._record_visit_once()`/`get_visit_count()` — a
+  rough, best-effort total-visits count (one shared `visit_counter`
+  table, same backend), incremented once per browser session the moment
+  `require_auth()` runs, whether or not the visitor ever logs in. Fails
+  silently on any storage error — never blocks login.
+- **Feedback**: `pages/10_🐛_Feedback.py` — any logged-in user (beta or
+  Admin) can submit a free-text bug report/feedback message, appended to
+  a shared `beta_feedback` table (same backend again). Admin sees total
+  visits and the full feedback log on the same page. Readable straight
+  out of the Google Sheet too, no dashboard needed.
+- **Deploy blocker still open**: none of this reaches production until
+  `claude/continue-from-yesterday-3zx97l` (or its changes) lands on
+  `main` — Streamlit Cloud auto-deploys from `main` only. Not resolved
+  this session; needs the repo owner's explicit call (see
+  `reports/latest-session-report.md`, gitignored, for the live invite
+  codes and full session writeup — do not put real invite codes in this
+  file or anywhere else in git).
+- **Streamlit Cloud public/private setting**: still unverified this
+  session too — no dashboard access from this environment. Check
+  Settings → Sharing before beta.
 
 ## Legal / business paperwork
 
@@ -228,14 +279,24 @@ Chromium is pre-installed in this environment at
 ## PRODUCT REQUIREMENTS" section at the top of `CRTC_HANDOFF.md`, and
 ## `LAUNCH_CHECKLIST.md` for the full launch-readiness writeup)
 
-- **Public signup isn't wired into the real login gate** — see
-  "Subscription billing" above. This is the biggest open item for
-  actually launching Appraze as a SaaS other people can pay for.
+- **Real public signup still isn't wired into the login gate** — see
+  "Subscription billing" and "Beta access, feedback, visit counter"
+  above. Beta invite codes (2026-09-21 late) unblock a 10-person beta
+  only; they are not open public signup. This is still the biggest open
+  item for actually launching Appraze as a SaaS anyone can pay for.
 - **The production Streamlit Cloud app may be set to private** — a
   direct check on 2026-09-21 showed the production URL redirecting to
-  Streamlit's own viewer-login gate rather than the app. Confirm/fix in
-  the app's Streamlit Cloud settings before sharing any public link.
-  See `LAUNCH_CHECKLIST.md` section 0.
+  Streamlit's own viewer-login gate rather than the app. Still
+  unverified as of 2026-09-21 late (no Streamlit Cloud dashboard access
+  from this environment either session). Confirm/fix in the app's
+  Streamlit Cloud settings before sharing any public link. See
+  `LAUNCH_CHECKLIST.md` section 0.
+- **None of tonight's (2026-09-21 late) work is deployed** —
+  `claude/continue-from-yesterday-3zx97l` is pushed but not merged to
+  `main`, and Streamlit Cloud auto-deploys from `main` only. This is the
+  actual blocker for tomorrow's beta functioning at all; resolving it
+  needs the repo owner's explicit go-ahead (never pushed to `main`
+  unilaterally — see this session's branch policy).
 - **`AppsScript_Code.gs` needs re-deploying** after the 2026-09-21 `plan`
   column migration, or subscription purchases won't actually save a plan
   server-side. Can't be verified from this environment (no live Apps
