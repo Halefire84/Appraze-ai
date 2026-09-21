@@ -5,8 +5,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f7f9fc",
-  "theme_color": "#f7f9fc",
+  "background_color": "#ffffff",
+  "theme_color": "#0b2548",
   "icons": [
     {
       "src": "llave-logo.svg",
