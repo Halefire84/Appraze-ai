@@ -1,3 +1,8 @@
+> **SUPERSEDED 2026-09-21.** The product name is now **Appraze** — see
+> [`APPRAZE_BRAND.md`](APPRAZE_BRAND.md) for the current, final brand
+> record. "BUSINESS OS" as a product name is retired; this file is kept
+> for history only.
+
 # BUSINESS OS — Brand & Product Positioning
 
 ## Core Position

@@ -30,7 +30,7 @@ from storage import load_table, save_table
 # PAGE CONFIG + GLOBAL STYLE
 # --------------------------------------------------------------------------
 st.set_page_config(
-    page_title="BUSINESS OS",
+    page_title="Appraze",
     page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -38,8 +38,8 @@ st.set_page_config(
 
 DARK_CSS = """
 <style>
-    .llave-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
-    .llave-brand { padding: 6px 0 4px; }
+    .appraze-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
+    .appraze-brand { padding: 6px 0 4px; }
     /* ---- base ---- */
     .stApp {
         background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
@@ -131,11 +131,11 @@ _PWA_HEAD_INJECTION = """
 (function () {
     try {
         var head = window.parent.document.head;
-        if (head.querySelector('[data-crtc-pwa]')) return;
+        if (head.querySelector('[data-appraze-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/llave-logo.svg', sizes: '192x192', type: 'image/png'}],
-            ['link', {rel: 'apple-touch-icon', href: './app/static/llave-logo.svg'}],
+            ['link', {rel: 'icon', href: './app/static/icon-192.png', sizes: '192x192', type: 'image/png'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/icon-192.png'}],
             ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
@@ -143,7 +143,7 @@ _PWA_HEAD_INJECTION = """
         ];
         tags.forEach(function (t) {
             var el = window.parent.document.createElement(t[0]);
-            el.setAttribute('data-crtc-pwa', '1');
+            el.setAttribute('data-appraze-pwa', '1');
             for (var k in t[1]) el.setAttribute(k, t[1][k]);
             head.appendChild(el);
         });
@@ -213,7 +213,7 @@ if "editor_key" not in st.session_state:
 
 
 # --------------------------------------------------------------------------
-# BUSINESS PROFILE — document identity belongs to the logged-in CRTC customer
+# BUSINESS PROFILE — document identity belongs to the logged-in Appraze customer
 # --------------------------------------------------------------------------
 BUSINESS_PROFILE_DEFAULTS = {
     "Business Name": "",
@@ -255,9 +255,9 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown('<div class="llave-brand"><img src="./app/static/business-os-logo.svg" alt="BUSINESS OS"></div>', unsafe_allow_html=True)
-    st.markdown("### 🔑 BUSINESS OS")
-    st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
+    st.markdown('<div class="appraze-brand"><img src="./app/static/icon-192.png" alt="Appraze"></div>', unsafe_allow_html=True)
+    st.markdown("### 🔑 Appraze™")
+    st.caption("Complete Resale Business Suite")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
         logout()
@@ -339,8 +339,8 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## 🔑 BUSINESS OS")
-st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
+st.markdown("## 🔑 Appraze™")
+st.caption("Complete Resale Business Suite")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
 df = recalc(st.session_state.deals)
@@ -1122,4 +1122,4 @@ with tab_ai:
                 st.session_state.ai_last_result = None
 
 st.markdown("---")
-st.caption("BUSINESS OS · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
+st.caption("Appraze · Complete Resale Business Suite · Built for buying, valuing, managing, and selling physical goods")

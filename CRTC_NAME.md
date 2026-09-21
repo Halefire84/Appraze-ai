@@ -1,3 +1,7 @@
+> **SUPERSEDED 2026-09-21.** The product name is now **Appraze** — see
+> [`APPRAZE_BRAND.md`](APPRAZE_BRAND.md) for the current, final brand
+> record. This file is kept for history only.
+
 # LLAVE Business OS — Brand Record
 
 **Product-facing name:** LLAVE Business OS

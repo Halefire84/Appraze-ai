@@ -1,9 +1,13 @@
-# LLAVE Business OS
+# Appraze™
 
-LLAVE is a professional retail and resale business system for tracking, filtering, and evaluating
-resale/auction deals across CTBids, eBay, HiBid, Facebook Marketplace,
-Mercari, Chairish, and Etsy — plus inventory margin tracking, market comps
-valuation, an AI item analyzer, and Stripe point-of-sale checkout.
+### Complete Resale Business Suite
+
+Appraze is a professional retail and resale business system — deal math,
+inventory, and listing for resellers — for tracking, filtering, and
+evaluating resale/auction deals across CTBids, eBay, HiBid, Facebook
+Marketplace, Mercari, Chairish, and Etsy — plus inventory margin tracking,
+market comps valuation, an AI item analyzer, and Stripe point-of-sale
+checkout.
 (`app.py`'s actual tabs, as of 2026-09-20: Deal Dashboard, Profit
 Calculator, Inventory, Suppliers, Charge Customer, AI Analyzer. A few
 other modules below implement invoice-import/mail-tracking features that

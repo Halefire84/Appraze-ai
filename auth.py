@@ -1,7 +1,8 @@
 """
-Cooper River Trading Co. — CRTC Auth Module
+Appraze — Auth Module
 ------------------------------------------------
-Authentication for the CRTC resale intelligence app.
+Authentication for the Appraze resale intelligence app, by Cooper River
+Trading Co. (CRTC).
 
 Production model:
 - One shared Admin login for the owners (you + Ashley).
@@ -190,7 +191,7 @@ def render_login_gate() -> bool:
     if st.session_state.get("authenticated"):
         return True
 
-    st.markdown("## 🪙 CRTC")
+    st.markdown("## 🪙 Appraze™")
     st.caption("Cooper River Trading Co. — private workspace")
 
     tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
@@ -289,7 +290,7 @@ def require_auth() -> None:
     if st.session_state.get("authenticated"):
         return
 
-    st.markdown("## 🪙 CRTC")
+    st.markdown("## 🪙 Appraze™")
     st.caption("Cooper River Trading Co. — sign in to continue")
 
     if not _admin_credentials_configured():

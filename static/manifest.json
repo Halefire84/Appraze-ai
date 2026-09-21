@@ -1,7 +1,7 @@
 {
-  "name": "Business OS",
-  "short_name": "Business OS",
-  "description": "Professional retail and resale business software with POS, inventory, valuation, purchasing, listings, payments, and analytics",
+  "name": "Appraze",
+  "short_name": "Appraze",
+  "description": "Appraze — Complete Resale Business Suite: deal math, inventory, and listing for resellers, with POS, valuation, purchasing, listings, payments, and analytics",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -9,21 +9,21 @@
   "theme_color": "#0b2548",
   "icons": [
     {
-      "src": "business-os-logo.svg",
+      "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "llave-logo.svg",
+      "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "llave-logo.svg",
+      "src": "icon-512-maskable.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ]
