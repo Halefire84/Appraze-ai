@@ -30,47 +30,49 @@ from storage import load_table, save_table
 # PAGE CONFIG + GLOBAL STYLE
 # --------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Appraze",
-    page_icon="🪙",
+    page_title="TURNKEY Business Ledger",
+    page_icon="🔑",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 DARK_CSS = """
 <style>
+    .turnkey-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
+    .turnkey-brand { padding: 6px 0 4px; }
     /* ---- base ---- */
     .stApp {
-        background: linear-gradient(180deg, #0b0f14 0%, #10151c 100%);
-        color: #e6e9ef;
+        background: linear-gradient(180deg, #f7f9fc 0%, #eef3f8 100%);
+        color: #172230;
     }
     section[data-testid="stSidebar"] {
-        background: #0d1117;
-        border-right: 1px solid #1f2733;
+        background: #ffffff;
+        border-right: 1px solid #d9e1ea;
     }
-    h1, h2, h3, h4 { color: #f2f4f8 !important; letter-spacing: -0.02em; }
+    h1, h2, h3, h4 { color: #172230 !important; letter-spacing: -0.02em; }
 
     /* ---- KPI cards ---- */
     .kpi-card {
-        background: linear-gradient(145deg, #141a23, #0f141b);
-        border: 1px solid #232c38;
+        background: linear-gradient(145deg, #ffffff, #f3f6fa);
+        border: 1px solid #d7e0ea;
         border-radius: 14px;
         padding: 18px 20px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+        box-shadow: 0 4px 18px rgba(31,52,73,0.10);
     }
     .kpi-label {
         font-size: 0.78rem;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: #8b96a5;
+        color: #5d6b7a;
         margin-bottom: 6px;
     }
     .kpi-value {
         font-size: 1.6rem;
         font-weight: 700;
-        color: #f7f9fc;
+        color: #172230;
     }
-    .kpi-sub { font-size: 0.8rem; color: #67e8a4; margin-top: 2px; }
-    .kpi-sub.neg { color: #f2607a; }
+    .kpi-sub { font-size: 0.8rem; color: #16804b; margin-top: 2px; }
+    .kpi-sub.neg { color: #c62f4a; }
 
     /* ---- pills / badges ---- */
     .badge {
@@ -93,12 +95,12 @@ DARK_CSS = """
     /* buttons */
     .stButton>button {
         border-radius: 10px;
-        border: 1px solid #2a3441;
-        background: #1a212b;
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
         color: #e6e9ef;
         font-weight: 600;
     }
-    .stButton>button:hover { border-color: #4d7cff; color: #4d7cff; }
+    .stButton>button:hover { border-color: #2563eb; color: #2563eb; }
 
     /* dataframe */
     div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
@@ -106,7 +108,7 @@ DARK_CSS = """
     /* metric containers spacing */
     .block-container { padding-top: 1.6rem; }
 
-    hr { border-color: #232c38; }
+    hr { border-color: #d7e0ea; }
 </style>
 """
 st.markdown(DARK_CSS, unsafe_allow_html=True)
@@ -134,10 +136,10 @@ _PWA_HEAD_INJECTION = """
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
             ['link', {rel: 'icon', href: './app/static/icon-192.png', sizes: '192x192', type: 'image/png'}],
             ['link', {rel: 'apple-touch-icon', href: './app/static/icon-192.png'}],
-            ['meta', {name: 'theme-color', content: '#0b0f14'}],
+            ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
-            ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'}],
+            ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'default'}],
         ];
         tags.forEach(function (t) {
             var el = window.parent.document.createElement(t[0]);
@@ -253,7 +255,8 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### 🪙 Appraze")
+    st.markdown('<div class="turnkey-brand"><img src="./app/static/turnkey-logo.svg" alt="TURNKEY Business Ledger"></div>', unsafe_allow_html=True)
+    st.markdown("### 🔑 TURNKEY")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
         logout()
@@ -335,7 +338,7 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## Appraze")
+st.markdown("## 🔑 TURNKEY Business Ledger")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
 df = recalc(st.session_state.deals)
@@ -1117,4 +1120,4 @@ with tab_ai:
                 st.session_state.ai_last_result = None
 
 st.markdown("---")
-st.caption("Appraze · built for Estate Auctions / eBay / HiBid / FB Marketplace / Mercari / Chairish / Etsy sourcing")
+st.caption("TURNKEY Business Ledger · built for buying, valuing, managing, and selling physical goods")

@@ -1,6 +1,6 @@
-# Appraze
+# TURNKEY Business Ledger
 
-A single-page Streamlit dashboard for tracking, filtering, and evaluating
+TURNKEY is a professional retail and resale business system for tracking, filtering, and evaluating
 resale/auction deals across CTBids, eBay, HiBid, Facebook Marketplace,
 Mercari, Chairish, and Etsy — plus inventory margin tracking, market comps
 valuation, an AI item analyzer, and Stripe point-of-sale checkout.

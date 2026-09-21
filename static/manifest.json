@@ -1,12 +1,12 @@
 {
-  "name": "Appraze",
-  "short_name": "Appraze",
-  "description": "Cooper River Trading Co. deal, inventory, and point-of-sale dashboard",
+  "name": "TURNKEY Business Ledger",
+  "short_name": "TURNKEY",
+  "description": "Professional retail and resale business software with POS, inventory, valuation, purchasing, listings, payments, and analytics",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0b0f14",
-  "theme_color": "#0b0f14",
+  "background_color": "#f7f9fc",
+  "theme_color": "#f7f9fc",
   "icons": [
     {
       "src": "icon-192.png",

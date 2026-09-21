@@ -1,9 +1,13 @@
-# CRTC Naming Standard
+# TURNKEY Business Ledger — Brand Record
 
-CRTC = Cooper River Trading Co.
+**Product-facing name:** TURNKEY Business Ledger
 
-Effective immediately, use **CRTC** as the product-facing name for the resale opportunity-intelligence system.
+**Short product name:** TURNKEY
 
-The repository remains `Halefire84/Appraze-ai` for continuity. A repository rename is intentionally deferred so existing deployment, links, and integrations are not broken.
+**Positioning:** Professional retail and resale business software with full POS, inventory management, purchasing, valuation, listings, payments, customer records, reporting, and opportunity intelligence.
 
-Use CRTC in new UI labels, documentation, roadmap language, and product references unless a legacy Appraze reference is required for compatibility.
+**Signature feature:** Holy Grail Finder — identifies potential listing errors, pricing anomalies, overlooked value, and other opportunity signals.
+
+**Repository:** `Halefire84/Appraze-ai` remains unchanged for continuity.
+
+New customer-facing UI, graphics, app metadata, and marketing should use TURNKEY. Internal module names, database keys, package identifiers, historical handoff filenames, and existing deployment URLs may retain legacy identifiers until separately migrated and tested.
