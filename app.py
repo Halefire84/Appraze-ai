@@ -424,6 +424,15 @@ def _christopher_hale_tribute():
         "C++ before I ever tracked a deal.*"
     )
 
+
+@st.dialog("🖖")
+def _live_long_and_prosper_tribute():
+    st.markdown("### Live long and prosper.")
+    st.markdown(
+        "*Christopher Hale loved this show almost as much as a good deal. "
+        "This one's for him.*"
+    )
+
 with tab_dash:
     st.markdown("#### Filters")
     f1, f2, f3, f4 = st.columns([1.2, 1.2, 1.2, 2])
@@ -438,6 +447,8 @@ with tab_dash:
 
     if search.strip().lower() == "christopher hale":
         _christopher_hale_tribute()
+    elif search.strip().lower() in ("live long and prosper", "engage"):
+        _live_long_and_prosper_tribute()
 
     filtered = df.copy()
     if platform_filter:
