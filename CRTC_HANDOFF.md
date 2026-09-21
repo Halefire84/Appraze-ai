@@ -1,7 +1,8 @@
 # CRTC — Project Handoff Point
 
 **Canonical repository:** Halefire84/Appraze-ai  
-**Product direction:** CRTC (Cooper River Trading Co.)  
+**Product:** Appraze  
+**Company:** Cooper River Trading Co. (CRTC)  
 **Last handoff:** 2026-09-20 (P0 hardening: canonical decision engine + webhook correctness)
 
 ## OPEN PRODUCT REQUIREMENTS (owner-requested 2026-09-20, not started — check this before closing out any "done" milestone)
