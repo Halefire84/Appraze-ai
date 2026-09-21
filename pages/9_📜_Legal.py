@@ -23,6 +23,14 @@ st.warning(
     "`[bracketed]` placeholder below with your own details first."
 )
 
+st.caption(
+    "Looking for back-office paperwork instead (an NDA, a contractor "
+    "agreement, a consignment/purchase agreement, a W-9 request letter)? "
+    "That's a separate template library in this repo's `legal/` folder — "
+    "not shown here since it's internal business paperwork, not something "
+    "app users need to read."
+)
+
 LAST_UPDATED = "September 21, 2026"
 
 tos_tab, privacy_tab, refund_tab = st.tabs(
