@@ -57,7 +57,7 @@ def _post(action: str, **fields) -> dict:
     return data if isinstance(data, dict) else {"success": False, "error": "invalid usage response"}
 
 
-def reserve_ai_call(username: str) -> UsageDecision:
+def reserve_ai_call(username: str, is_admin: bool = False) -> UsageDecision:
     """Atomically reserve one AI call before contacting Anthropic.
 
     A failed reservation means no provider request should be made.
@@ -65,7 +65,7 @@ def reserve_ai_call(username: str) -> UsageDecision:
     if not username.strip():
         return UsageDecision(False, "account identity is unavailable")
     try:
-        data = _post("reserve_ai_usage", username=username.strip().lower())
+        data = _post("reserve_ai_usage", username=username.strip().lower(), is_admin="true" if is_admin else "false")
     except Exception:
         return UsageDecision(False, "AI usage service is temporarily unavailable")
     if not data.get("success"):
@@ -118,9 +118,9 @@ def release_ai_call(username: str) -> dict:
         return {"success": False, "error": "usage accounting temporarily unavailable"}
 
 
-def usage_summary(username: str) -> dict:
+def usage_summary(username: str, is_admin: bool = False) -> dict:
     """Return the current server-side usage summary for an authenticated user."""
     try:
-        return _post("get_ai_usage", username=username.strip().lower())
+        return _post("get_ai_usage", username=username.strip().lower(), is_admin="true" if is_admin else "false")
     except Exception:
         return {"success": False, "error": "usage service temporarily unavailable"}
