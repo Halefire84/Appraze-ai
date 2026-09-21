@@ -1,6 +1,6 @@
 {
-  "name": "TURNKEY Business Ledger",
-  "short_name": "TURNKEY",
+  "name": "LLAVE Business OS",
+  "short_name": "LLAVE",
   "description": "Professional retail and resale business software with POS, inventory, valuation, purchasing, listings, payments, and analytics",
   "start_url": "/",
   "scope": "/",
@@ -9,19 +9,19 @@
   "theme_color": "#f7f9fc",
   "icons": [
     {
-      "src": "turnkey-logo.svg",
+      "src": "llave-logo.svg",
       "sizes": "192x192",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "turnkey-logo.svg",
+      "src": "llave-logo.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any"
     },
     {
-      "src": "turnkey-logo.svg",
+      "src": "llave-logo.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "maskable"
