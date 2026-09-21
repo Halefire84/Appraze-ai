@@ -20,6 +20,8 @@ SOURCES = {
 }
 
 st.set_page_config(page_title="Appraze — Auction Hunt", page_icon="🏷️", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 st.title("🏷️ Appraze™ Auction Hunt")

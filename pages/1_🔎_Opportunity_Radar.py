@@ -16,6 +16,8 @@ from source_registry import default_source_registry
 from source_search import public_search_url
 
 st.set_page_config(page_title="Appraze — Opportunity Radar", page_icon="🔎", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 st.title("🔎 Appraze™ Opportunity Radar")

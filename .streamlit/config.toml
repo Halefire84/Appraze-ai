@@ -3,3 +3,23 @@
 # see manifest.json + the head-injection snippet near the top of app.py).
 [server]
 enableStaticServing = true
+
+[client]
+# Hides Streamlit's own "Deploy" button and most of the hamburger menu
+# (Streamlit Cloud settings, "Report a bug", "About Streamlit", etc.) --
+# that chrome is what makes any Streamlit app read as "someone's internal
+# dev tool" instead of a finished program. "minimal" keeps only what an
+# end user actually needs (Rerun/Settings), not Streamlit's own branding.
+toolbarMode = "minimal"
+
+[theme]
+# Matches the Appraze brand palette (see APPRAZE_BRAND.md / appraze-mark.svg)
+# instead of Streamlit's default blue/red accents -- native widgets
+# (buttons, sliders, checkboxes, the sidebar) now look like part of one
+# designed product instead of stock Streamlit.
+base = "light"
+primaryColor = "#f5a524"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f5f8fc"
+textColor = "#172230"
+font = "sans serif"

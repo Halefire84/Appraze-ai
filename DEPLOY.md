@@ -64,9 +64,10 @@ STRIPE_SECRET_KEY = "sk_live_... or sk_test_..."
 APP_URL = "https://your-app-name.streamlit.app"
 
 # One Payment Link per paid plan (Free needs none). Plan keys are defined
-# in subscription_plans.py: scout, hunter, operator, pro.
+# in subscription_plans.py: scout, analyst, appraiser, operator, pro.
 STRIPE_PAYMENT_LINK_SCOUT = "the Payment Link URL for the Scout plan"
-STRIPE_PAYMENT_LINK_HUNTER = "the Payment Link URL for the Hunter plan"
+STRIPE_PAYMENT_LINK_ANALYST = "the Payment Link URL for the Analyst plan"
+STRIPE_PAYMENT_LINK_APPRAISER = "the Payment Link URL for the Appraiser plan"
 STRIPE_PAYMENT_LINK_OPERATOR = "the Payment Link URL for the Operator plan"
 STRIPE_PAYMENT_LINK_PRO = "the Payment Link URL for the Pro plan"
 ```
@@ -75,7 +76,8 @@ Only Payment Links, never raw card data — this app never touches a card
 number, only checks payment status after the fact via Stripe's read-only
 session lookup. Any plan whose secret is left blank shows a disabled
 "Not yet available" button on the Pricing page instead of a broken link,
-so you can launch with just Hunter configured and add the rest later.
+so you can launch with just Appraiser (the flagship) configured and add
+the rest later.
 
 Setting up each plan's Payment Link, once per plan, in the Stripe
 Dashboard:
@@ -83,7 +85,7 @@ Dashboard:
    `subscription_plans.py` for the dollar amounts) → Create payment link.
 2. In that Payment Link's own settings → **After payment** → redirect to
    a URL, and set it to (replacing `<plan_key>` with that plan's lowercase
-   key, e.g. `hunter`):
+   key, e.g. `appraiser`):
    `{APP_URL}/?sub_plan=<plan_key>&sub_session_id={CHECKOUT_SESSION_ID}`
 3. Copy the Payment Link's URL into the matching
    `STRIPE_PAYMENT_LINK_<PLAN_KEY>` secret above.

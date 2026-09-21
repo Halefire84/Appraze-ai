@@ -13,6 +13,8 @@ from opportunity_sources import scan_ebay
 from source_profiles import get_hunt_profile
 
 st.set_page_config(page_title="Appraze — Government Electronics", page_icon="🏛️", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 

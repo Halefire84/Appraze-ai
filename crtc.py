@@ -1,4 +1,4 @@
-"""CRTC Cross-List Command Center.
+"""Appraze Cross-List Command Center.
 
 NOT CURRENTLY USED — nothing in this repo imports this file (verified by
 grep across app.py, pages/*.py, and tests/ on 2026-09-20). It predates and
@@ -23,7 +23,7 @@ import streamlit as st
 from listing_store import upsert_listing, transition_listing, mark_item_sold
 from storage import load_table, save_table
 
-st.set_page_config(page_title="CRTC — Cross-List", page_icon="🛒", layout="wide")
+st.set_page_config(page_title="Appraze — Cross-List", page_icon="🛒", layout="wide")
 from auth import require_auth
 require_auth()
 
@@ -70,7 +70,7 @@ if "master" not in st.session_state:
     saved_master = (master_rows.payload or [])[-1] if master_rows.success and master_rows.payload else None
     if saved_master:
         st.session_state.master = MasterItem(
-            str(saved_master.get("sku") or "CRTC-ITEM"),
+            str(saved_master.get("sku") or "Appraze-ITEM"),
             str(saved_master.get("title") or "Untitled item"),
             str(saved_master.get("description") or ""),
             str(saved_master.get("category") or ""),
@@ -82,7 +82,7 @@ if "master" not in st.session_state:
         )
         st.session_state["master_source"] = "Flip Ledger"
     else:
-        st.session_state.master = MasterItem("CRTC-000001", "Vintage Martin Acoustic-Electric Guitar", "Vintage acoustic-electric guitar in very good used condition. Includes case. See photos for condition details.", "Musical Instruments", 1249.00, 350.00, 1, "Used — Very Good", ["photo-1", "photo-2", "photo-3"])
+        st.session_state.master = MasterItem("Appraze-000001", "Vintage Martin Acoustic-Electric Guitar", "Vintage acoustic-electric guitar in very good used condition. Includes case. See photos for condition details.", "Musical Instruments", 1249.00, 350.00, 1, "Used — Very Good", ["photo-1", "photo-2", "photo-3"])
         st.session_state["master_source"] = "Demo"
 
 if "drafts" not in st.session_state:
@@ -91,7 +91,7 @@ if "drafts" not in st.session_state:
     st.session_state.drafts = {str(row.get("marketplace")): row for row in rows if row.get("marketplace")}
     st.session_state["listing_storage_message"] = "Loaded saved listing drafts." if loaded.success else f"Local listing drafts: {loaded.error}"
 
-st.title("🛒 CRTC Cross-List Command Center")
+st.title("🛒 Appraze Cross-List Command Center")
 st.caption("One master inventory record → marketplace-specific drafts → approved publishing integrations")
 st.info(st.session_state.get("listing_storage_message", ""))
 if st.session_state.get("master_source") == "Flip Ledger":
@@ -141,7 +141,7 @@ if st.session_state.drafts:
 
 st.divider(); st.subheader("Marketplace Listings")
 if not st.session_state.drafts:
-    st.info("Generate listings above. CRTC keeps one master item and separate marketplace drafts.")
+    st.info("Generate listings above. Appraze keeps one master item and separate marketplace drafts.")
 else:
     for marketplace, draft in list(st.session_state.drafts.items()):
         with st.expander(f"{marketplace} · {draft['status']}", expanded=True):

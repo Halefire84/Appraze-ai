@@ -50,8 +50,8 @@ launching:
   payments" section for exact setup steps and the new
   `STRIPE_PAYMENT_LINK_<PLAN>` secrets it needs. A plan with no secret
   configured shows a disabled "Not yet available" button instead of a
-  broken link, so you can launch with just Hunter live and add the rest
-  later.
+  broken link, so you can launch with just Appraiser (the flagship) live
+  and add the rest later.
 
   **Important gap found while wiring this up:** the login gate every
   page actually uses (`auth.require_auth()`) only supports the one
@@ -73,8 +73,13 @@ launching:
   actually use end-to-end.
 - Also not yet built: nothing in the app currently checks a user's plan
   to gate a feature (`subscription_plans.feature_enabled()` exists and
-  is unit-tested, but nothing calls it). Buying Hunter today records
-  "hunter" as your plan; it doesn't unlock anything extra yet.
+  is unit-tested, but nothing calls it). Buying Appraiser today records
+  "appraiser" as your plan; it doesn't unlock anything extra yet.
+- Pricing tiers were renamed/restructured 2026-09-21 based on
+  `COMPETITIVE-GAPS.md`'s research — "Hunter" is retired (renamed
+  "Appraiser"), and a new "Analyst" tier ($35/mo) sits between Scout and
+  Appraiser. See `subscription_plans.py`'s module docstring for the
+  reasoning.
 
 Steps to take Stripe live (POS and/or subscriptions):
 1. In your Stripe Dashboard, toggle out of test mode (or use a separate

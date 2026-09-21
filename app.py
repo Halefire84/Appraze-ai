@@ -43,85 +43,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DARK_CSS = """
-<style>
-    .appraze-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
-    .appraze-brand { padding: 6px 0 4px; }
-    .appraze-header { display: flex; align-items: center; gap: 12px; margin: 4px 0 0; }
-    .appraze-header img { width: 40px; height: 40px; border-radius: 9px; }
-    .appraze-header h2 { margin: 0 !important; font-size: 1.7rem !important; }
-    /* ---- base ---- */
-    .stApp {
-        background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%);
-        color: #172230;
-    }
-    section[data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid #d9e1ea;
-    }
-    h1, h2, h3, h4 { color: #172230 !important; letter-spacing: -0.02em; }
-
-    /* ---- KPI cards ---- */
-    .kpi-card {
-        background: linear-gradient(145deg, #ffffff, #f3f6fa);
-        border: 1px solid #d7e0ea;
-        border-radius: 14px;
-        padding: 18px 20px;
-        box-shadow: 0 4px 18px rgba(31,52,73,0.10);
-    }
-    .kpi-label {
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #5d6b7a;
-        margin-bottom: 6px;
-    }
-    .kpi-value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #172230;
-    }
-    .kpi-sub { font-size: 0.8rem; color: #16804b; margin-top: 2px; }
-    .kpi-sub.neg { color: #c62f4a; }
-
-    /* ---- pills / badges ---- */
-    .badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 999px;
-        font-size: 0.72rem;
-        font-weight: 600;
-        letter-spacing: 0.03em;
-    }
-    .badge-strongbuy { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-buy { background: #10331a; color: #4ade80; border: 1px solid #4ade8040;}
-    .badge-ceiling { background: #142a37; color: #38bdf8; border: 1px solid #38bdf840;}
-    .badge-borderline { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-passverdict { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-    .badge-hot { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-good { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-pass { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-
-    /* buttons */
-    .stButton>button {
-        border-radius: 10px;
-        border: 1px solid #cbd5e1;
-        background: #ffffff;
-        color: #0b2548;
-        font-weight: 600;
-    }
-    .stButton>button:hover { border-color: #0b2548; color: #0b2548; }
-
-    /* dataframe */
-    div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
-
-    /* metric containers spacing */
-    .block-container { padding-top: 1.6rem; }
-
-    hr { border-color: #d7e0ea; }
-</style>
-"""
-st.markdown(DARK_CSS, unsafe_allow_html=True)
+from ui_theme import inject_theme
+inject_theme()
 
 # --------------------------------------------------------------------------
 # PWA HEAD INJECTION

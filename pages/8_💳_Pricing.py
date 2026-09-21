@@ -9,6 +9,8 @@ import streamlit as st
 from subscription_plans import PLANS
 
 st.set_page_config(page_title="Appraze Pricing", page_icon="💳", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 
@@ -25,18 +27,18 @@ elif _current_plan and _current_plan != "free":
 else:
     st.info("You're on the Free plan.")
 
-st.info("Launch strategy: keep the Free tier useful, make Hunter the obvious flagship, and add higher-volume tiers only as real demand appears.")
+st.info("Launch strategy: keep the Free tier useful, make Appraiser the obvious flagship, and add higher-volume tiers only as real demand appears.")
 
 cols = st.columns(len(PLANS))
 for col, plan in zip(cols, PLANS):
     with col:
-        if plan.key == "hunter":
+        if plan.key == "appraiser":
             st.markdown("### 🏆 MOST POPULAR")
         st.subheader(plan.name)
         if plan.monthly_price == 0:
-            st.markdown("# Free")
+            st.markdown('<div class="price-amount">Free</div>', unsafe_allow_html=True)
         else:
-            st.markdown(f"# ${plan.monthly_price}/mo")
+            st.markdown(f'<div class="price-amount">${plan.monthly_price}/mo</div>', unsafe_allow_html=True)
         st.caption(plan.tagline)
         st.write(f"**{plan.analyses_per_month:,}** AI analyses / month")
         st.write("✅ Holy Grail hunting" if plan.hunt_enabled else "• Manual analysis")
@@ -56,14 +58,15 @@ for col, plan in zip(cols, PLANS):
         else:
             link = plan_payment_link(plan.key)
             if link:
-                st.link_button(f"Subscribe to {plan.name}", link, use_container_width=True)
+                button_type = "primary" if plan.key == "appraiser" else "secondary"
+                st.link_button(f"Subscribe to {plan.name}", link, use_container_width=True, type=button_type)
             else:
                 st.button("Not yet available", disabled=True, use_container_width=True, key=f"unavail_{plan.key}")
 
 st.divider()
-st.subheader("Why Hunter is the flagship")
+st.subheader("Why Appraiser is the flagship")
 st.markdown("""
-**$49/month** is designed around the feature that makes Appraze different: finding opportunities the market overlooked.
+**$59/month** is designed around the feature that makes Appraze different: finding opportunities the market overlooked.
 
 - Holy Grail opportunity hunting
 - Information-failure scoring

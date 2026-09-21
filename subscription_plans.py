@@ -3,6 +3,22 @@
 Pricing is intentionally data-driven so the product can launch with a simple
 flagship plan and add higher tiers without scattering price logic through the UI.
 Stripe Payment Links remain deployment configuration.
+
+Tier structure updated 2026-09-21 (see COMPETITIVE-GAPS.md for the pricing
+research this is based on): the flagship tier was renamed from "Hunter" to
+"Appraiser" (ties directly to the product name and reads as professional/
+credentialed rather than the "hunting" theme it replaces), and a new
+"Analyst" tier was added between Scout and Appraiser to cover the price gap
+most competitors also have between their entry and flagship tiers. Round-
+dollar pricing ($19/$35/$59/$99/$199, no ".99" endings) is a deliberate
+choice -- the ".99" convention every competitor in COMPETITIVE-GAPS.md uses
+reads as a discount-bin signal, which cuts against the "this is a premium
+program, not a cheap web app" positioning. $59 for the flagship (Appraiser)
+sits at Vendoo Pro's exact price and below List Perfectly Pro ($69) and
+Nifty AI ($69.99) -- market parity for the entry to "serious tool" tier,
+not the cheapest and not the most expensive, matching the deliberate
+"don't leave money on the table, don't overcharge before we've proven
+ourselves" positioning.
 """
 from dataclasses import dataclass
 from typing import FrozenSet, Tuple
@@ -28,7 +44,8 @@ class Plan:
 PLANS: Tuple[Plan, ...] = (
     Plan("free", "Free", 0, 5, False, False, False, False, False, False, False, tagline="Try Appraze"),
     Plan("scout", "Scout", 19, 50, True, True, False, False, False, False, False, tagline="For occasional sourcing"),
-    Plan("hunter", "Hunter", 49, 250, True, True, True, True, True, True, True, tagline="The Appraze flagship"),
+    Plan("analyst", "Analyst", 35, 120, True, True, True, False, False, False, False, tagline="For sellers ready to scale up"),
+    Plan("appraiser", "Appraiser", 59, 250, True, True, True, True, True, True, True, tagline="The Appraze flagship"),
     Plan("operator", "Operator", 99, 1000, True, True, True, True, True, True, True, tagline="For serious resellers"),
     Plan("pro", "Pro", 199, 5000, True, True, True, True, True, True, True, team_seats=5, tagline="For teams and high volume"),
 )
