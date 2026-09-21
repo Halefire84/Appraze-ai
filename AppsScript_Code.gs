@@ -42,6 +42,16 @@ const STORAGE_HEADER = ["owner_key", "table", "payload_json", "updated_at"];
 const PROCESSED_SHEET_NAME = "ProcessedFiles";
 const PROCESSED_HEADER = ["file_id", "file_name", "processed_at"];
 
+// Server-side Appraze AI usage controls. These limits are enforced here,
+// not in Streamlit session state, so browser reruns cannot reset them.
+const AI_USAGE_SHEET_NAME = "AIUsage";
+const AI_USAGE_HEADER = ["username","month_key","day_key","successful_calls","reserved_calls","daily_successful","daily_reserved","input_tokens","output_tokens","estimated_cost_usd","updated_at"];
+const AI_CUSTOMER_MONTHLY_LIMIT = 100;
+const AI_CUSTOMER_DAILY_LIMIT = 10;
+const AI_ADMIN_MONTHLY_LIMIT = 500;
+const AI_ADMIN_DAILY_LIMIT = 25;
+const AI_RESERVATION_TTL_MS = 15 * 60 * 1000;
+
 // Supported file types for invoice/inventory scanning — images and PDFs only
 // (matches what Claude's vision API can read directly).
 const SUPPORTED_MIME_TYPES = [
@@ -83,6 +93,14 @@ function handleRequest(e) {
         return handleScanFolder_(params);
       case "mark_processed":
         return handleMarkProcessed_(getProcessedSheet_(), params);
+      case "reserve_ai_usage":
+        return handleReserveAiUsage_(getUsersSheet_(), getAiUsageSheet_(), params);
+      case "finalize_ai_usage":
+        return handleFinalizeAiUsage_(getAiUsageSheet_(), params);
+      case "release_ai_usage":
+        return handleReleaseAiUsage_(getAiUsageSheet_(), params);
+      case "get_ai_usage":
+        return handleGetAiUsage_(getUsersSheet_(), getAiUsageSheet_(), params);
       default:
         return jsonResponse({ success: false, error: "unknown action" });
     }
@@ -373,6 +391,130 @@ function handleUpdateSalesLogStatus_(sheet, params) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function getAiUsageSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(AI_USAGE_SHEET_NAME);
+  if (!sheet) { sheet = ss.insertSheet(AI_USAGE_SHEET_NAME); sheet.appendRow(AI_USAGE_HEADER); }
+  return sheet;
+}
+
+function aiPeriodKeys_() {
+  const now = new Date();
+  return {
+    monthKey: Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM"),
+    dayKey: Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd"),
+    nowMs: now.getTime()
+  };
+}
+
+function findUser_(sheet, username) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toLowerCase() === username) {
+      return { row: i + 1, isAdmin: String(data[i][3]).toUpperCase() === "TRUE", isPaid: String(data[i][4]).toUpperCase() === "TRUE" };
+    }
+  }
+  return null;
+}
+
+function findAiUsageRow_(sheet, username, monthKey) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toLowerCase() === username && String(data[i][1]) === monthKey) return i + 1;
+  }
+  return 0;
+}
+
+function usagePayload_(vals, allowed, error, monthlyLimit, dailyLimit, dayKey) {
+  const dailyKey = vals.length ? String(vals[2]) : dayKey;
+  return {success: allowed, allowed: allowed, error: error || "",
+    monthly_used: vals.length ? Number(vals[3]) || 0 : 0,
+    monthly_reserved: vals.length ? Number(vals[4]) || 0 : 0,
+    monthly_limit: monthlyLimit,
+    daily_used: vals.length && dailyKey === dayKey ? Number(vals[5]) || 0 : 0,
+    daily_reserved: vals.length && dailyKey === dayKey ? Number(vals[6]) || 0 : 0,
+    daily_limit: dailyLimit,
+    monthly_cost_usd: vals.length ? Number((Number(vals[9]) || 0).toFixed(6)) : 0};
+}
+
+function handleReserveAiUsage_(usersSheet, usageSheet, params) {
+  const username = String(params.username || "").trim().toLowerCase();
+  if (!username) return jsonResponse({success:false,error:"account identity is unavailable"});
+  const user = findUser_(usersSheet, username);
+  const requestedAdmin = String(params.is_admin || "").toLowerCase() === "true";
+  const isAdmin = requestedAdmin || (user && user.isAdmin);
+  if (!user && !requestedAdmin) return jsonResponse({success:false,error:"account is not recognized"});
+  if (user && !user.isPaid && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
+  if (!user && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
+  const monthlyLimit = isAdmin ? AI_ADMIN_MONTHLY_LIMIT : AI_CUSTOMER_MONTHLY_LIMIT;
+  const dailyLimit = isAdmin ? AI_ADMIN_DAILY_LIMIT : AI_CUSTOMER_DAILY_LIMIT;
+  const period = aiPeriodKeys_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    let rowNum = findAiUsageRow_(usageSheet, username, period.monthKey);
+    if (!rowNum) {
+      usageSheet.appendRow([username,period.monthKey,period.dayKey,0,0,0,0,0,0,0,new Date().toISOString()]);
+      rowNum = usageSheet.getLastRow();
+    }
+    const row = usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length);
+    const vals = row.getValues()[0];
+    const updatedMs = new Date(String(vals[10] || "")).getTime();
+    if (Number.isFinite(updatedMs) && period.nowMs - updatedMs > AI_RESERVATION_TTL_MS) { vals[4]=0; vals[6]=0; }
+    if (String(vals[2]) !== period.dayKey) { vals[2]=period.dayKey; vals[5]=0; vals[6]=0; }
+    const successful=Number(vals[3])||0, reserved=Number(vals[4])||0;
+    const dailySuccessful=Number(vals[5])||0, dailyReserved=Number(vals[6])||0;
+    if (successful+reserved >= monthlyLimit) { row.setValues([vals]); return jsonResponse(usagePayload_(vals,false,"Monthly AI usage limit reached",monthlyLimit,dailyLimit,period.dayKey)); }
+    if (dailySuccessful+dailyReserved >= dailyLimit) { row.setValues([vals]); return jsonResponse(usagePayload_(vals,false,"Daily AI usage limit reached",monthlyLimit,dailyLimit,period.dayKey)); }
+    vals[4]=reserved+1; vals[6]=dailyReserved+1; vals[10]=new Date().toISOString(); row.setValues([vals]);
+    return jsonResponse(usagePayload_(vals,true,"",monthlyLimit,dailyLimit,period.dayKey));
+  } finally { lock.releaseLock(); }
+}
+
+function handleFinalizeAiUsage_(usageSheet, params) {
+  const username=String(params.username||"").trim().toLowerCase();
+  const inputTokens=Math.max(0,Number(params.input_tokens)||0);
+  const outputTokens=Math.max(0,Number(params.output_tokens)||0);
+  const cost=Math.max(0,Number(params.estimated_cost_usd)||0);
+  if(!username) return jsonResponse({success:false,error:"account identity is unavailable"});
+  const period=aiPeriodKeys_(), lock=LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey);
+    if(!rowNum) return jsonResponse({success:false,error:"usage reservation not found"});
+    const row=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length), vals=row.getValues()[0];
+    vals[4]=Math.max(0,(Number(vals[4])||0)-1);
+    if(String(vals[2])!==period.dayKey){vals[2]=period.dayKey;vals[5]=0;vals[6]=0;}
+    vals[6]=Math.max(0,(Number(vals[6])||0)-1); vals[3]=(Number(vals[3])||0)+1; vals[5]=(Number(vals[5])||0)+1;
+    vals[7]=(Number(vals[7])||0)+inputTokens; vals[8]=(Number(vals[8])||0)+outputTokens; vals[9]=(Number(vals[9])||0)+cost; vals[10]=new Date().toISOString();
+    row.setValues([vals]); return jsonResponse({success:true,monthly_cost_usd:Number(vals[9].toFixed(6))});
+  } finally { lock.releaseLock(); }
+}
+
+function handleReleaseAiUsage_(usageSheet, params) {
+  const username=String(params.username||"").trim().toLowerCase(); if(!username)return jsonResponse({success:false,error:"account identity is unavailable"});
+  const period=aiPeriodKeys_(), lock=LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey); if(!rowNum)return jsonResponse({success:true});
+    const row=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length), vals=row.getValues()[0];
+    vals[4]=Math.max(0,(Number(vals[4])||0)-1); if(String(vals[2])===period.dayKey)vals[6]=Math.max(0,(Number(vals[6])||0)-1);
+    vals[10]=new Date().toISOString(); row.setValues([vals]); return jsonResponse({success:true});
+  } finally { lock.releaseLock(); }
+}
+
+function handleGetAiUsage_(usersSheet, usageSheet, params) {
+  const username=String(params.username||"").trim().toLowerCase(); if(!username)return jsonResponse({success:false,error:"account identity is unavailable"});
+  const user=findUser_(usersSheet,username);
+  const requestedAdmin=String(params.is_admin||"").toLowerCase()==="true";
+  const isAdmin=requestedAdmin||(user&&user.isAdmin);
+  if((!user&&!requestedAdmin)|| (user&&!user.isPaid&&!isAdmin))return jsonResponse({success:false,error:"active subscription required"});
+  const monthlyLimit=isAdmin?AI_ADMIN_MONTHLY_LIMIT:AI_CUSTOMER_MONTHLY_LIMIT, dailyLimit=isAdmin?AI_ADMIN_DAILY_LIMIT:AI_CUSTOMER_DAILY_LIMIT, period=aiPeriodKeys_();
+  const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey);
+  if(!rowNum)return jsonResponse({success:true,monthly_used:0,monthly_limit:monthlyLimit,daily_used:0,daily_limit:dailyLimit,monthly_cost_usd:0,input_tokens:0,output_tokens:0});
+  const vals=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length).getValues()[0], dailyUsed=String(vals[2])===period.dayKey?Number(vals[5])||0:0;
+  return jsonResponse({success:true,monthly_used:Number(vals[3])||0,monthly_limit:monthlyLimit,daily_used:dailyUsed,daily_limit:dailyLimit,monthly_cost_usd:Number((Number(vals[9])||0).toFixed(6)),input_tokens:Number(vals[7])||0,output_tokens:Number(vals[8])||0});
 }
 
 function jsonResponse(obj) {
