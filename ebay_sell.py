@@ -40,14 +40,30 @@ _SANDBOX_API_HOST = "https://api.sandbox.ebay.com"
 AUTHORIZE_URL = f"{_SANDBOX_AUTH_HOST}/oauth2/authorize"
 TOKEN_URL = f"{_SANDBOX_API_HOST}/identity/v1/oauth2/token"
 INVENTORY_BASE = f"{_SANDBOX_API_HOST}/sell/inventory/v1"
+ACCOUNT_BASE = f"{_SANDBOX_API_HOST}/sell/account/v1"
 
 DEFAULT_SCOPES = (
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
     "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
+    # Required for the policy/location builders below (createPaymentPolicy,
+    # createFulfillmentPolicy, createReturnPolicy, createInventoryLocation) --
+    # NOT covered by the sell.inventory scopes above. A token authorized
+    # before this scope was added must be re-authorized from scratch
+    # (sell.account cannot be added to an existing token via refresh).
+    "https://api.ebay.com/oauth/api_scope/sell.account",
 )
 
 CONFIG_FILE = Path("ebay_config.json")
 TOKEN_FILE = Path(".ebay_tokens.json")
+
+# Reuse-if-exists match key: a policy/location whose name already equals one
+# of these is reused rather than duplicated. Overridable via EbayConfig so a
+# second sandbox account (or a re-run after a partial failure) doesn't keep
+# spawning near-duplicates under a common name.
+DEFAULT_PAYMENT_POLICY_NAME = "Appraze Sandbox Test Payment Policy"
+DEFAULT_FULFILLMENT_POLICY_NAME = "Appraze Sandbox Test Fulfillment Policy"
+DEFAULT_RETURN_POLICY_NAME = "Appraze Sandbox Test Return Policy"
+DEFAULT_MERCHANT_LOCATION_KEY = "appraze-test-warehouse"
 
 # Refresh a little early so a token can't expire mid-request.
 _EXPIRY_SKEW_SECONDS = 120
@@ -101,6 +117,16 @@ class EbayConfig:
     fulfillment_policy_id: str = ""
     payment_policy_id: str = ""
     return_policy_id: str = ""
+    # Used only when creating a NEW merchant location (get_or_create_merchant_location).
+    # A placeholder sandbox address -- sandbox listings are never real
+    # merchandise at a real address, but eBay's API requires a well-formed
+    # one. Override via EBAY_SELL_LOCATION_* env vars / ebay_config.json if
+    # the owner wants a different placeholder.
+    location_address_line1: str = "123 Sandbox Test Street"
+    location_city: str = "San Jose"
+    location_state: str = "CA"
+    location_postal_code: str = "95131"
+    location_country: str = "US"
 
     def __repr__(self) -> str:  # never leak the secret into logs or tracebacks
         return (
@@ -178,6 +204,11 @@ def load_config(env: Optional[Dict[str, str]] = None, config_path: Path = CONFIG
         fulfillment_policy_id=pick("FULFILLMENT_POLICY_ID"),
         payment_policy_id=pick("PAYMENT_POLICY_ID"),
         return_policy_id=pick("RETURN_POLICY_ID"),
+        location_address_line1=pick("LOCATION_ADDRESS_LINE1", "123 Sandbox Test Street"),
+        location_city=pick("LOCATION_CITY", "San Jose"),
+        location_state=pick("LOCATION_STATE", "CA"),
+        location_postal_code=pick("LOCATION_POSTAL_CODE", "95131"),
+        location_country=pick("LOCATION_COUNTRY", "US"),
     )
 
 
@@ -198,8 +229,44 @@ def write_config_template(path: Path = CONFIG_FILE) -> Path:
         "FULFILLMENT_POLICY_ID": "",
         "PAYMENT_POLICY_ID": "",
         "RETURN_POLICY_ID": "",
+        "LOCATION_ADDRESS_LINE1": "123 Sandbox Test Street",
+        "LOCATION_CITY": "San Jose",
+        "LOCATION_STATE": "CA",
+        "LOCATION_POSTAL_CODE": "95131",
+        "LOCATION_COUNTRY": "US",
     }
     path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def save_config(config: EbayConfig, path: Path = CONFIG_FILE) -> Path:
+    """Persist the resolved config (including any IDs the policy/location
+    builders just created) back to ebay_config.json, preserving whatever
+    other keys the file already has (e.g. a hand-edited _comment). Secrets
+    are written in plain JSON here exactly as write_config_template()
+    already does -- this file is gitignored and chmod'd 600, the same
+    trust boundary as .ebay_tokens.json, not a new one."""
+    existing = _config_file_values(path)
+    existing.update({
+        "CLIENT_ID": config.client_id,
+        "CLIENT_SECRET": config.client_secret,
+        "REDIRECT_URI": config.redirect_uri,
+        "MARKETPLACE_ID": config.marketplace_id,
+        "MERCHANT_LOCATION_KEY": config.merchant_location_key,
+        "FULFILLMENT_POLICY_ID": config.fulfillment_policy_id,
+        "PAYMENT_POLICY_ID": config.payment_policy_id,
+        "RETURN_POLICY_ID": config.return_policy_id,
+        "LOCATION_ADDRESS_LINE1": config.location_address_line1,
+        "LOCATION_CITY": config.location_city,
+        "LOCATION_STATE": config.location_state,
+        "LOCATION_POSTAL_CODE": config.location_postal_code,
+        "LOCATION_COUNTRY": config.location_country,
+    })
+    path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return path
 
 
@@ -515,8 +582,8 @@ class EbaySellClient:
             headers["Content-Language"] = "en-US"
         return headers
 
-    def _request(self, method: str, path: str, *, json_body: Any = None, content_language: bool = False) -> Dict[str, Any]:
-        url = f"{INVENTORY_BASE}{path}"
+    def _request(self, method: str, path: str, *, json_body: Any = None, content_language: bool = False, base: str = INVENTORY_BASE) -> Dict[str, Any]:
+        url = f"{base}{path}"
         try:
             resp = self.session.request(
                 method,
@@ -598,6 +665,163 @@ class EbaySellClient:
     def withdraw_offer(self, offer_id: str) -> Dict[str, Any]:
         """End the sandbox listing but keep the offer — used for cleanup."""
         return self._request("POST", f"/offer/{urllib.parse.quote(str(offer_id), safe='')}/withdraw")
+
+    # -- business policies (Account API) -----------------------------------
+    # These live under /sell/account/v1, not /sell/inventory/v1 -- a
+    # different eBay API entirely, hence the explicit `base=ACCOUNT_BASE`
+    # on every call here. Requires the sell.account OAuth scope.
+    def list_payment_policies(self) -> List[Dict[str, Any]]:
+        data = self._request("GET", f"/payment_policy?marketplace_id={self.config.marketplace_id}", base=ACCOUNT_BASE)
+        return list(data.get("paymentPolicies") or [])
+
+    def create_payment_policy(self, name: str) -> str:
+        """Simplest sandbox-acceptable payment policy: no immediate-pay
+        requirement (immediatePay OFF, per the brief), Managed Payments
+        marketplaces like EBAY_US do not need an explicit paymentMethods
+        list. UNVERIFIED against live eBay -- built from eBay's published
+        Sell Account API v1 schema, not exercised against a real sandbox
+        account yet (see docs/EBAY_SELL_SETUP.md). If eBay rejects this
+        body, the raised EbaySellError carries eBay's exact error message
+        via _error_summary(), not a guess."""
+        body = {
+            "name": name,
+            "marketplaceId": self.config.marketplace_id,
+            "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
+            "immediatePay": False,
+        }
+        data = self._request("POST", "/payment_policy", json_body=body, base=ACCOUNT_BASE)
+        policy_id = data.get("paymentPolicyId")
+        if not policy_id:
+            raise EbaySellError("eBay created the payment policy but returned no paymentPolicyId.")
+        return str(policy_id)
+
+    def list_fulfillment_policies(self) -> List[Dict[str, Any]]:
+        data = self._request("GET", f"/fulfillment_policy?marketplace_id={self.config.marketplace_id}", base=ACCOUNT_BASE)
+        return list(data.get("fulfillmentPolicies") or [])
+
+    def create_fulfillment_policy(self, name: str) -> str:
+        """Simple terms for a small test item: 3-day handling, one flat-rate
+        domestic shipping service. UNVERIFIED against live eBay (see
+        create_payment_policy's docstring -- same caveat applies)."""
+        body = {
+            "name": name,
+            "marketplaceId": self.config.marketplace_id,
+            "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
+            "handlingTime": {"value": 3, "unit": "DAY"},
+            "shippingOptions": [{
+                "optionType": "DOMESTIC",
+                "costType": "FLAT_RATE",
+                "shippingServices": [{
+                    "sortOrder": 1,
+                    "shippingCarrierCode": "USPS",
+                    "shippingServiceCode": "USPSPriorityMail",
+                    "shippingCost": {"value": "5.00", "currency": "USD"},
+                    "freeShipping": False,
+                }],
+            }],
+        }
+        data = self._request("POST", "/fulfillment_policy", json_body=body, base=ACCOUNT_BASE)
+        policy_id = data.get("fulfillmentPolicyId")
+        if not policy_id:
+            raise EbaySellError("eBay created the fulfillment policy but returned no fulfillmentPolicyId.")
+        return str(policy_id)
+
+    def list_return_policies(self) -> List[Dict[str, Any]]:
+        data = self._request("GET", f"/return_policy?marketplace_id={self.config.marketplace_id}", base=ACCOUNT_BASE)
+        return list(data.get("returnPolicies") or [])
+
+    def create_return_policy(self, name: str) -> str:
+        """Simplest sandbox-accepted returns: 30-day buyer-pays-return-shipping,
+        money-back refund. UNVERIFIED against live eBay (same caveat)."""
+        body = {
+            "name": name,
+            "marketplaceId": self.config.marketplace_id,
+            "categoryTypes": [{"name": "ALL_EXCLUDING_MOTORS_VEHICLES"}],
+            "returnsAccepted": True,
+            "returnPeriod": {"value": 30, "unit": "DAY"},
+            "returnShippingCostPayer": "BUYER",
+            "refundMethod": "MONEY_BACK",
+        }
+        data = self._request("POST", "/return_policy", json_body=body, base=ACCOUNT_BASE)
+        policy_id = data.get("returnPolicyId")
+        if not policy_id:
+            raise EbaySellError("eBay created the return policy but returned no returnPolicyId.")
+        return str(policy_id)
+
+    # -- merchant location (Inventory API) ----------------------------------
+    def list_merchant_locations(self) -> List[Dict[str, Any]]:
+        data = self._request("GET", "/location")
+        return list(data.get("locations") or [])
+
+    def create_merchant_location(self, location_key: str) -> str:
+        """PUT /sell/inventory/v1/location/{merchantLocationKey}. eBay
+        returns 204 No Content on success; the key itself (which the caller
+        chose) is the location's identity, not a server-generated ID.
+        UNVERIFIED against live eBay (same caveat as the policy builders)."""
+        body = {
+            "location": {
+                "address": {
+                    "addressLine1": self.config.location_address_line1,
+                    "city": self.config.location_city,
+                    "stateOrProvince": self.config.location_state,
+                    "postalCode": self.config.location_postal_code,
+                    "country": self.config.location_country,
+                },
+            },
+            "locationTypes": ["WAREHOUSE"],
+            "merchantLocationStatus": "ENABLED",
+        }
+        self._request(
+            "POST",
+            f"/location/{urllib.parse.quote(str(location_key), safe='')}",
+            json_body=body,
+        )
+        return location_key
+
+
+# ---------------------------------------------------------------------------
+# Reuse-if-exists policy/location builders
+# ---------------------------------------------------------------------------
+def get_or_create_payment_policy(client: "EbaySellClient", name: str = DEFAULT_PAYMENT_POLICY_NAME) -> str:
+    for policy in client.list_payment_policies():
+        if policy.get("name") == name and policy.get("paymentPolicyId"):
+            return str(policy["paymentPolicyId"])
+    return client.create_payment_policy(name)
+
+
+def get_or_create_fulfillment_policy(client: "EbaySellClient", name: str = DEFAULT_FULFILLMENT_POLICY_NAME) -> str:
+    for policy in client.list_fulfillment_policies():
+        if policy.get("name") == name and policy.get("fulfillmentPolicyId"):
+            return str(policy["fulfillmentPolicyId"])
+    return client.create_fulfillment_policy(name)
+
+
+def get_or_create_return_policy(client: "EbaySellClient", name: str = DEFAULT_RETURN_POLICY_NAME) -> str:
+    for policy in client.list_return_policies():
+        if policy.get("name") == name and policy.get("returnPolicyId"):
+            return str(policy["returnPolicyId"])
+    return client.create_return_policy(name)
+
+
+def get_or_create_merchant_location(client: "EbaySellClient", location_key: str = DEFAULT_MERCHANT_LOCATION_KEY) -> str:
+    for location in client.list_merchant_locations():
+        if location.get("merchantLocationKey") == location_key:
+            return location_key
+    return client.create_merchant_location(location_key)
+
+
+def ensure_sandbox_listing_prerequisites(client: "EbaySellClient") -> EbayConfig:
+    """Reuse-if-exists all three business policies plus the merchant
+    location, fill them into client.config, persist to ebay_config.json,
+    and return the updated config. Idempotent: safe to call every run --
+    an existing policy/location by name/key is reused, never duplicated."""
+    config = client.config
+    config.payment_policy_id = get_or_create_payment_policy(client)
+    config.fulfillment_policy_id = get_or_create_fulfillment_policy(client)
+    config.return_policy_id = get_or_create_return_policy(client)
+    config.merchant_location_key = get_or_create_merchant_location(client)
+    save_config(config, CONFIG_FILE)
+    return config
 
 
 # ---------------------------------------------------------------------------

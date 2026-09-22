@@ -329,3 +329,195 @@ def test_inventory_item_request_sends_content_language_header():
     assert headers["Content-Language"] == "en-US"
     assert headers["X-EBAY-C-MARKETPLACE-ID"] == "EBAY_US"
     assert headers["Authorization"] == "Bearer ACCESS-1"
+
+
+# --- account-scope required for policy/location creation --------------------
+def test_default_scopes_include_sell_account():
+    # Without this, every policy/location builder below 403s on a live
+    # sandbox call even though the mocked tests here would still pass --
+    # this is the one thing mocks cannot catch, so it's pinned explicitly.
+    assert any(scope.endswith("/sell.account") for scope in ebay_sell.DEFAULT_SCOPES)
+
+
+# --- account/location endpoint constants are sandbox-only -------------------
+def test_account_base_is_sandbox_only():
+    assert ebay_sell.ACCOUNT_BASE == "https://api.sandbox.ebay.com/sell/account/v1"
+    assert "sandbox" in ebay_sell.ACCOUNT_BASE
+    assert "api.ebay.com" not in ebay_sell.ACCOUNT_BASE.replace("api.sandbox.ebay.com", "")
+
+
+# --- policy/location builders: list + create, reuse-if-exists ---------------
+def test_list_payment_policies_hits_sandbox_account_endpoint():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"paymentPolicies": [{"paymentPolicyId": "PP-9", "name": "X"}]})
+    policies = _client(session).list_payment_policies()
+    assert policies == [{"paymentPolicyId": "PP-9", "name": "X"}]
+    url = session.request.call_args.args[1]
+    assert url == "https://api.sandbox.ebay.com/sell/account/v1/payment_policy?marketplace_id=EBAY_US"
+
+
+def test_create_payment_policy_returns_new_id():
+    session = MagicMock()
+    session.request.return_value = _response(201, {"paymentPolicyId": "PP-NEW"})
+    policy_id = _client(session).create_payment_policy("Test Payment Policy")
+    assert policy_id == "PP-NEW"
+    body = session.request.call_args.kwargs["json"]
+    assert body["name"] == "Test Payment Policy"
+    assert body["immediatePay"] is False
+
+
+def test_create_payment_policy_raises_if_no_id_returned():
+    session = MagicMock()
+    session.request.return_value = _response(201, {})
+    with pytest.raises(EbaySellError, match="paymentPolicyId"):
+        _client(session).create_payment_policy("Test Payment Policy")
+
+
+def test_get_or_create_payment_policy_reuses_existing_by_name():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"paymentPolicies": [
+        {"paymentPolicyId": "PP-EXISTING", "name": ebay_sell.DEFAULT_PAYMENT_POLICY_NAME},
+    ]})
+    policy_id = ebay_sell.get_or_create_payment_policy(_client(session))
+    assert policy_id == "PP-EXISTING"
+    # Only the list call happened -- no POST to create a duplicate.
+    assert session.request.call_args.args[0] == "GET"
+    assert session.request.call_count == 1
+
+
+def test_get_or_create_payment_policy_creates_when_no_name_match():
+    session = MagicMock()
+    session.request.side_effect = [
+        _response(200, {"paymentPolicies": [{"paymentPolicyId": "PP-OTHER", "name": "Some Other Policy"}]}),
+        _response(201, {"paymentPolicyId": "PP-NEW"}),
+    ]
+    policy_id = ebay_sell.get_or_create_payment_policy(_client(session))
+    assert policy_id == "PP-NEW"
+    assert session.request.call_count == 2
+
+
+def test_get_or_create_fulfillment_policy_reuses_existing_by_name():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"fulfillmentPolicies": [
+        {"fulfillmentPolicyId": "FP-EXISTING", "name": ebay_sell.DEFAULT_FULFILLMENT_POLICY_NAME},
+    ]})
+    policy_id = ebay_sell.get_or_create_fulfillment_policy(_client(session))
+    assert policy_id == "FP-EXISTING"
+    assert session.request.call_count == 1
+
+
+def test_create_fulfillment_policy_sends_shipping_terms():
+    session = MagicMock()
+    session.request.return_value = _response(201, {"fulfillmentPolicyId": "FP-NEW"})
+    _client(session).create_fulfillment_policy("Test Fulfillment Policy")
+    body = session.request.call_args.kwargs["json"]
+    assert body["handlingTime"] == {"value": 3, "unit": "DAY"}
+    assert body["shippingOptions"][0]["costType"] == "FLAT_RATE"
+
+
+def test_get_or_create_return_policy_reuses_existing_by_name():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"returnPolicies": [
+        {"returnPolicyId": "RP-EXISTING", "name": ebay_sell.DEFAULT_RETURN_POLICY_NAME},
+    ]})
+    policy_id = ebay_sell.get_or_create_return_policy(_client(session))
+    assert policy_id == "RP-EXISTING"
+    assert session.request.call_count == 1
+
+
+def test_create_return_policy_sends_30_day_terms():
+    session = MagicMock()
+    session.request.return_value = _response(201, {"returnPolicyId": "RP-NEW"})
+    _client(session).create_return_policy("Test Return Policy")
+    body = session.request.call_args.kwargs["json"]
+    assert body["returnsAccepted"] is True
+    assert body["returnPeriod"] == {"value": 30, "unit": "DAY"}
+
+
+def test_list_merchant_locations_hits_inventory_location_endpoint():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"locations": [{"merchantLocationKey": "appraze-test-warehouse"}]})
+    locations = _client(session).list_merchant_locations()
+    assert locations == [{"merchantLocationKey": "appraze-test-warehouse"}]
+    url = session.request.call_args.args[1]
+    assert url == "https://api.sandbox.ebay.com/sell/inventory/v1/location"
+
+
+def test_create_merchant_location_sends_address_from_config():
+    session = MagicMock()
+    session.request.return_value = _response(204)
+    config = _config(location_city="Testville", location_state="TX")
+    client = EbaySellClient(config=config, access_token="ACCESS-1", session=session)
+    key = client.create_merchant_location("appraze-test-warehouse")
+    assert key == "appraze-test-warehouse"
+    body = session.request.call_args.kwargs["json"]
+    assert body["location"]["address"]["city"] == "Testville"
+    assert body["location"]["address"]["stateOrProvince"] == "TX"
+    assert body["locationTypes"] == ["WAREHOUSE"]
+
+
+def test_get_or_create_merchant_location_reuses_existing_key():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"locations": [{"merchantLocationKey": "appraze-test-warehouse"}]})
+    key = ebay_sell.get_or_create_merchant_location(_client(session))
+    assert key == "appraze-test-warehouse"
+    assert session.request.call_count == 1  # list only, no create POST
+
+
+def test_get_or_create_merchant_location_creates_when_missing():
+    session = MagicMock()
+    session.request.side_effect = [
+        _response(200, {"locations": []}),
+        _response(204),
+    ]
+    key = ebay_sell.get_or_create_merchant_location(_client(session))
+    assert key == ebay_sell.DEFAULT_MERCHANT_LOCATION_KEY
+    assert session.request.call_count == 2
+
+
+def test_ensure_sandbox_listing_prerequisites_fills_and_saves_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "ebay_config.json"
+    monkeypatch.setattr(ebay_sell, "CONFIG_FILE", config_path)
+    session = MagicMock()
+    session.request.side_effect = [
+        _response(200, {"paymentPolicies": []}),
+        _response(201, {"paymentPolicyId": "PP-NEW"}),
+        _response(200, {"fulfillmentPolicies": []}),
+        _response(201, {"fulfillmentPolicyId": "FP-NEW"}),
+        _response(200, {"returnPolicies": []}),
+        _response(201, {"returnPolicyId": "RP-NEW"}),
+        _response(200, {"locations": []}),
+        _response(204),
+    ]
+    client = _client(session, config=_config(payment_policy_id="", fulfillment_policy_id="", return_policy_id="", merchant_location_key=""))
+    config = ebay_sell.ensure_sandbox_listing_prerequisites(client)
+    assert config.payment_policy_id == "PP-NEW"
+    assert config.fulfillment_policy_id == "FP-NEW"
+    assert config.return_policy_id == "RP-NEW"
+    assert config.merchant_location_key == ebay_sell.DEFAULT_MERCHANT_LOCATION_KEY
+    saved = json.loads(config_path.read_text())
+    assert saved["PAYMENT_POLICY_ID"] == "PP-NEW"
+    assert saved["FULFILLMENT_POLICY_ID"] == "FP-NEW"
+    assert saved["RETURN_POLICY_ID"] == "RP-NEW"
+    assert saved["MERCHANT_LOCATION_KEY"] == ebay_sell.DEFAULT_MERCHANT_LOCATION_KEY
+
+
+# --- config save --------------------------------------------------------
+def test_save_config_writes_all_fields_and_preserves_unknown_keys(tmp_path):
+    path = tmp_path / "ebay_config.json"
+    path.write_text(json.dumps({"_comment": "keep me"}), encoding="utf-8")
+    config = _config(payment_policy_id="PP-1", merchant_location_key="LOC-1")
+    ebay_sell.save_config(config, path)
+    saved = json.loads(path.read_text())
+    assert saved["_comment"] == "keep me"
+    assert saved["PAYMENT_POLICY_ID"] == "PP-1"
+    assert saved["MERCHANT_LOCATION_KEY"] == "LOC-1"
+    assert saved["CLIENT_SECRET"] == "CSECRET-SANDBOX"
+
+
+def test_save_config_never_overwrites_with_missing_file(tmp_path):
+    path = tmp_path / "ebay_config.json"  # does not exist yet
+    config = _config()
+    result_path = ebay_sell.save_config(config, path)
+    assert result_path == path
+    assert json.loads(path.read_text())["CLIENT_ID"] == "CID-SANDBOX"
