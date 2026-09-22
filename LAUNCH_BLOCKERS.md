@@ -25,13 +25,12 @@ Last verified: 2026-09-22 — `python3 -m pytest tests/ -q` -> 497 passed, 0 fai
 - [x] Arbitrary Google Drive file exposure via `scan_folder` closed (`ALLOWED_SCAN_FOLDER_NAMES` allowlist)
 - [x] Spreadsheet formula/CSV injection via display_name defused
 - [x] Timing-unsafe secret comparisons (token, admin invite code) replaced with constant-time compare
-- [ ] Escalating abuse-detection lockout (temp lockout -> permanent/admin-required after repeated bot-like abuse) — in progress 2026-09-22
+- [x] Escalating abuse-detection lockout (temp lockout -> permanent/admin-required after repeated bot-like abuse) — done 2026-09-22, `checkAndRecordAbuseAttempt_` in `AppsScript_Code.gs`, gates `reserve_ai_usage`
 - [ ] Dedicated security audit written up (`SECURITY_NOTES.md` — Session 7 of `CRTC_SESSION_PROMPTS.md` not yet done as a standalone artifact); a real audit pass happened 2026-09-22 (see `.agent/HANDOFF.md`) but hasn't been written up as its own document
 
-**Stage A status: CLOSE.** The financial/webhook/category/SKU/auth
+**Stage A status: CLOSE.** The financial/webhook/category/SKU/auth/abuse
 hardening is done and tested. The remaining gap is writing up the
-2026-09-22 security-audit findings as a standalone `SECURITY_NOTES.md`
-and finishing escalating abuse-detection lockout.
+2026-09-22 security-audit findings as a standalone `SECURITY_NOTES.md`.
 
 ## Stage B — Friendly free beta (5–10 trusted resellers, target Oct 1 2026)
 

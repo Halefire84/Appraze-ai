@@ -69,6 +69,22 @@ const AI_ADMIN_MONTHLY_LIMIT = 500;
 const AI_ADMIN_DAILY_LIMIT = 25;
 const AI_RESERVATION_TTL_MS = 15 * 60 * 1000;
 
+// Escalating abuse-detection lockout -- separate from the monthly/daily AI
+// quota above. The quota caps *total* usage; this catches *rate* of usage
+// that looks automated (a human clicking "Analyze" can't realistically fire
+// off a burst of reserve_ai_usage calls inside one minute the way a script
+// hammering the endpoint can). First burst -> a short cooldown. Repeated
+// bursts -> the account is flagged and stays locked until an admin clears
+// it via the admin_clear_abuse_lockout action -- this is deliberately NOT
+// self-clearing, since a script that trips the temp lockout once will just
+// keep tripping it forever on its own if left to expire automatically.
+const ABUSE_LOCKOUT_SHEET_NAME = "AbuseLockouts";
+const ABUSE_LOCKOUT_HEADER = ["username", "window_start", "window_count", "lockout_until", "strike_count", "permanent", "updated_at"];
+const ABUSE_BURST_WINDOW_MS = 60 * 1000;        // count reserve_ai_usage calls within this rolling window
+const ABUSE_BURST_THRESHOLD = 6;                // more than this many calls in one window is bot-like, not human clicking
+const ABUSE_TEMP_LOCKOUT_MS = 5 * 60 * 1000;    // first offense: 5-minute cooldown
+const ABUSE_MAX_STRIKES = 3;                    // this many temp lockouts -> permanent, admin-required
+
 // Operational event log (errors + financial-decision/payment events), kept
 // as a normal "table" row in the Storage sheet under admin_shared -- no new
 // sheet needed. Capped so the payload_json cell never approaches Google
@@ -162,6 +178,8 @@ function handleRequest(e) {
         return handleReleaseAiUsage_(getAiUsageSheet_(), params);
       case "get_ai_usage":
         return handleGetAiUsage_(getUsersSheet_(), getAiUsageSheet_(), params);
+      case "admin_clear_abuse_lockout":
+        return handleAdminClearAbuseLockout_(getUsersSheet_(), getAbuseLockoutSheet_(), params);
       case "log_event":
         return handleLogEvent_(getStorageSheet_(), params);
       default:
@@ -700,6 +718,13 @@ function usagePayload_(vals, allowed, error, monthlyLimit, dailyLimit, dayKey) {
 function handleReserveAiUsage_(usersSheet, usageSheet, params) {
   const username = String(params.username || "").trim().toLowerCase();
   if (!username) return jsonResponse({success:false,error:"account identity is unavailable"});
+  // Abuse-rate check runs before the quota lookup so a bot hammering this
+  // endpoint gets locked out even once/if it exhausts (or never has) a
+  // legitimate quota -- the lockout is about call *rate*, not call *count*.
+  const abuseCheck = checkAndRecordAbuseAttempt_(username);
+  if (abuseCheck.locked) {
+    return jsonResponse({success:false, allowed:false, error:abuseCheck.reason, locked_out:true, permanent:!!abuseCheck.permanent});
+  }
   const user = findUser_(usersSheet, username);
   // Admin status is authoritative from the Users sheet only -- a
   // client-supplied is_admin param is never trusted for quota decisions.
@@ -775,6 +800,126 @@ function handleGetAiUsage_(usersSheet, usageSheet, params) {
   if(!rowNum)return jsonResponse({success:true,monthly_used:0,monthly_limit:monthlyLimit,daily_used:0,daily_limit:dailyLimit,monthly_cost_usd:0,input_tokens:0,output_tokens:0});
   const vals=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length).getValues()[0], dailyUsed=String(vals[2])===period.dayKey?Number(vals[5])||0:0;
   return jsonResponse({success:true,monthly_used:Number(vals[3])||0,monthly_limit:monthlyLimit,daily_used:dailyUsed,daily_limit:dailyLimit,monthly_cost_usd:Number((Number(vals[9])||0).toFixed(6)),input_tokens:Number(vals[7])||0,output_tokens:Number(vals[8])||0});
+}
+
+function getAbuseLockoutSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(ABUSE_LOCKOUT_SHEET_NAME);
+  if (!sheet) { sheet = ss.insertSheet(ABUSE_LOCKOUT_SHEET_NAME); sheet.appendRow(ABUSE_LOCKOUT_HEADER); }
+  return sheet;
+}
+
+function findAbuseRow_(sheet, username) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toLowerCase() === username) return i + 1;
+  }
+  return 0;
+}
+
+// Rolling-window burst detector with escalating consequences. Uses its own
+// LockService acquisition (released before returning) rather than sharing
+// the caller's lock, so this stays a self-contained, independently callable
+// unit -- callers never need to know or coordinate locking with it.
+function checkAndRecordAbuseAttempt_(username) {
+  const sheet = getAbuseLockoutSheet_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const nowMs = Date.now();
+    let rowNum = findAbuseRow_(sheet, username);
+    if (!rowNum) {
+      sheet.appendRow([username, new Date(nowMs).toISOString(), 1, "", 0, "FALSE", new Date(nowMs).toISOString()]);
+      return { locked: false };
+    }
+    const row = sheet.getRange(rowNum, 1, 1, ABUSE_LOCKOUT_HEADER.length);
+    const vals = row.getValues()[0];
+
+    if (String(vals[5]).toUpperCase() === "TRUE") {
+      return {
+        locked: true,
+        permanent: true,
+        reason: "This account has been locked for repeated bot-like AI usage and needs an admin to clear it before AI features work again.",
+      };
+    }
+
+    const lockoutUntilMs = vals[3] ? new Date(String(vals[3])).getTime() : NaN;
+    if (Number.isFinite(lockoutUntilMs) && nowMs < lockoutUntilMs) {
+      const remainingSec = Math.ceil((lockoutUntilMs - nowMs) / 1000);
+      return {
+        locked: true,
+        permanent: false,
+        reason: "Too many AI requests too fast -- locked out for " + remainingSec + " more second(s).",
+      };
+    }
+
+    const windowStartMs = new Date(String(vals[1] || "")).getTime();
+    let windowCount = Number(vals[2]) || 0;
+    if (!Number.isFinite(windowStartMs) || nowMs - windowStartMs > ABUSE_BURST_WINDOW_MS) {
+      vals[1] = new Date(nowMs).toISOString();
+      windowCount = 1;
+    } else {
+      windowCount += 1;
+    }
+    vals[2] = windowCount;
+    vals[6] = new Date(nowMs).toISOString();
+
+    if (windowCount > ABUSE_BURST_THRESHOLD) {
+      const strikeCount = (Number(vals[4]) || 0) + 1;
+      vals[4] = strikeCount;
+      vals[1] = new Date(nowMs).toISOString();
+      vals[2] = 0;
+      if (strikeCount >= ABUSE_MAX_STRIKES) {
+        vals[5] = "TRUE";
+        vals[3] = "";
+        row.setValues([vals]);
+        return {
+          locked: true,
+          permanent: true,
+          reason: "This account has been locked for repeated bot-like AI usage and needs an admin to clear it before AI features work again.",
+        };
+      }
+      vals[3] = new Date(nowMs + ABUSE_TEMP_LOCKOUT_MS).toISOString();
+      row.setValues([vals]);
+      return { locked: true, permanent: false, reason: "Too many AI requests too fast -- locked out for 5 minutes." };
+    }
+
+    row.setValues([vals]);
+    return { locked: false };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Admin-only escape hatch -- the permanent lockout above is intentionally
+// not self-clearing, so this is the only way an account recovers from one.
+// admin_username must itself resolve to an is_admin=TRUE row in the Users
+// sheet; a non-admin (or forged) caller gets refused, same pattern as every
+// other admin-gated action in this file.
+function handleAdminClearAbuseLockout_(usersSheet, abuseSheet, params) {
+  const adminUsername = String(params.admin_username || "").trim().toLowerCase();
+  const targetUsername = String(params.target_username || "").trim().toLowerCase();
+  if (!targetUsername) return jsonResponse({success:false, error:"target_username is required"});
+  const admin = findUser_(usersSheet, adminUsername);
+  if (!admin || !admin.isAdmin) return jsonResponse({success:false, error:"admin privileges required"});
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const rowNum = findAbuseRow_(abuseSheet, targetUsername);
+    if (!rowNum) return jsonResponse({success:true});
+    const row = abuseSheet.getRange(rowNum, 1, 1, ABUSE_LOCKOUT_HEADER.length);
+    const vals = row.getValues()[0];
+    vals[1] = new Date().toISOString();
+    vals[2] = 0;
+    vals[3] = "";
+    vals[4] = 0;
+    vals[5] = "FALSE";
+    vals[6] = new Date().toISOString();
+    row.setValues([vals]);
+    return jsonResponse({success:true});
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function jsonResponse(obj) {
