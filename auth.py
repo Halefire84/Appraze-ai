@@ -181,6 +181,22 @@ def mark_paid(username: str) -> bool:
         return False
 
 
+def _render_brand_header(caption: str) -> None:
+    """Shared login-screen header: the real Appraze logo, not a generic
+    emoji, and "Appraze" as the product name -- never "CRTC", which is the
+    company name only (see CRTC_NAME.md's brand rule). Inlined styling
+    rather than the .appraze-brand CSS class app.py's LIGHT_CSS defines,
+    since this renders on every independently-reachable page (each calls
+    require_auth() directly, per its docstring) and most of them never
+    load app.py's stylesheet."""
+    st.markdown(
+        '<img src="./app/static/appraze-logo.svg" alt="Appraze" '
+        'style="max-width:220px;width:100%;display:block;margin:0 auto 14px;">',
+        unsafe_allow_html=True,
+    )
+    st.caption(caption)
+
+
 def render_login_gate() -> bool:
     """
     Renders a login/signup form. Returns True if the current session is
@@ -190,8 +206,7 @@ def render_login_gate() -> bool:
     if st.session_state.get("authenticated"):
         return True
 
-    st.markdown("## 🪙 CRTC")
-    st.caption("Cooper River Trading Co. — private workspace")
+    _render_brand_header("Cooper River Trading Co. — private workspace")
 
     tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
 
@@ -289,8 +304,7 @@ def require_auth() -> None:
     if st.session_state.get("authenticated"):
         return
 
-    st.markdown("## 🪙 CRTC")
-    st.caption("Cooper River Trading Co. — sign in to continue")
+    _render_brand_header("Cooper River Trading Co. — sign in to continue")
 
     if not _admin_credentials_configured():
         st.error(

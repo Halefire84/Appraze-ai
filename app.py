@@ -37,7 +37,7 @@ from ai_usage import (
 # --------------------------------------------------------------------------
 st.set_page_config(
     page_title="Appraze",
-    page_icon="💼",
+    page_icon="static/icon-192.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
