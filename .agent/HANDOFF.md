@@ -3,6 +3,86 @@
 Last updated: 2026-09-22 (follow-up session, on `main` directly — the
 2026-09-21 session's branch was squash-merged as PR #25 and auto-deleted).
 
+## 2026-09-22 (later still): real eBay listing publishing
+
+New: `ebay_listing.py` -- real eBay listing creation, distinct from
+`comps_adapters.py`'s existing `EbayBrowseAdapter` (which uses the
+`client_credentials` OAuth grant for app-level, read-only Browse/Insights
+lookups, no seller context). Posting an actual listing requires the
+**Authorization Code grant**: the seller logs into eBay once and
+explicitly consents, eBay redirects back with a code this app exchanges
+for a refresh token (~18mo) / access token (~2hr, auto-refreshed).
+
+Single-seller model (matches this app's single-shared-workspace
+architecture): credentials stored once under the `admin_shared` owner key
+via the existing `storage.py` table pattern (`ebay_seller_credentials`),
+not a per-customer "everyone connects their own eBay" feature.
+
+Flow: `authorization_url()` -> seller consents on eBay -> redirected back
+to `pages/5_Cross_List.py` with `?code=&state=` -> `exchange_code_for_tokens()`
+-> `save_credentials()`. Publishing a READY_TO_PUBLISH eBay draft calls
+`publish_listing()`, which orchestrates 3 real Sell Inventory API calls in
+order and stops at the first failure, reporting exactly which step failed
+(`PublishResult.step`) -- never claims success from a partial completion,
+and never leaves a phantom "published" status if eBay actually rejected
+something:
+1. `create_inventory_item()` -- PUT /sell/inventory/v1/inventory_item/{sku}
+2. `create_offer()` -- POST /sell/inventory/v1/offer (needs existing
+   payment/return/fulfillment business-policy IDs from the seller's own
+   eBay account -- `get_business_policies()` fetches whatever exists so
+   the UI can offer a picker, never guesses/hardcodes an ID)
+3. `publish_offer()` -- POST .../offer/{offerId}/publish -- returns the
+   real `listingId`, wired into `listing_store.transition_listing(draft,
+   "ACTIVE", external_id=listing_id)`.
+
+**External prerequisites only the account owner can complete** (documented
+in `ebay_listing.py`'s module docstring and surfaced in the UI, not
+something this code can do or work around):
+1. Register a redirect ("RuName") for this app's OAuth callback in the
+   eBay Developer Portal -- `EBAY_RUNAME` secret.
+2. Set up at least one payment/return/fulfillment business policy in
+   Seller Hub -- publishing fails with a clear "set these up first"
+   message if none exist, never a guess.
+3. Confirm the developer account's Sell APIs are enabled for the target
+   environment (`EBAY_SANDBOX` secret toggles sandbox vs production
+   hosts) -- production Sell API access can need eBay's own compliance
+   review, analogous to Stripe Connect going live.
+
+Every other marketplace in Cross-List (Etsy, Facebook Marketplace,
+Mercari, Poshmark, Depop) remains draft-only, deliberately: none has a
+public API for third-party listing tools, and the competitor tools that
+do reach 10+ marketplaces (Vendoo, List Perfectly, etc.) almost certainly
+get there via browser automation against each site's own web form --
+explicitly against this project's own stated rules (no anti-bot bypass).
+See `BETA_TO_PAID_CONVERSION_PLAN.md`'s "Cross-list reality check" for
+the business-side framing of this same tradeoff.
+
+**Verified live:** booted the app, logged in, navigated to Cross-List in
+a real browser (Playwright) -- renders cleanly, no exceptions, correctly
+shows "Not connected" + the exact missing-secrets message since no real
+eBay credentials exist in this environment. **Not verified:** an actual
+OAuth consent round-trip or a real published listing -- needs live eBay
+developer credentials nobody in this session has. Flagged, not claimed.
+
+A real bug was caught and fixed during testing, not just at review time:
+`get_business_policies()`'s response-key guessing (`f"{path}s"`, e.g.
+"payment_policys") didn't match eBay's actual camelCase API field names
+("paymentPolicies"). Caught because the test asserted on real values
+(`policies["payment"][0]["id"] == "pp1"`), not just "no exception" --
+worth noting since a shallower test would have missed it entirely, and
+one early draft of this test suite briefly had exactly that shallower
+version, which passed for the wrong reason (a Streamlit secrets-access
+crash also produces the same `ok=False` a real rejection does) until
+fixed.
+
+`tests/test_ebay_listing.py` -- 25 tests, all mocked (no real network
+calls): OAuth URL construction (incl. sandbox mode), token exchange/
+refresh, the `publish_listing()` orchestration's stop-at-first-failure
+contract, each Sell API step's success/rejection/not-connected paths, and
+`get_business_policies()`'s correct-shape parsing + failure fallback.
+
+Tests: `python3 -m pytest -q` -> 410 passed, 0 failed (385 prior + 25 new).
+
 ## 2026-09-22 (later): telemetry.py — operational error/event logging
 
 New: `telemetry.py`. Best-effort logging (never raises, never blocks a

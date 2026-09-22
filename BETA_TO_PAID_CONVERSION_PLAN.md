@@ -69,24 +69,37 @@ engine — deal math and buyer-premium auction math nobody else has. If that's
 sharp on Oct 1, the price holds. If it's wobbly, $29 feels expensive next to
 Vendoo Growth.
 
-> **Cross-list reality check (added 2026-09-22):** the tools above
-> (Vendoo, List Perfectly, Crosslist, PrimeLister, SellRaze) crosslist to
-> 10+ marketplaces largely because most of those marketplaces (Mercari,
-> Poshmark, Depop, Facebook Marketplace) have **no public API for
-> third-party listing tools** — those tools almost certainly automate the
-> marketplace's own web form (browser automation / session replay), which
-> is exactly what CRTC's own stated rules forbid ("no browser automation
-> or anti-bot bypasses" — see `SECURITY_RELEASE_CHECKLIST.md`,
-> `crtc_hunt_engine`-adjacent docs). Appraze's Cross-List page today
-> prepares per-marketplace drafts and stops at "ready to publish
-> manually" by design, not by oversight. The one marketplace where a
-> real, rules-compliant API integration is actually feasible is **eBay**
-> (Appraze already has `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET` wired for
-> read-only comps search; posting a real listing needs eBay's
-> Inventory/Trading API, a different OAuth scope, and — likely — the
-> owner requesting expanded API access from eBay's developer console).
-> This is a real scoping decision, not something to build silently; see
-> the open question raised in chat.
+> **Cross-list reality check (added 2026-09-22, updated same day — eBay
+> publishing now built):** the tools above (Vendoo, List Perfectly,
+> Crosslist, PrimeLister, SellRaze) crosslist to 10+ marketplaces largely
+> because most of those marketplaces (Mercari, Poshmark, Depop, Facebook
+> Marketplace) have **no public API for third-party listing tools** —
+> those tools almost certainly automate the marketplace's own web form
+> (browser automation / session replay), which is exactly what CRTC's own
+> stated rules forbid. Those marketplaces remain draft-only in Appraze by
+> design, not oversight.
+>
+> **eBay is done:** `ebay_listing.py` + `pages/5_Cross_List.py` now do
+> real eBay listing creation (Sell Inventory API, Authorization Code
+> OAuth — a seller connects their own eBay account once, then publishing
+> a READY_TO_PUBLISH draft creates an actual live eBay listing). Built
+> and unit-tested (25 tests, all mocked network) this session — **not yet
+> exercised against a real eBay account**, because that needs three
+> things only the account owner can do:
+> 1. Register a redirect ("RuName") in the eBay Developer Portal for this
+>    app's OAuth callback.
+> 2. Set up at least one payment/return/fulfillment business policy in
+>    Seller Hub — every offer references one, and the app has no way to
+>    create or guess these.
+> 3. Confirm the developer account's Sell APIs are enabled for whichever
+>    environment you test in (sandbox is usually available by default;
+>    production Sell API access can need eBay's own review, similar to
+>    Stripe Connect going live).
+>
+> Once those three are done and `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`/
+> `EBAY_RUNAME` are set in Streamlit secrets, do a real sandbox test
+> before trusting it with a live listing — same "verify before you trust
+> it" rule as the Stripe flow above.
 
 Recommendation: launch with the single $29 tier + $19 founding lock. Add
 volume/feature tiers later once usage data shows you the segments. Keep the

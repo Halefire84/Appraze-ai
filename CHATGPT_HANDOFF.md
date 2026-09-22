@@ -25,27 +25,29 @@
 > - A `/loop` self-paced hardening pass is running against this repo —
 >   expect small commits to show up on their own; check `git log` before
 >   assuming a fix is still needed.
+> - **eBay real listing publishing** — `ebay_listing.py` (new) +
+>   `pages/5_Cross_List.py` now do real eBay listing creation via the
+>   Sell Inventory API (Authorization Code OAuth, seller connects their
+>   own account once). Built and unit-tested (25 tests, all mocked), NOT
+>   yet exercised against a real eBay account — needs the owner to (1)
+>   register an OAuth redirect ("RuName") in eBay's Developer Portal, (2)
+>   set up payment/return/fulfillment business policies in Seller Hub,
+>   (3) confirm Sell API access for whichever environment they test in.
+>   None of those three are things this session or you can do — external,
+>   human-gated, same category as Stripe's live-credential gap above.
+>   Every other marketplace (Etsy, Facebook Marketplace, Mercari,
+>   Poshmark, Depop) is still deliberately draft-only: none has a public
+>   API for third-party listing tools, and reaching them the way
+>   competitor tools do (browser automation against each site's own web
+>   form) is explicitly against this project's own rules
+>   (`SECURITY_RELEASE_CHECKLIST.md`) — don't build that as a workaround.
 >
 > **Still genuinely open — good next targets for you:**
 > - Session 6 (financial-input validation at every UI boundary, not just
 >   the core engine) and Session 7 (dedicated security pass) from this
 >   pack's original plan.
-> - **Cross-List / real marketplace publishing** (`pages/5_🔗_Cross_List.py`)
->   is UI-only today by design — it prepares per-marketplace drafts and
->   stops, it does not post anywhere. Most reseller crosslisting tools
->   (Vendoo, List Perfectly, etc.) get multi-marketplace posting via
->   browser automation against each marketplace's own web form, which
->   this project's own rules explicitly forbid (no anti-bot bypass, no
->   scraping past auth walls — see `SECURITY_RELEASE_CHECKLIST.md`).
->   eBay is the one marketplace with a real public API path already
->   partially wired (`EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET` already used
->   for read-only comps search) — posting a live listing needs eBay's
->   Inventory/Trading API instead, a different OAuth scope, and likely
->   the owner requesting expanded API access from eBay's own developer
->   console (an external, human-gated step). See
->   `BETA_TO_PAID_CONVERSION_PLAN.md` for why this matters for the Oct 1
->   launch pricing story. Do not attempt browser automation for the other
->   marketplaces as a workaround — that's a rule violation, not a shortcut.
+> - The real eBay OAuth/policy dry run described above, once the owner
+>   completes eBay's own setup steps.
 > - Whether the Google Apps Script backend's OAuth "app is blocked" issue
 >   (mentioned in the owner's own conversion-plan doc as a launch
 >   blocker) is resolved — nobody in this session has visibility into
