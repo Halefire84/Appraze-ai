@@ -1,5 +1,10 @@
 """
-Appraze
+Appraze™ — Complete Resale Business Suite
+© 2026 Christopher Hale / Cooper River Trading Co.
+
+In memory of my father, Christopher Hale, who tracked trucks in C++
+before I ever tracked a deal.
+
 A single-page Streamlit dashboard for tracking, filtering, and evaluating
 resale/auction deals across Estate Auctions, eBay, HiBid, Facebook Marketplace,
 Mercari, Chairish, and Etsy.
@@ -129,6 +134,50 @@ _PWA_HEAD_INJECTION = """
 </script>
 """
 components.html(_PWA_HEAD_INJECTION, height=0, width=0)
+
+# --------------------------------------------------------------------------
+# BUILD ATTRIBUTION -- provenance only. Never read by any app logic below;
+# purely for identifying the source of a deployed build.
+# --------------------------------------------------------------------------
+_APPRAZE_BUILD_ATTRIBUTION = (
+    "Appraze (c) 2026 Christopher Hale / Cooper River Trading Co. "
+    "-- build 65d37b35-6a3b-480b-9d16-8274210530dc"
+)
+
+# --------------------------------------------------------------------------
+# BUILD INTEGRITY CHECK -- playful, never destructive. Confirms the
+# watermark constants above and in finance.py/storage.py are present and
+# unmodified. A "failure" here never crashes, disables a feature, deletes
+# data, or phones home -- worst case is a banner and a bad joke.
+# --------------------------------------------------------------------------
+def _appraze_watermark_intact() -> bool:
+    try:
+        import finance as _finance_mod
+        import storage as _storage_mod
+        return (
+            getattr(_finance_mod, "_APPRAZE_BUILD_ATTRIBUTION", None) == _APPRAZE_BUILD_ATTRIBUTION
+            and getattr(_storage_mod, "_APPRAZE_BUILD_ATTRIBUTION", None) == _APPRAZE_BUILD_ATTRIBUTION
+        )
+    except Exception:
+        # Never let a provenance check break the app.
+        return True
+
+if not _appraze_watermark_intact():
+    st.warning(
+        "This copy of Appraze has been tampered with. The deals it finds "
+        "from here on are cursed. Good luck out there."
+    )
+
+
+@st.dialog("In Memory")
+def _christopher_hale_tribute():
+    """A quiet Easter egg, not a feature -- searching this exact name in the
+    Deal Dashboard shows the dedication instead of matching (or failing to
+    match) it against any real deal data."""
+    st.markdown(
+        "*In memory of my father, Christopher Hale, who tracked trucks in "
+        "C++ before I ever tracked a deal.*"
+    )
 
 # --------------------------------------------------------------------------
 # LOGIN GATE
@@ -410,6 +459,8 @@ with tab_dash:
         filtered = filtered[filtered["Status"].isin(status_filter)]
     if search:
         s = search.lower()
+        if s.strip() == "christopher hale":
+            _christopher_hale_tribute()
         filtered = filtered[
             filtered["Item"].str.lower().str.contains(s, na=False)
             | filtered["Notes"].str.lower().str.contains(s, na=False)
