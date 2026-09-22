@@ -1,7 +1,110 @@
 # CRTC / Appraze — Agent Handoff
 
-Last updated: 2026-09-22 (follow-up session, on `main` directly — the
-2026-09-21 session's branch was squash-merged as PR #25 and auto-deleted).
+Last updated: 2026-09-22 (beta-launch sprint, `claude/beta-launch-sprint`,
+open as PR #29, not yet merged).
+
+## 2026-09-22 (beta-launch sprint): rebrand, decision-engine hardening, auth hardening
+
+Free beta (10 users, no payments) was ordered to ship 2026-09-22. This
+sprint covers the P0-adjacent items called out as tonight's minimum;
+Stripe P0s, paywall wiring, and the data-integrity batch (SKU/listing ID
+work) were explicitly out of scope for tonight per the sprint brief and
+remain open for the week leading to the Oct 1 paid launch.
+
+**1. Rebrand sweep.** Every remaining live "CRTC" string in the UI (button
+labels, decision banners, page titles) replaced with "Appraze" --
+`crtc_holy_grail.py` was the worst offender (whole page titled/branded
+CRTC). `CRTC_NAME.md`'s rule: Appraze is the product name, CRTC is the
+company name only, never customer-facing. Docstrings/comments and the
+`CRTC_ADMIN_*` secret key names are left alone (developer-facing only;
+renaming the secret key would break an already-configured deployment).
+manifest.json and README.md were already correct from an earlier session.
+
+**2. Decision-engine audit (P0 items 4/5/6).**
+- Category-mismatch (F-04): the fix (independent-taxonomy-only evidence)
+  was already in place from an earlier session, but the only test called
+  `detect_category_mismatch()` directly. Added
+  `tests/test_category_mismatch_real_pipeline.py`, which goes through
+  `holy_grail_pipeline.score_listing()` -- the actual eBay-scan pipeline
+  (`normalize_listing()` -> `analyze_listing()`) -- with NO caller-supplied
+  taxonomy, covering correct/wrong/ambiguous/missing category, misleading
+  title/description, and brand/category conflict.
+- Found two real gaps in `decision_policy.evaluate_deal()` while auditing
+  it against the invalid-input requirement: (a) negative
+  `buyer_premium_pct`/`shipping`/`other_fees` only went through
+  `_safe_float()` (screens None/bool/NaN/Inf, not sign) -- a negative
+  value silently reduced all-in cost below price, which could manufacture
+  a false BUY from malformed input; now treated as unknown/not-applicable,
+  never used to shrink cost. (b) `market_value == 0.0` (valid input, not
+  negative) fell through to the normal 70%-rule comparison, so
+  price=$0/value=$0 returned BUY; now returns REVIEW directly, since zero
+  resale value can never justify an acquisition regardless of price.
+  New regression suite: `tests/test_decision_policy_invalid_inputs.py`.
+
+**3. Auth hardening (P0 item 3, `auth.py:33,87,272`).**
+- Brute-force lockout: 5 failed attempts locks a username out for 15
+  minutes, in-process (module-level dict), applied to both the Admin login
+  and the Apps-Script tester login path. This is in-process state, not a
+  durable/shared store -- it resets on app restart/redeploy and only
+  applies within one running instance. Acceptable for a 10-user beta on
+  Streamlit Community Cloud's single-instance free tier; documented as a
+  known limitation, not oversold as durable multi-instance rate limiting.
+- `CRTC_ADMIN_PASSWORD_HASH` now accepts bcrypt (new recommended format,
+  salted, deliberately slow) alongside the legacy SHA-256 hex digest
+  (unsalted, fast to brute-force offline if ever leaked), auto-detected by
+  hash shape. The legacy format is intentionally still accepted: tomorrow's
+  launch depends on the already-configured production secret continuing to
+  work without a forced rotation. `AUTH_SETUP.md` documents bcrypt as the
+  path for new/rotated credentials.
+- **Known follow-up, not done tonight:** the tester/signup path
+  (`AppsScript_Code.gs`'s `handleSignup_`/`handleLogin_`) still stores a
+  SHA-256 hash. Migrating that needs Apps-Script-side changes that
+  couldn't be live-tested against the real deployed Sheet from this
+  session -- left as a documented gap rather than an unverified change
+  pushed hours before launch.
+
+**4. Full test suite:** `python3 -m pytest -q` -> 434 passed, 0 failed (11
+pre-existing deprecation warnings from starlette/httpx2, unrelated).
+`flake8 --select=E9,F63,F7,F82` (CI's blocking lint gate): 0 findings.
+
+**5. Deployment:** code is pushed and PR #29 is open, but actually
+deploying to Streamlit Community Cloud is a web-UI action under the
+account owner's own Streamlit/GitHub login -- there is no CLI/API for
+that step, so this session cannot perform it. Reported to the user with
+exact manual steps.
+
+**6. Lightweight security pass (not the full audit -- that's sequenced
+after P0/P1 closure per the standing security-hardening directive, and
+starts next):**
+- `bandit -r .`: 2 Medium findings, both `urllib.request.urlopen()` calls
+  bandit flags generically for any dynamic-scheme risk. Both reviewed:
+  `app.py`'s call target is the hardcoded Anthropic API URL; and
+  `listing_bridge.py::_default_transport()` takes `url` as a parameter but
+  its only real caller passes the hardcoded `_ANTHROPIC_URL` constant --
+  no listing-derived or otherwise attacker-controlled URL reaches either
+  call site today. False positives given current usage, not fixed
+  tonight; worth a `# nosec` with a comment if this keeps tripping scans.
+- `pip-audit -r requirements.txt`: no known vulnerabilities in pinned deps.
+- Checked for the AI/prompt-injection surface the standing directive
+  flags (marketplace listing text reaching an LLM unsupervised): no such
+  path currently exists. `opportunity_radar.py`/`holy_grail_pipeline.py`
+  (the code that processes scraped/imported marketplace listings) are
+  pure deterministic regex/keyword logic with no LLM call anywhere in
+  that pipeline. The only LLM call in the app is the AI Analyzer
+  (`app.py` ~line 980), which sends the logged-in user's own uploaded
+  photo/description of their own item, with a fixed `system` prompt kept
+  separate from user `content` (the correct separation) -- self-directed
+  input, not third-party data, and not currently a cross-user injection
+  vector.
+
+**Not done tonight, explicitly deferred to the standing directive's next
+phase:** full security audit (auth/session/API-boundary/secrets/rate-
+limiting/IDOR review), POS point-of-sale legal/tax-compliance work
+(per-state/county tax configuration, fully customizable receipts, barcode
+scan, card-present checkout), mobile/desktop deployment-readiness review.
+These are real, tracked asks -- not dropped, just correctly sequenced
+after tonight's P0 beta-shippability minimum per the user's own stated
+priority order.
 
 ## 2026-09-22 (later still): real eBay listing publishing
 
