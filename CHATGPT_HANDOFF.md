@@ -1,13 +1,56 @@
-> **STATUS (2026-09-22):** Sessions 1-5 and most of 8-9 from this pack are
-> **done** — reconciled and cross-checked against actual source, not just
-> claimed. See `.agent/HANDOFF.md` for the current-state snapshot with
-> file/test evidence. `CRTC-P0-hardened.zip` referenced below no longer
-> needs to be unzipped anywhere — its content (`decision_policy.py`,
-> `number_normalize.py`, `tests/test_p0_regression.py`) is already merged
-> into `main`. Sessions 6 (financial-input validation at every UI
-> boundary) and 7 (a dedicated security pass) are the two still genuinely
-> open. Read this file for the operating rules and Session 6-7 prompts;
-> don't restart from Session 0.
+> **STATUS (2026-09-22, later — handoff for parallel ChatGPT work):**
+> Read `.agent/HANDOFF.md` first — it is the current-state snapshot with
+> file/test evidence, updated today. This banner is the fast summary.
+>
+> **Done and pushed** (branch `claude/chatgpt-crosscheck-buyer-premium-fix`
+> on `Halefire84/Appraze-ai`, not yet merged to `main` — check
+> `git log origin/main..origin/claude/chatgpt-crosscheck-buyer-premium-fix`
+> before assuming which branch has what):
+> - Sessions 1-5 and most of 8-9 from this pack's original plan — done,
+>   cross-checked against actual source, not just claimed.
+> - A real unit-collision bug in `acquisition_hunter.py` (`buyer_premium`
+>   meant dollars there, percent points in `decision_policy.py` — same
+>   key, two conventions) — fixed, renamed to `buyer_premium_amount`.
+> - `telemetry.py` — best-effort error/payment-event logging to a new
+>   `event_log` table, wired into Stripe webhook failures and AI Analyzer
+>   errors, with an admin-only viewer in the app.
+> - **The paid-subscription flow was completely unwired until today** —
+>   `billing.py`/`auth.mark_paid()` existed but nothing called them, not
+>   even the owner could mark an account paid through the app. Fixed:
+>   `pages/8_Pricing.py` now has a real Subscribe button + Stripe
+>   session-verify + account-upgrade flow. NOT yet tested with a real
+>   payment (needs live/test Stripe credentials nobody here has).
+> - `crtc.py` (confirmed dead code) removed; `CRTC_GAP_CLOSURE_REPORT.md`
+>   (contained a factually wrong claim) removed.
+> - A `/loop` self-paced hardening pass is running against this repo —
+>   expect small commits to show up on their own; check `git log` before
+>   assuming a fix is still needed.
+>
+> **Still genuinely open — good next targets for you:**
+> - Session 6 (financial-input validation at every UI boundary, not just
+>   the core engine) and Session 7 (dedicated security pass) from this
+>   pack's original plan.
+> - **Cross-List / real marketplace publishing** (`pages/5_🔗_Cross_List.py`)
+>   is UI-only today by design — it prepares per-marketplace drafts and
+>   stops, it does not post anywhere. Most reseller crosslisting tools
+>   (Vendoo, List Perfectly, etc.) get multi-marketplace posting via
+>   browser automation against each marketplace's own web form, which
+>   this project's own rules explicitly forbid (no anti-bot bypass, no
+>   scraping past auth walls — see `SECURITY_RELEASE_CHECKLIST.md`).
+>   eBay is the one marketplace with a real public API path already
+>   partially wired (`EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET` already used
+>   for read-only comps search) — posting a live listing needs eBay's
+>   Inventory/Trading API instead, a different OAuth scope, and likely
+>   the owner requesting expanded API access from eBay's own developer
+>   console (an external, human-gated step). See
+>   `BETA_TO_PAID_CONVERSION_PLAN.md` for why this matters for the Oct 1
+>   launch pricing story. Do not attempt browser automation for the other
+>   marketplaces as a workaround — that's a rule violation, not a shortcut.
+> - Whether the Google Apps Script backend's OAuth "app is blocked" issue
+>   (mentioned in the owner's own conversion-plan doc as a launch
+>   blocker) is resolved — nobody in this session has visibility into
+>   Google Cloud Console to check.
+> - Real Stripe test-mode dry run end-to-end (nobody has done one yet).
 
 # CRTC → ChatGPT / Claude Full Handoff Pack
 **Date:** 2026-09-19  
