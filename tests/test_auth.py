@@ -20,6 +20,7 @@ from auth import (
     _admin_credentials_configured,
     _admin_login,
     logout,
+    mark_paid,
     require_auth,
 )
 
@@ -229,6 +230,52 @@ class TestSessionSurvivesRerun(unittest.TestCase):
         for _ in range(5):
             require_auth()  # must return cleanly every time, never stop
         mock_st.stop.assert_not_called()
+
+
+class TestMarkPaid(unittest.TestCase):
+    """mark_paid() was defined but never called from anywhere in the live
+    app until pages/8_Pricing.py wired up the actual subscribe/verify flow
+    -- these are its first real behavioral tests (previously only checked
+    for existence via hasattr in test_smoke.py)."""
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_success_returns_true_and_sends_expected_action(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True}
+        mock_requests.post.return_value = resp
+
+        self.assertTrue(mark_paid("alex"))
+        call_kwargs = mock_requests.post.call_args.kwargs
+        self.assertEqual(call_kwargs["data"]["action"], "set_paid")
+        self.assertEqual(call_kwargs["data"]["username"], "alex")
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_backend_failure_returns_false(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": False, "error": "no account with that username"}
+        mock_requests.post.return_value = resp
+
+        self.assertFalse(mark_paid("does-not-exist"))
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_connection_error_returns_false_not_a_crash(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        mock_requests.post.side_effect = Exception("connection refused")
+
+        self.assertFalse(mark_paid("alex"))
 
 
 class TestDemoModeIsolation(unittest.TestCase):
