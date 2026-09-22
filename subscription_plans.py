@@ -26,11 +26,11 @@ class Plan:
 
 
 PLANS: Tuple[Plan, ...] = (
-    Plan("free", "Free", 0, 5, False, False, False, False, False, False, False, tagline="Try CRTC"),
-    Plan("scout", "Scout", 19, 50, True, True, False, False, False, False, False, tagline="For occasional sourcing"),
-    Plan("hunter", "Hunter", 49, 250, True, True, True, True, True, True, True, tagline="The CRTC flagship"),
-    Plan("operator", "Operator", 99, 1000, True, True, True, True, True, True, True, tagline="For serious resellers"),
-    Plan("pro", "Pro", 199, 5000, True, True, True, True, True, True, True, team_seats=5, tagline="For teams and high volume"),
+    Plan("free", "Free", 0, 5, False, False, False, False, False, False, False, tagline="Taste the deal math"),
+    Plan("starter", "Starter", 25, 50, True, True, False, False, False, False, False, tagline="For occasional sourcing"),
+    Plan("pro", "Pro", 50, 250, True, True, True, True, False, True, True, tagline="The flagship. For working resellers"),
+    Plan("business", "Business", 100, 1000, True, True, True, True, True, True, True, team_seats=3, tagline="For serious volume and teams"),
+    Plan("enterprise", "Enterprise", 200, 5000, True, True, True, True, True, True, True, team_seats=10, tagline="For full-time operations"),
 )
 
 FEATURE_LABELS: FrozenSet[str] = frozenset({

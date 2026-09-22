@@ -9,12 +9,12 @@ require_auth()
 st.title("💳 CRTC Pricing")
 st.caption("Pay for opportunity intelligence — not another spreadsheet.")
 
-st.info("Launch strategy: keep the Free tier useful, make Hunter the obvious flagship, and add higher-volume tiers only as real demand appears.")
+st.info("Launch strategy: keep the Free tier useful, make Pro the obvious flagship, and add higher-volume tiers only as real demand appears.")
 
 cols = st.columns(len(PLANS))
 for col, plan in zip(cols, PLANS):
     with col:
-        if plan.key == "hunter":
+        if plan.key == "pro":
             st.markdown("### 🏆 MOST POPULAR")
         st.subheader(plan.name)
         if plan.monthly_price == 0:
@@ -34,9 +34,9 @@ for col, plan in zip(cols, PLANS):
             st.write(f"✅ {plan.team_seats} team seats")
 
 st.divider()
-st.subheader("Why Hunter is the flagship")
+st.subheader("Why Pro is the flagship")
 st.markdown("""
-**$49/month** is designed around the feature that makes CRTC different: finding opportunities the market overlooked.
+**$50/month** is designed around the feature that makes CRTC different: finding opportunities the market overlooked.
 
 - Holy Grail opportunity hunting
 - Information-failure scoring
