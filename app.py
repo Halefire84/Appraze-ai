@@ -21,7 +21,9 @@ from finance import (
     compute_verdict, deal_roi, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
 )
-from auth import require_auth, logout
+from auth import require_auth, logout, mark_paid
+from billing import verify_checkout_session
+from subscription_plans import get_plan
 from pos import create_pos_checkout, check_payment_status
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
@@ -139,6 +141,39 @@ components.html(_PWA_HEAD_INJECTION, height=0, width=0)
 # Admin secrets aren't configured, require_auth() refuses to render a
 # login form at all rather than accepting a guessable placeholder.
 require_auth()
+
+# --------------------------------------------------------------------------
+# SUBSCRIPTION CHECKOUT RETURN -- a plan's Stripe Payment Link (see
+# pages/8_Pricing.py + billing.plan_payment_link) redirects back here with
+# ?sub_plan=<key>&sub_session_id={CHECKOUT_SESSION_ID} after payment. This
+# verifies the session actually paid (never trusts the redirect alone --
+# anyone could hand-craft that URL) before recording the plan. mark_paid()
+# is called with BOTH session_id (this app's Stripe-replay protection --
+# AppsScript_Code.gs's handleSetPaid_ rejects reusing an already-redeemed
+# session_id against a different account) and plan (which tier to record)
+# as explicit keywords -- mark_paid's signature is
+# (username, session_id="", plan=""), so passing the plan key positionally
+# here would silently land in the session_id slot instead.
+# --------------------------------------------------------------------------
+_qp = st.query_params
+if _qp.get("sub_session_id") and _qp.get("sub_plan"):
+    _sub_plan_key = _qp["sub_plan"]
+    _sub_session_id = _qp["sub_session_id"]
+    _sub_result = verify_checkout_session(_sub_session_id)
+    if _sub_result.paid:
+        if mark_paid(st.session_state.get("username", ""), session_id=_sub_session_id, plan=_sub_plan_key):
+            st.session_state.user_is_paid = True
+            st.session_state.user_plan = _sub_plan_key
+            st.success(f"You're now on the {get_plan(_sub_plan_key).name} plan. Welcome aboard!")
+        else:
+            st.warning(
+                "Payment went through, but saving your new plan failed. "
+                "Contact support with this session ID and we'll fix it: "
+                f"{_sub_session_id}"
+            )
+    else:
+        st.warning("We couldn't confirm that payment yet. If you just paid, refresh in a moment.")
+    st.query_params.clear()
 
 WORKSPACE = "business"
 
