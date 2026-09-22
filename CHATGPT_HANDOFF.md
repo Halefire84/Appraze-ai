@@ -1,3 +1,14 @@
+> **STATUS (2026-09-22):** Sessions 1-5 and most of 8-9 from this pack are
+> **done** — reconciled and cross-checked against actual source, not just
+> claimed. See `.agent/HANDOFF.md` for the current-state snapshot with
+> file/test evidence. `CRTC-P0-hardened.zip` referenced below no longer
+> needs to be unzipped anywhere — its content (`decision_policy.py`,
+> `number_normalize.py`, `tests/test_p0_regression.py`) is already merged
+> into `main`. Sessions 6 (financial-input validation at every UI
+> boundary) and 7 (a dedicated security pass) are the two still genuinely
+> open. Read this file for the operating rules and Session 6-7 prompts;
+> don't restart from Session 0.
+
 # CRTC → ChatGPT / Claude Full Handoff Pack
 **Date:** 2026-09-19  
 **Product:** CRTC (Cooper River Trading Co.) — resale deal radar, max-bid math, flip ledger  
