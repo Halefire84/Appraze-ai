@@ -34,7 +34,13 @@ const TOKEN = "REPLACE_WITH_YOUR_OWN_LONG_RANDOM_STRING";
 const ADMIN_SETUP_CODE = "REPLACE_WITH_YOUR_OWN_ADMIN_INVITE_CODE";
 
 const USERS_SHEET_NAME = "Users";
-const USERS_HEADER = ["username", "password_hash", "display_name", "is_admin", "is_paid", "created_at"];
+// "plan" was added 2026-09-21 as a trailing 7th column (never inserted
+// mid-schema -- see migrateUsersSheetIfNeeded_) so existing rows' data in
+// columns A-F keep their original meaning. Values are subscription_plans.py's
+// plan keys ("free", "scout", "analyst", "appraiser", "operator", "pro");
+// a row written before this column existed reads back as "" and Python's
+// login()/signup() treat "" the same as "free".
+const USERS_HEADER = ["username", "password_hash", "display_name", "is_admin", "is_paid", "created_at", "plan"];
 
 const STORAGE_SHEET_NAME = "Storage";
 const STORAGE_HEADER = ["owner_key", "table", "payload_json", "updated_at"];
@@ -172,8 +178,39 @@ function getUsersSheet_() {
   if (!sheet) {
     sheet = ss.insertSheet(USERS_SHEET_NAME);
     sheet.appendRow(USERS_HEADER);
+    return sheet;
   }
+  migrateUsersSheetIfNeeded_(sheet);
   return sheet;
+}
+
+// Adds the "plan" column (index 6, i.e. column G) to a Users sheet created
+// before 2026-09-21, which only had the first 6 USERS_HEADER columns.
+// Appended at the END rather than inserted mid-schema, unlike
+// migrateStorageSheetIfNeeded_'s insertColumnAfter -- that keeps every
+// existing row's is_admin/is_paid/created_at sitting in the exact columns
+// they were already written to, so there's no data to backfill: a
+// pre-existing row simply reads back with an empty "plan" cell, and
+// handleLogin_/handleSignup_ already treat "" the same as "free".
+function migrateUsersSheetIfNeeded_(sheet) {
+  if (!isLegacyUsersSchema_(sheet)) return;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (!isLegacyUsersSchema_(sheet)) return;
+    const lastCol = sheet.getLastColumn();
+    sheet.getRange(1, lastCol + 1).setValue("plan");
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function isLegacyUsersSchema_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) return false;
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return header.length === 6 && header[0] === "username" && header[5] === "created_at";
 }
 
 function getStorageSheet_() {
@@ -310,8 +347,8 @@ function handleSignup_(sheet, params) {
   // Sanitize only the copy written to the Sheet cell -- the response below
   // returns the original displayName unchanged, so the app UI shows
   // exactly what the person typed, not a leading apostrophe.
-  sheet.appendRow([username, passwordHash, sanitizeForSheetCell_(displayName), isAdmin ? "TRUE" : "FALSE", "FALSE", new Date().toISOString()]);
-  return jsonResponse({ success: true, display_name: displayName, is_admin: isAdmin, is_paid: false, username: username });
+  sheet.appendRow([username, passwordHash, sanitizeForSheetCell_(displayName), isAdmin ? "TRUE" : "FALSE", "FALSE", new Date().toISOString(), "free"]);
+  return jsonResponse({ success: true, display_name: displayName, is_admin: isAdmin, is_paid: false, username: username, plan: "free" });
 }
 
 function handleLogin_(sheet, params) {
@@ -328,6 +365,7 @@ function handleLogin_(sheet, params) {
           is_admin: String(data[i][3]).toUpperCase() === "TRUE",
           is_paid: String(data[i][4]).toUpperCase() === "TRUE",
           username: username,
+          plan: String(data[i][6] || "free"),
         });
       }
       return jsonResponse({ success: false, error: "incorrect password" });
@@ -346,11 +384,14 @@ function getRedeemedSessionsSheet_() {
   return sheet;
 }
 
-function setPaidForUser_(sheet, username) {
+function setPaidForUser_(sheet, username, plan) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).toLowerCase() === username) {
       sheet.getRange(i + 1, 5).setValue("TRUE"); // is_paid column
+      if (plan) {
+        sheet.getRange(i + 1, 7).setValue(plan); // plan column
+      }
       return jsonResponse({ success: true });
     }
   }
@@ -360,6 +401,7 @@ function setPaidForUser_(sheet, username) {
 function handleSetPaid_(sheet, redeemedSheet, params) {
   const username = String(params.username || "").trim().toLowerCase();
   const sessionId = String(params.session_id || "").trim();
+  const plan = String(params.plan || "");
   if (!username) {
     return jsonResponse({ success: false, error: "username required" });
   }
@@ -367,7 +409,7 @@ function handleSetPaid_(sheet, redeemedSheet, params) {
     // No Stripe session to guard against replay of (e.g. a future
     // hand-triggered admin action) -- every real call from
     // pages/8_Pricing.py always supplies one.
-    return setPaidForUser_(sheet, username);
+    return setPaidForUser_(sheet, username, plan);
   }
 
   const lock = LockService.getScriptLock();
@@ -388,7 +430,7 @@ function handleSetPaid_(sheet, redeemedSheet, params) {
       }
     }
     redeemedSheet.appendRow([sessionId, username, new Date().toISOString()]);
-    return setPaidForUser_(sheet, username);
+    return setPaidForUser_(sheet, username, plan);
   } finally {
     lock.releaseLock();
   }
