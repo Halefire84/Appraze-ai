@@ -32,6 +32,7 @@ from stripe_webhooks import (
 from listing_bridge import build_master_listing, _stable_sku
 from listing_normalizer import normalize_listing
 from number_normalize import parse_percent_points, parse_money
+from acquisition_hunter import estimate_max_bid
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +216,36 @@ def test_f13_secret_rotation_accepts_first_valid_v1():
     assert verify_stripe_signature(payload, header, secret) is True
     header2 = f"t={ts},v1={good},v1=deadbeef"
     assert verify_stripe_signature(payload, header2, secret) is True
+
+
+# ---------------------------------------------------------------------------
+# buyer_premium naming collision -- acquisition_hunter.py's liquidation-lot
+# pipeline sums a DOLLAR figure under this concept, while decision_policy.py's
+# unrelated auction pipeline treats a bare "buyer_premium" key as PERCENTAGE
+# points. The two used to share the identical ambiguous key name; a listing
+# dict accidentally fed to the wrong pipeline would have silently
+# misinterpreted the units. acquisition_hunter.py now only reads the
+# explicit buyer_premium_amount key.
+# ---------------------------------------------------------------------------
+def test_acquisition_hunter_reads_explicit_amount_key():
+    result = estimate_max_bid({
+        "expected_resale": 1000,
+        "recovery_rate": 1.0,
+        "buyer_premium_amount": 100,
+    })
+    assert result["fixed_costs"] == 100.0
+
+
+def test_acquisition_hunter_ignores_legacy_ambiguous_key():
+    # The old bare "buyer_premium" key (as used by decision_policy.py's
+    # percentage-points pipeline) must NOT be picked up here as a dollar
+    # amount -- that was exactly the cross-pipeline unit confusion risk.
+    result = estimate_max_bid({
+        "expected_resale": 1000,
+        "recovery_rate": 1.0,
+        "buyer_premium": 100,
+    })
+    assert result["fixed_costs"] == 0.0
 
 
 # ---------------------------------------------------------------------------

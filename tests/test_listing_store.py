@@ -12,8 +12,8 @@ def test_upsert_replaces_same_marketplace():
 def test_transition_preserves_external_id():
     # READY_TO_PUBLISH, not DRAFT: the lifecycle hardening in listing_store.py
     # (see tests/test_listing_lifecycle_e2e.py::test_listing_cannot_skip_draft_to_active)
-    # deliberately requires DRAFT -> READY_TO_PUBLISH -> ACTIVE, matching every
-    # real caller (crtc.py, pages/5_Cross_List.py only ever request
+    # deliberately requires DRAFT -> READY_TO_PUBLISH -> ACTIVE, matching the
+    # real caller (pages/5_Cross_List.py only ever requests
     # READY_TO_PUBLISH). This test predates that hardening; the scenario is
     # updated to a valid transition, the behavior under test (external_id is
     # set, status updates, the input dict is not mutated) is unchanged.

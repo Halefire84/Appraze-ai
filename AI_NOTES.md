@@ -54,8 +54,7 @@ in its own file header — see `README.md`'s "Built but not currently
 wired" section and `CRTC_HANDOFF.md` for the full inventory and why):
 `billing.py`'s subscriber-paywall half (`payment_link_url()`; its
 `verify_checkout_session()` IS used, see above), `mail.py` /
-`mail_parse.py`, `drive_scan.py`, `crtc.py` (superseded by
-`pages/5_🔗_Cross_List.py`), `financial_intelligence.py` /
+`mail_parse.py`, `drive_scan.py`, `financial_intelligence.py` /
 `payments_adapter.py` (future-roadmap scaffolding, see
 `CRTC_FINANCIAL_ROADMAP.md`), `crtc_learning.py` (tested, tied to
 `docs/CRTC_CONTINUOUS_HUNT.md`'s design), `ebay_image_scan.py` (recent,

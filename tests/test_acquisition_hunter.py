@@ -13,7 +13,7 @@ class TestAcquisitionHunter(unittest.TestCase):
             "expected_resale": 1800,
             "recovery_rate": 0.85,
             "current_bid": 300,
-            "buyer_premium": 30,
+            "buyer_premium_amount": 30,
             "freight": 100,
         }, "modern_computers")
         self.assertIn("modern_cpu", result["signals"])
@@ -34,7 +34,7 @@ class TestAcquisitionHunter(unittest.TestCase):
         result = estimate_max_bid({
             "expected_resale": 1000,
             "recovery_rate": 0.8,
-            "buyer_premium": 50,
+            "buyer_premium_amount": 50,
             "tax": 50,
             "freight": 100,
             "repair_cost": 50,

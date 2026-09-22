@@ -1,13 +1,76 @@
 # CRTC / Appraze — Agent Handoff
 
-Last updated: 2026-09-21, this session (branch `claude/app-syntax-admin-auth-rkovke`).
+Last updated: 2026-09-22 (follow-up session, on `main` directly — the
+2026-09-21 session's branch was squash-merged as PR #25 and auto-deleted).
 
 This file is the authoritative, self-contained state summary for the next
 agent. `CRTC_HANDOFF.md` is a longer append-only session log kept for
 history; this file is the current-state snapshot. If the two disagree,
 trust this file and re-verify by running the test commands below.
 
-## What this session did
+## 2026-09-22 follow-up: buyer_premium naming collision, crtc.py removed
+
+Asked to cross-check everything ChatGPT's parallel session
+(`CHATGPT_HANDOFF.md`, `CRTC_SESSION_PROMPTS.md` — Sessions 0-9) had
+flagged, against actual current source, and to cut anything not worth
+keeping.
+
+**Real bug found and fixed:** `acquisition_hunter.py`'s liquidation-lot
+pipeline (`estimate_max_bid`/`score_acquisition`, used by
+`pages/2_📦_Liquidation_Surplus.py` and `pages/3_🏛️_Government_Electronics.py`
+via `crtc_hunt_engine.py`) summed a bare `listing.get("buyer_premium")` as
+a **dollar amount**. `decision_policy.py`'s unrelated auction pipeline
+(`pages/3_💰_Deal_Workspace.py`, `auction_radar.py`) reads that exact same
+key name as **percentage points** (documented there as a "legacy key").
+Two different unit conventions sharing one ambiguous field name — the
+exact class of bug the audit's "buyer_premium must have ONE documented
+unit convention" item warns about. If a listing dict were ever passed to
+the wrong pipeline, the value would have been silently misinterpreted.
+Fixed by renaming the dollar-amount side to the explicit
+`buyer_premium_amount` in `acquisition_hunter.py` and its two page
+callers (the percentage-points side, `decision_policy.py`'s legacy input
+alias, was intentional and left untouched — it already has an explicit
+`buyer_premium_pct` preferred key, this was a deliberate backward-compat
+read, not a bug). Added
+`tests/test_p0_regression.py::test_acquisition_hunter_reads_explicit_amount_key`
+and `::test_acquisition_hunter_ignores_legacy_ambiguous_key` to lock this
+in — the second test specifically proves the old ambiguous key is no
+longer read as a dollar amount.
+
+**Dead code removed:** `crtc.py` (178 lines) — confirmed via grep that
+nothing imports it anywhere in source, docs, or tests beyond passing
+mentions; its own docstring already said "NOT CURRENTLY USED... superseded
+by `pages/5_Cross_List.py`... safe to delete once someone confirms
+`pages/5_Cross_List.py` fully covers its functionality" — confirmed
+(`pages/5_Cross_List.py` reads `sku` from `listing_bridge.build_master_listing()`
+correctly, not a hardcoded fallback). Updated the 3 files that referenced
+it in passing (`AI_NOTES.md`, `tests/test_listing_store.py` comment, this
+file).
+
+**Explicitly NOT cut, despite being unwired/unimported** (checked each
+against `AI_NOTES.md`'s existing "Built but NOT wired" inventory and the
+docs it points to, rather than assuming "unused = cruft"):
+- `financial_intelligence.py`, `payments_adapter.py` — deliberate,
+  documented roadmap scaffolding for `CRTC_FINANCIAL_ROADMAP.md`'s
+  Plaid/bank-connection plan; `payments_adapter.py` specifically is what
+  OPEN PRODUCT REQUIREMENTS item 1 (pluggable payment processor) builds
+  on next.
+- `crtc_learning.py` — tested, tied to `docs/CRTC_CONTINUOUS_HUNT.md`'s
+  design.
+- `ebay_image_scan.py` — tested, "recent, deliberate, not legacy" per
+  `AI_NOTES.md`.
+
+A prior session already made this same call and left a note: this
+environment treats file deletion as needing explicit confirmation, and
+none of those four "not wired" but roadmap-anchored files should be
+deleted without the owner weighing in specifically on the roadmap, not
+just on unwired-ness.
+
+**Tests:** `python3 -m pytest -q` → 373 passed, 0 failed (371 prior + 2
+new). `python3 -m compileall -q .` → exit 0. Run in this session, on
+`main` directly.
+
+## What the 2026-09-21 session did (superseded branch, content is on `main`)
 
 1. **Fixed 5 collapsed-line syntax errors in `app.py`** (lines ~170, 368,
    762, 765, 768, 968 — the task named 5, one adjacent collapse at 762 was
@@ -65,7 +128,7 @@ trust this file and re-verify by running the test commands below.
    | 5 | Financial input validation (NaN/Inf/negative never → BUY) | **Done** | `number_normalize.py` (`parse_money`/`parse_percent_points` reject NaN/Inf/negative/bool-as-number); `decision_policy.evaluate_deal` returns REVIEW for any invalid number | `test_f10_*`, `test_f11_*`, `test_parse_money_common_forms` |
    | 6 | Unknown acquisition costs never silently $0 | **Done** | `decision_policy.py` cost states `KNOWN\|UNKNOWN\|ESTIMATED\|NOT_APPLICABLE`; unknown required shipping/premium → REVIEW/CONDITIONAL_BUY with `costs_complete=False` and the assumption listed in `warnings` | `test_f05_*` |
    | 7 | Buyer-premium unit ambiguity | **Done** | `number_normalize.parse_percent_points` — single documented convention (fraction/percent-string/points all normalize to points); `buyer_premium_pct` naming used at call sites | `test_f06_*` |
-   | 8 | SKU/listing-identity collisions (`CRTC-ITEM` fallback) | **Done** in the live path | `listing_bridge.build_master_listing()`/`_stable_sku()` generate collision-safe IDs, never `"CRTC-ITEM"`; the live Cross-List page (`pages/5_Cross_List.py`) consumes this. One residual literal `"CRTC-ITEM"` fallback remains in `crtc.py`, but that file is dead code (`NOT CURRENTLY USED`, per its own docstring — nothing imports it, superseded by `pages/5_Cross_List.py`) and was deliberately left alone rather than editing unreachable code flagged for eventual deletion | `test_f08_*` |
+   | 8 | SKU/listing-identity collisions (`CRTC-ITEM` fallback) | **Done** | `listing_bridge.build_master_listing()`/`_stable_sku()` generate collision-safe IDs, never `"CRTC-ITEM"`; the live Cross-List page (`pages/5_Cross_List.py`) consumes this. The one residual literal `"CRTC-ITEM"` fallback lived in dead code (`crtc.py`, superseded by `pages/5_Cross_List.py`), removed 2026-09-22 | `test_f08_*` |
 
    Also covered by the same suite but not in the original 8-item list:
    F-09 (out-of-order webhook can't downgrade a more-final status), F-12
@@ -183,8 +246,6 @@ dependencies, unrelated to this session's changes.
 - `AppsScript_Code.gs`'s `SALES_LOG_STATUS_RANK_` is a hand-mirrored copy
   of `stripe_webhooks.py`'s `STATUS_RANK` — see "Webhook state
   precedence" above.
-- `crtc.py` still contains a literal `"CRTC-ITEM"` fallback, but the file
-  is dead code (not imported anywhere); left alone deliberately.
 - The referenced audit brief file
   (`crtc-audit/claude-code-implementation-brief-2026-09-20.md`) does not
   exist in this repository. If the user has it, it should be added to the
