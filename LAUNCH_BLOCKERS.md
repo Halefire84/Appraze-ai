@@ -4,7 +4,7 @@ Hard gates only — not a general TODO list. See `CRTC_HANDOFF.md` for full
 implementation detail and `CHATGPT_HANDOFF.md` / `CRTC_SESSION_PROMPTS.md`
 for the hardening-session history behind these items.
 
-Last verified: 2026-09-22 — `python3 -m pytest tests/ -q` -> 497 passed, 0 failed.
+Last verified: 2026-09-22 — `python3 -m pytest tests/ -q` -> 498 passed, 0 failed.
 
 ## Stage A — Code-hardened (owner-only use)
 
@@ -32,6 +32,18 @@ Last verified: 2026-09-22 — `python3 -m pytest tests/ -q` -> 497 passed, 0 fai
 security-audit hardening is done, tested, and written up. See
 `SECURITY_NOTES.md` for what still needs a human before a wider beta
 (the shared-TOKEN trust model, live Apps Script deployment testing).
+
+## P1 — Cross-module consistency (verified 2026-09-22, not re-derived from claims)
+
+Every item below was checked against the actual current code this
+session, not copied forward from an earlier pass's notes:
+
+- [x] Buyer-premium units standardized — `buyer_premium_pct`/`buyer_premium_amount` are the live internal names; the one remaining bare `buyer_premium` key is a documented legacy input alias, explicitly commented "treated as percentage points" everywhere it's read (`decision_policy.py`, `auction_radar.py`), not silent ambiguity
+- [x] Out-of-order webhook state handling — `STATUS_RANK` (`stripe_webhooks.py`) and `SALES_LOG_STATUS_RANK_` (`AppsScript_Code.gs`) are identical and kept in sync; traced the actual enforcement point (`handleUpdateSalesLogStatus_`) and confirmed a status downgrade is genuinely rejected (`salesLogStatusRank_(newStatus) >= salesLogStatusRank_(currentStatus)`), not just a defined-but-unused table
+- [x] SKU/listing-identity generation — `listing_bridge._stable_sku()` uses a `uuid.uuid4()` nonce alongside a content hash, so two independently-created, otherwise-identical items never collide; no `"CRTC-ITEM"` fallback exists anywhere in production code (only in tests/comments documenting its removal)
+- [x] Shared financial/number normalization layer — `number_normalize.py` genuinely implements the full format set (currency with `$`/commas, bare numbers, `%`/fractional percentages, unit-ambiguous values), used across `acquisition_hunter.py`, `auction_costs.py`, `auction_radar.py`, `decision_policy.py`
+- [ ] Opportunity Radar arbitrary/fuzzy typo detection — explicitly out of scope, see "Not a blocker" section below (a deliberate decision, not an oversight)
+- [x] Observability/logging around financial decisions — found and fixed a real gap 2026-09-22: `telemetry.py`'s own docstring documented `deal_workspace.py` as the intended place to log every evaluated deal, but it never actually did. `build_deal_workspace()` (the one canonical entry point every caller goes through) now calls `log_event("INFO", "decision", ...)` with the verdict/ROI tier/cost on every call, with a regression test confirming it. Payment events were already logged (`stripe_webhook_server.py`, `pages/5_Cross_List.py`'s eBay publish path) — this closes the other half of the P2 observability item.
 
 ## Stage B — Friendly free beta (5–10 trusted resellers, target Oct 1 2026)
 
