@@ -30,6 +30,21 @@ def test_intake_becomes_canonical_flip():
     assert record["status"] == "PURCHASED"
     assert record["cost_basis"] == 75.0
     assert record["list_price"] == 0.0
+    assert record["image_urls"] == []
+
+
+def test_intake_carries_image_urls_through():
+    record = build_flip_record({"item_name": "Camera", "cost_basis": 75, "image_urls": ["https://example.com/a.jpg"]})
+    assert record["image_urls"] == ["https://example.com/a.jpg"]
+
+
+def test_image_urls_can_be_updated_after_intake():
+    # The Flip Ledger UI edits image_urls on an existing tracked flip
+    # (a seller often doesn't have photo URLs ready at intake time) --
+    # update_flip must accept it like any other field.
+    record = build_flip_record({"item_name": "Camera", "cost_basis": 75})
+    updated = update_flip(record, image_urls=["https://example.com/b.jpg"])
+    assert updated["image_urls"] == ["https://example.com/b.jpg"]
 
 
 def test_sold_update_calculates_realized_profit():

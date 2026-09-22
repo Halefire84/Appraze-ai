@@ -198,7 +198,7 @@ if matching:
                                 "title": draft.get("title", ""),
                                 "description": draft.get("description", ""),
                                 "condition": "USED_GOOD",
-                                "imageUrls": draft.get("imageUrls", []) or [],
+                                "imageUrls": draft.get("image_urls", []) or [],
                                 "quantity": draft.get("quantity", 1),
                             }
                             offer = {
@@ -227,11 +227,18 @@ if matching:
             if marketplace == "eBay" and status == "READY_TO_PUBLISH" and st.session_state.get(f"_show_ebay_sandbox_publish_{i}"):
                 st.markdown("---")
                 st.caption("Sandbox test publish (ebay_sell.py) — this listing is only visible on eBay's sandbox, never real eBay.")
+                sandbox_category_id = st.text_input(
+                    "eBay category ID",
+                    key=f"sandbox_cat_{i}",
+                    help="Same eBay category tree as production — find it via eBay's category search. "
+                         "Without this, eBay's Sell API rejects the offer outright (category is required); "
+                         "publishing fails clearly if it's wrong, nothing is guessed.",
+                )
                 confirm_sandbox = st.checkbox("This creates a real SANDBOX eBay listing (not production).", key=f"confirm_sandbox_{i}")
-                if st.button("Confirm sandbox publish", key=f"confirm_sandbox_publish_{i}", disabled=not confirm_sandbox, use_container_width=True):
+                if st.button("Confirm sandbox publish", key=f"confirm_sandbox_publish_{i}", disabled=not (confirm_sandbox and sandbox_category_id), use_container_width=True):
                     with st.spinner("Publishing to eBay sandbox..."):
                         try:
-                            published = ebay_sell.publish_master({**master, **draft})
+                            published = ebay_sell.publish_master({**master, **draft, "ebay_category_id": sandbox_category_id})
                         except ebay_sell.EbaySellError as exc:
                             st.error(f"eBay sandbox publish failed: {exc}")
                             log_event("ERROR", "ebay_sell", "pages/5_Cross_List", "sandbox publish failed", {"sku": draft.get("sku", ""), "error": str(exc)})

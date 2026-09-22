@@ -49,11 +49,18 @@ def calculate_flip_profit(cost_basis: float, sale_price: float, *, fee_pct: floa
 
 
 def build_flip_record(intake: Dict[str, Any], *, status: str = "PURCHASED") -> Dict[str, Any]:
-    """Convert inventory intake into one canonical flip record."""
+    """Convert inventory intake into one canonical flip record.
+
+    image_urls is a list of already-hosted photo URLs -- this app has no
+    upload/hosting mechanism of its own (no S3/Cloudinary/etc. wired up),
+    so a seller pastes in URLs of photos hosted elsewhere. Carried through
+    unchanged to listing_bridge.build_master_listing() -> the eBay publish
+    payload; see that module's docstring for why this field's name must
+    stay "image_urls" everywhere in this app's own data model."""
     status = str(status).upper()
     if status not in STATUSES:
         raise ValueError(f"Unsupported flip status: {status}")
-    return {"item_name": str(intake.get("item_name") or "Untitled item"), "source": str(intake.get("source") or ""), "source_listing_id": str(intake.get("source_listing_id") or ""), "source_url": str(intake.get("source_url") or ""), "cost_basis": round(max(0.0, _num(intake.get("cost_basis"))), 2), "market_value": intake.get("market_value"), "radar_score": intake.get("radar_score"), "status": status, "list_price": 0.0, "sale_price": 0.0, "platform_fee_pct": 13.0, "shipping_out": 0.0, "shipping_charged": 0.0, "notes": str(intake.get("notes") or "")}
+    return {"item_name": str(intake.get("item_name") or "Untitled item"), "source": str(intake.get("source") or ""), "source_listing_id": str(intake.get("source_listing_id") or ""), "source_url": str(intake.get("source_url") or ""), "cost_basis": round(max(0.0, _num(intake.get("cost_basis"))), 2), "market_value": intake.get("market_value"), "radar_score": intake.get("radar_score"), "status": status, "list_price": 0.0, "sale_price": 0.0, "platform_fee_pct": 13.0, "shipping_out": 0.0, "shipping_charged": 0.0, "notes": str(intake.get("notes") or ""), "image_urls": list(intake.get("image_urls") or [])}
 
 
 def update_flip(record: Dict[str, Any], **changes: Any) -> Dict[str, Any]:

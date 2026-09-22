@@ -93,6 +93,16 @@ if ledger:
             sale_price = c2.number_input("Sale price", min_value=0.0, value=float(record.get("sale_price", 0) or 0), step=5.0, key=f"sale_{i}")
             fee_pct = c3.number_input("Fee %", min_value=0.0, value=float(record.get("platform_fee_pct", 13) or 13), step=0.5, key=f"fee_{i}")
             ship_out = c4.number_input("Shipping out", min_value=0.0, value=float(record.get("shipping_out", 0) or 0), step=1.0, key=f"ship_{i}")
+            image_urls_text = st.text_area(
+                "Image URLs (one per line)",
+                value="\n".join(record.get("image_urls") or []),
+                key=f"images_{i}",
+                height=68,
+                help="Paste URLs of photos already hosted somewhere (e.g. the source listing's own photos, "
+                     "or images you've uploaded elsewhere) — Appraze does not host images itself. A listing "
+                     "with no image URLs here will publish to eBay with zero photos.",
+            )
+            image_urls = [line.strip() for line in image_urls_text.splitlines() if line.strip()]
             if new_status == "SOLD" and sale_price > 0:
                 preview = update_flip(record, status="SOLD", list_price=list_price, sale_price=sale_price, platform_fee_pct=fee_pct, shipping_out=ship_out)
                 p1, p2, p3 = st.columns(3)
@@ -101,7 +111,7 @@ if ledger:
                 p3.metric("ROI", "∞" if preview['roi_pct'] == float('inf') else f"{preview['roi_pct']:.1f}%")
             if st.button("SAVE CHANGES", key=f"save_{i}", use_container_width=True):
                 try:
-                    updated = update_flip(record, status=new_status, list_price=list_price, sale_price=sale_price, platform_fee_pct=fee_pct, shipping_out=ship_out)
+                    updated = update_flip(record, status=new_status, list_price=list_price, sale_price=sale_price, platform_fee_pct=fee_pct, shipping_out=ship_out, image_urls=image_urls)
                     if new_status == "LISTED" and record.get("status") != "LISTED":
                         master = build_master_listing(updated)
                         st.session_state["crtc_master_listing"] = master
