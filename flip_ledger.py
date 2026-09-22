@@ -25,16 +25,26 @@ def _num(value: Any, default: float = 0.0) -> float:
 
 
 def calculate_flip_profit(cost_basis: float, sale_price: float, *, fee_pct: float = 13.0, shipping_out: float = 0.0, shipping_charged: float = 0.0) -> Dict[str, float]:
-    """Return actual net proceeds, profit, margin and ROI for a completed sale."""
+    """Return actual net proceeds, profit, margin and ROI for a completed sale.
+
+    fee is charged on (sale price + buyer-paid shipping), not sale price
+    alone -- eBay's published fee schedule explicitly includes "item
+    price, handling, buyer-paid shipping, sales tax, and other applicable
+    amounts" in its percentage-fee basis (see DEAL-MATH.md), and Mercari's
+    10% is likewise charged on "item price plus any buyer-paid shipping".
+    Charging the fee on sale price alone understates it whenever
+    shipping_charged > 0, overstating realized profit."""
     cost = max(0.0, _num(cost_basis))
     sale = max(0.0, _num(sale_price))
-    fee = sale * max(0.0, _num(fee_pct)) / 100.0
     outbound = max(0.0, _num(shipping_out))
     buyer_shipping = max(0.0, _num(shipping_charged))
+    fee = (sale + buyer_shipping) * max(0.0, _num(fee_pct)) / 100.0
     net_proceeds = sale + buyer_shipping - fee - outbound
     profit = net_proceeds - cost
     margin_pct = (profit / sale * 100.0) if sale else 0.0
     roi_pct = (profit / cost * 100.0) if cost else (float("inf") if profit > 0 else 0.0)
+    if roi_pct != float("inf"):
+        roi_pct = round(roi_pct, 2)  # every other field here is rounded; this one wasn't
     return {"sale_price": round(sale, 2), "platform_fee": round(fee, 2), "shipping_out": round(outbound, 2), "shipping_charged": round(buyer_shipping, 2), "net_proceeds": round(net_proceeds, 2), "profit": round(profit, 2), "margin_pct": round(margin_pct, 2), "roi_pct": roi_pct}
 
 

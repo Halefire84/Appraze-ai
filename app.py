@@ -440,8 +440,29 @@ with tab_calc:
         calc_resale = st.number_input("Estimated resale value ($)", min_value=0.0, step=1.0, format="%.2f", key="calc_resale")
 
     with st.expander("Optional: factor in platform fees / buyer's premium"):
-        fee_pct = st.slider("Fees as % of resale value (marketplace + payment processing)", 0.0, 30.0, 13.0, 0.5)
-        premium_pct = st.slider("Buyer's premium at purchase (e.g. Estate Auctions 18%)", 0.0, 25.0, 18.0, 0.5)
+        fee_pct = st.slider(
+            "Fees as % of resale value (marketplace + payment processing)", 0.0, 30.0, 13.0, 0.5,
+            help=(
+                "Real current fees vary a lot by where you'll actually sell it — "
+                "the 13% default is a rough blend, not any one platform's real "
+                "rate. eBay ≈13.6% + a small per-order fee (higher for clothing/"
+                "media, lower for guitars/athletic shoes), Poshmark 20% (or a "
+                "flat $2.95 under $15), Mercari 10%, Etsy ≈6.5% + 3%+$0.25 "
+                "processing + a $0.20 listing fee, Depop ≈3.3% + $0.45. Move "
+                "this slider to match where you're actually selling — see "
+                "DEAL-MATH.md for sources."
+            ),
+        )
+        premium_pct = st.slider(
+            "Buyer's premium at purchase (e.g. Estate Auctions 18%)", 0.0, 25.0, 18.0, 0.5,
+            help=(
+                "18% matches CTBids' published online estate-auction premium. "
+                "Other houses vary and some fine-art/collectibles auctions use "
+                "a tiered scale (a higher % on the first portion, lower above "
+                "it) rather than one flat rate — check the specific house's "
+                "terms rather than trusting this default for an unfamiliar venue."
+            ),
+        )
 
     true_cost, net_resale, gross_profit, roi = profit_calc(calc_cost, calc_resale, fee_pct, premium_pct)
 
@@ -537,7 +558,15 @@ with tab_inv:
     st.markdown("#### Settings")
     ic1, ic2 = st.columns(2)
     with ic1:
-        inv_fee_pct = st.slider("Estimated Platform Fees %", 0.0, 30.0, 13.0, 0.5, key="inv_fee")
+        inv_fee_pct = st.slider(
+            "Estimated Platform Fees %", 0.0, 30.0, 13.0, 0.5, key="inv_fee",
+            help=(
+                "13% is a rough blend, not any one platform's real rate — "
+                "eBay ≈13.6%, Poshmark 20%, Mercari 10%, Etsy ≈9.5% all-in, "
+                "Depop ≈3.3%+$0.45. Match this to where the item will actually "
+                "sell; see DEAL-MATH.md for sources."
+            ),
+        )
     with ic2:
         margin_threshold = st.slider("Minimum healthy Net Margin %", 0.0, 50.0, 20.0, 1.0, key="inv_margin_thresh")
 
@@ -949,7 +978,9 @@ with tab_accounts:
         else: st.info("No quotes or invoices yet.")
 
 
-BETA_AI_ACCESS = True  # Free beta accounts may use AI; disable when paid gating begins.\n\n# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
+BETA_AI_ACCESS = True  # Free beta accounts may use AI; disable when paid gating begins.
+
+# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
 # ==========================================================================
 with tab_ai:
     st.markdown("#### AI Item Analyzer")

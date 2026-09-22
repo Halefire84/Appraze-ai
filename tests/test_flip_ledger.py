@@ -2,12 +2,15 @@ from flip_ledger import build_flip_record, calculate_flip_profit, update_flip
 
 
 def test_profit_accounts_for_fee_and_shipping():
+    # fee is charged on (sale price + buyer-paid shipping), matching eBay's
+    # and Mercari's published fee basis -- see calculate_flip_profit's
+    # docstring. fee = (250 + 10) * 0.13 = 33.8, not 250 * 0.13 = 32.5.
     result = calculate_flip_profit(100, 250, fee_pct=13, shipping_out=15, shipping_charged=10)
-    assert result["platform_fee"] == 32.5
-    assert result["net_proceeds"] == 212.5
-    assert result["profit"] == 112.5
-    assert result["margin_pct"] == 45.0
-    assert result["roi_pct"] == 112.5
+    assert result["platform_fee"] == 33.8
+    assert result["net_proceeds"] == 211.2
+    assert result["profit"] == 111.2
+    assert result["margin_pct"] == 44.48
+    assert result["roi_pct"] == 111.2
 
 
 def test_free_find_has_infinite_roi_when_profitable():
