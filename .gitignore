@@ -1,3 +1,8 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
+
+# local-only eBay Sell (sandbox) secrets -- never commit
+.ebay_tokens.json
+ebay_config.json
+.env

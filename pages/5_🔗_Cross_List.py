@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 
 import ebay_listing
+import ebay_sell
 from listing_store import upsert_listing, transition_listing
 from storage import load_table, save_table
 from telemetry import log_event
@@ -155,6 +156,14 @@ if matching:
                     if st.button("PUBLISH TO EBAY", key=f"publish_ebay_{i}", type="primary", use_container_width=True):
                         st.session_state[f"_show_ebay_publish_{i}"] = True
                         st.rerun()
+                elif status == "READY_TO_PUBLISH" and marketplace == "eBay" and ebay_sell.is_authorized():
+                    # Separate SANDBOX-only path (ebay_sell.py), independent of the
+                    # production ebay_listing.py connection above -- hardcoded to
+                    # *.sandbox.ebay.com, for proving the publish round-trip works
+                    # without needing a live connected production eBay account.
+                    if st.button("PUBLISH TO EBAY (SANDBOX TEST)", key=f"publish_ebay_sandbox_{i}", use_container_width=True):
+                        st.session_state[f"_show_ebay_sandbox_publish_{i}"] = True
+                        st.rerun()
 
             if marketplace == "eBay" and status == "READY_TO_PUBLISH" and st.session_state.get(f"_show_ebay_publish_{i}"):
                 st.markdown("---")
@@ -213,12 +222,36 @@ if matching:
                                 st.error(f"Publishing failed at the {result.step} step: {result.error}")
                                 log_event("ERROR", "ebay_listing", "pages/5_Cross_List", f"publish failed at {result.step}", {"sku": sku, "error": result.error})
 
+            if marketplace == "eBay" and status == "READY_TO_PUBLISH" and st.session_state.get(f"_show_ebay_sandbox_publish_{i}"):
+                st.markdown("---")
+                st.caption("Sandbox test publish (ebay_sell.py) — this listing is only visible on eBay's sandbox, never real eBay.")
+                confirm_sandbox = st.checkbox("This creates a real SANDBOX eBay listing (not production).", key=f"confirm_sandbox_{i}")
+                if st.button("Confirm sandbox publish", key=f"confirm_sandbox_publish_{i}", disabled=not confirm_sandbox, use_container_width=True):
+                    with st.spinner("Publishing to eBay sandbox..."):
+                        try:
+                            published = ebay_sell.publish_master({**master, **draft})
+                        except ebay_sell.EbaySellError as exc:
+                            st.error(f"eBay sandbox publish failed: {exc}")
+                            log_event("ERROR", "ebay_sell", "pages/5_Cross_List", "sandbox publish failed", {"sku": draft.get("sku", ""), "error": str(exc)})
+                        else:
+                            updated = transition_listing(draft, "ACTIVE", external_id=published["listing_id"])
+                            updated["ebay_offer_id"] = published["offer_id"]
+                            updated["ebay_environment"] = "sandbox"
+                            drafts = upsert_listing(drafts, updated)
+                            save_rows(drafts, DRAFT_TABLE)
+                            st.session_state.pop(f"_show_ebay_sandbox_publish_{i}", None)
+                            st.session_state["crtc_cross_list_message"] = f"Published to eBay sandbox — listing {published['listing_id']} (offer {published['offer_id']})."
+                            log_event("INFO", "ebay_sell", "pages/5_Cross_List", "sandbox listing published", {"sku": draft.get("sku", ""), "listing_id": published["listing_id"]})
+                            st.rerun()
+
 st.divider()
 st.caption(
     "eBay publishing above is real. Every other marketplace here is draft-only by design: "
     "Mercari, Poshmark, Depop, and Facebook Marketplace have no public API for third-party "
     "listing tools, and this app does not automate a marketplace's own web form to fake one."
 )
+if not ebay_sell.is_authorized():
+    st.caption("eBay sandbox test publishing (separate from the production connection above) is not authorized yet — see docs/EBAY_SELL_SETUP.md.")
 
 with st.expander("Export listing package"):
     st.download_button("Download JSON", json.dumps({"master": master, "drafts": matching}, indent=2), "crtc-listing-package.json", "application/json", use_container_width=True)
