@@ -11,6 +11,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from ebay_sell import EbaySellError, is_authorized as ebay_is_authorized, publish_master
 from listing_store import upsert_listing, transition_listing
 from storage import load_table, save_table
 
@@ -93,6 +94,8 @@ if matching:
                 st.markdown(f"**{marketplace}** · `{draft.get('status', 'DRAFT')}`")
                 st.write(draft.get("title", "Untitled"))
                 st.caption(f"${float(draft.get('price') or 0):,.2f} · SKU {draft.get('sku', '')}")
+                if draft.get("external_id"):
+                    st.caption(f"eBay listing `{draft['external_id']}`" + (f" · offer `{draft.get('ebay_offer_id', '')}`" if draft.get("ebay_offer_id") else ""))
             with b:
                 if st.button("MARK READY", key=f"ready_{i}", use_container_width=True):
                     updated = transition_listing(draft, "READY_TO_PUBLISH")
@@ -100,9 +103,33 @@ if matching:
                     result = save_rows(drafts, DRAFT_TABLE)
                     st.session_state["crtc_cross_list_message"] = "Draft marked READY_TO_PUBLISH." if result.success else f"Updated locally; save failed: {result.error}"
                     st.rerun()
+                # Milestone 1: eBay is the only marketplace with a real publish
+                # path, and only against the sandbox. Other marketplaces still
+                # stop at READY_TO_PUBLISH.
+                if marketplace == "eBay" and str(draft.get("status")) == "READY_TO_PUBLISH":
+                    if st.button("PUBLISH TO EBAY (SANDBOX)", key=f"publish_ebay_{i}", type="primary", use_container_width=True):
+                        try:
+                            published = publish_master({**master, **draft})
+                            updated = transition_listing(draft, "ACTIVE", external_id=published["listing_id"])
+                            updated["ebay_offer_id"] = published["offer_id"]
+                            updated["ebay_environment"] = "sandbox"
+                            drafts = upsert_listing(drafts, updated)
+                            result = save_rows(drafts, DRAFT_TABLE)
+                            st.session_state["crtc_cross_list_message"] = (
+                                f"Published to eBay sandbox — listing {published['listing_id']}."
+                                if result.success
+                                else f"Published to eBay sandbox (listing {published['listing_id']}); save failed: {result.error}"
+                            )
+                        except EbaySellError as exc:
+                            # Publish failed: surface it and leave the draft in
+                            # READY_TO_PUBLISH so the owner can retry.
+                            st.session_state["crtc_cross_list_message"] = f"eBay sandbox publish failed: {exc}"
+                        st.rerun()
 
 st.divider()
-st.caption("Publishing is intentionally not simulated here. Live marketplace posting requires each marketplace's approved API/partner access.")
+if not ebay_is_authorized():
+    st.caption("eBay sandbox publishing is not authorized yet — see `docs/EBAY_SELL_SETUP.md` to add developer keys and run the one-time authorize flow.")
+st.caption("Publishing is live for eBay **sandbox only**. Every other marketplace stops at READY_TO_PUBLISH: real posting requires each marketplace's approved API/partner access.")
 
 with st.expander("Export listing package"):
     st.download_button("Download JSON", json.dumps({"master": master, "drafts": matching}, indent=2), "crtc-listing-package.json", "application/json", use_container_width=True)
