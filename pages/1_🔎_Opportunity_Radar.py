@@ -57,7 +57,7 @@ with sc1:
     st.metric("Sources mapped", len(all_sources))
     st.metric("Automated now", len(enabled_sources))
 with sc2:
-    st.caption("CRTC maps legitimate marketplaces, estate auctions, government surplus and specialty sources. Automated acquisition is limited to approved APIs/feeds/public catalogs/user exports; no CAPTCHA or anti-bot bypassing.")
+    st.caption("Appraze maps legitimate marketplaces, estate auctions, government surplus and specialty sources. Automated acquisition is limited to approved APIs/feeds/public catalogs/user exports; no CAPTCHA or anti-bot bypassing.")
     source_status = pd.DataFrame([{"Source": s.name, "Mode": "AUTOMATED" if s in enabled_sources else "RESEARCH ROUTE", "Type": s.source_type} for s in all_sources])
     st.dataframe(source_status, use_container_width=True, hide_index=True)
 
@@ -182,4 +182,4 @@ if "radar_last" in st.session_state:
     for signal in result.signals:
         st.write(f"**{signal.severity.upper()} · +{signal.score:.0f}** — {signal.message}")
 
-st.caption("CRTC · FIND → IDENTIFY → VALUE → DECIDE → BUY → TRACK → LIST → SELL → MEASURE")
+st.caption("Appraze · FIND → IDENTIFY → VALUE → DECIDE → BUY → TRACK → LIST → SELL → MEASURE")

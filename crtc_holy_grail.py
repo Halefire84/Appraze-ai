@@ -12,10 +12,10 @@ from auction_radar import rank_auction_catalog
 from opportunity_sources import enrich_ebay_opportunities, scan_ebay, source_scan_status
 from source_registry import default_source_registry
 
-st.set_page_config(page_title="CRTC — Holy Grail Finder", page_icon="🔥", layout="wide")
+st.set_page_config(page_title="Appraze — Holy Grail Finder", page_icon="🔥", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("🔥 CRTC Holy Grail Finder")
+st.title("🔥 Appraze Holy Grail Finder")
 st.caption("Find the listings other buyers missed — then verify the opportunity before you buy.")
 st.markdown("**FIND → IDENTIFY → VALUE → DECIDE** · Radar finds the lead; evidence makes the decision.")
 
@@ -48,7 +48,7 @@ if scan_clicked:
 
 with st.container(border=True):
     st.subheader("📦 Auction Catalog Import")
-    st.caption("Import a permitted CSV/JSON catalog or export. CRTC does not scrape or bypass auction-site controls.")
+    st.caption("Import a permitted CSV/JSON catalog or export. Appraze does not scrape or bypass auction-site controls.")
     a1, a2 = st.columns([1, 2])
     with a1:
         auction_source = st.selectbox(
@@ -87,7 +87,7 @@ if import_clicked:
 
 auction_scan = st.session_state.get("crtc_auction_scan")
 
-with st.expander("🌎 CRTC source coverage", expanded=False):
+with st.expander("🌎 Appraze source coverage", expanded=False):
     registry = default_source_registry()
     rows = []
     for source in registry.all():
@@ -99,7 +99,7 @@ with st.expander("🌎 CRTC source coverage", expanded=False):
             state, method = "PLANNED", ", ".join(source.acquisition_methods)
         rows.append({"Source": source.name, "Status": state, "Acquisition": method})
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.caption("Unsupported sources remain planned until CRTC has a legitimate acquisition path. No anti-bot bypassing.")
+    st.caption("Unsupported sources remain planned until Appraze has a legitimate acquisition path. No anti-bot bypassing.")
 
 if auction_scan is not None:
     opportunities = auction_scan["opportunities"]
@@ -127,9 +127,9 @@ if auction_scan is not None:
                     asking = listing.get("price")
                     asking_text = f"${float(asking):,.2f}" if asking is not None else "Not provided"
                     st.write(f"**Asking/current bid:** {asking_text} · **Radar:** {item.score:.0f}/100")
-                    st.info("**CRTC decision: REVIEW** — catalog Radar identifies a lead; market-value evidence is still required before buying.")
+                    st.info("**Appraze decision: REVIEW** — catalog Radar identifies a lead; market-value evidence is still required before buying.")
                     if item.signals:
-                        st.markdown("**Why CRTC surfaced it:**")
+                        st.markdown("**Why Appraze surfaced it:**")
                         for signal in item.signals:
                             st.write(f"• {signal['message']}")
                 with right:
@@ -198,10 +198,10 @@ if scan is not None:
                         st.write(f"**Market confidence:** {result['market_confidence']}")
                         st.caption(f"Evidence: {meta.get('sold_count', 0)} sold · {meta.get('active_count', 0)} active")
                     else:
-                        st.warning("REVIEW — market-value evidence is required before CRTC recommends buying.")
-                    st.info(f"**CRTC decision: {result['decision']}** — {result['reason']}")
+                        st.warning("REVIEW — market-value evidence is required before Appraze recommends buying.")
+                    st.info(f"**Appraze decision: {result['decision']}** — {result['reason']}")
                     if item.signals:
-                        st.markdown("**Why CRTC surfaced it:**")
+                        st.markdown("**Why Appraze surfaced it:**")
                         for signal in item.signals:
                             st.write(f"• {signal['message']}")
                 with right:
@@ -214,7 +214,7 @@ if scan is not None:
                     st.caption("Verify authenticity, condition, shipping, fees, and sold comps before buying.")
 else:
     if auction_scan is None:
-        st.info("Start with a brand, item, or category, or import an auction catalog. CRTC will hunt for terminology errors, category mistakes, weak descriptions, and value gaps.")
+        st.info("Start with a brand, item, or category, or import an auction catalog. Appraze will hunt for terminology errors, category mistakes, weak descriptions, and value gaps.")
 
 st.markdown("---")
-st.caption("CRTC principle: Radar finds the lead. Market evidence and economics make the purchase decision.")
+st.caption("Appraze principle: Radar finds the lead. Market evidence and economics make the purchase decision.")

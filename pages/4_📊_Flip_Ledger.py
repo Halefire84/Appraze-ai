@@ -121,8 +121,8 @@ if ledger:
                     st.error(str(exc))
 
     st.markdown("### 📋 Ledger export")
-    st.download_button("Export CSV", pd.DataFrame(ledger).to_csv(index=False), "crtc-flip-ledger.csv", "text/csv", use_container_width=True)
+    st.download_button("Export CSV", pd.DataFrame(ledger).to_csv(index=False), "appraze-flip-ledger.csv", "text/csv", use_container_width=True)
 else:
     st.warning("Your flip ledger is empty. Track a BUY above or add a manual flip.")
 
-st.caption("CRTC · One source of truth for the flip lifecycle. Marketplace publishing remains a separate approved-API integration layer.")
+st.caption("Appraze · One source of truth for the flip lifecycle. Marketplace publishing remains a separate approved-API integration layer.")
