@@ -3,3 +3,18 @@
 # see manifest.json + the head-injection snippet near the top of app.py).
 [server]
 enableStaticServing = true
+
+# Without this section, Streamlit's native widgets (text inputs, selects,
+# sliders, etc.) follow the visitor's OS/browser dark-mode preference,
+# while app.py's LIGHT_CSS sets .stApp's text color dark (#172033) for the
+# app's own light design -- on a phone/browser in system dark mode, that
+# combination puts dark text on Streamlit's dark-mode input background,
+# effectively unreadable. Pinning the theme here (matching LIGHT_CSS's
+# palette and CRTC_NAME.md's "bright, clean, white/light surfaces"
+# direction) fixes every native widget at once, not just text inputs.
+[theme]
+base = "light"
+primaryColor = "#d9a321"
+backgroundColor = "#f7f9fc"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#172033"

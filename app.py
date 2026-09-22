@@ -37,7 +37,7 @@ from ai_usage import (
 # --------------------------------------------------------------------------
 st.set_page_config(
     page_title="Appraze",
-    page_icon="💼",
+    page_icon="static/icon-192.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -322,21 +322,26 @@ total_est_profit = df.loc[active_mask, "Gross Profit"].sum()
 sold_profit = df.loc[df["Status"] == "Sold", "Gross Profit"].sum()
 deal_count = int(active_mask.sum())
 
-k1, k2, k3, k4 = st.columns(4)
-with k1:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Active Deals</div>
-        <div class="kpi-value">{deal_count}</div></div>""", unsafe_allow_html=True)
-with k2:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Total Invested</div>
-        <div class="kpi-value">${total_invested:,.2f}</div></div>""", unsafe_allow_html=True)
-with k3:
-    cls = "kpi-sub" if total_est_profit >= 0 else "kpi-sub neg"
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Est. Profit (Active)</div>
-        <div class="kpi-value">${total_est_profit:,.2f}</div>
-        <div class="{cls}">{'↑ projected' if total_est_profit>=0 else '↓ projected'}</div></div>""", unsafe_allow_html=True)
-with k4:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Realized Profit (Sold)</div>
-        <div class="kpi-value">${sold_profit:,.2f}</div></div>""", unsafe_allow_html=True)
+with st.expander(
+    f"📊 {deal_count} active deal{'s' if deal_count != 1 else ''} · "
+    f"${total_invested:,.0f} invested · ${total_est_profit:,.0f} est. profit · ${sold_profit:,.0f} realized",
+    expanded=False,
+):
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Active Deals</div>
+            <div class="kpi-value">{deal_count}</div></div>""", unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Total Invested</div>
+            <div class="kpi-value">${total_invested:,.2f}</div></div>""", unsafe_allow_html=True)
+    with k3:
+        cls = "kpi-sub" if total_est_profit >= 0 else "kpi-sub neg"
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Est. Profit (Active)</div>
+            <div class="kpi-value">${total_est_profit:,.2f}</div>
+            <div class="{cls}">{'↑ projected' if total_est_profit>=0 else '↓ projected'}</div></div>""", unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Realized Profit (Sold)</div>
+            <div class="kpi-value">${sold_profit:,.2f}</div></div>""", unsafe_allow_html=True)
 
 st.write("")
 
