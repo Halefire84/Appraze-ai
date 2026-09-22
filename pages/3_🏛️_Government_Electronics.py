@@ -19,10 +19,10 @@ c2.metric("Risk focus", "Locks / MDM", "penalized")
 c3.metric("Best sourcing", "Local lots", "freight avoided")
 c4.metric("Decision", "MAX BID", "not retail value")
 
-st.info("CRTC separates two questions: **Holy Grail** asks why the market may have missed the value; **Acquisition Brain** asks whether the lot still makes money after recovery rate, fees, freight, tax, repairs and lock risk.")
+st.info("Appraze separates two questions: **Holy Grail** asks why the market may have missed the value; **Acquisition Brain** asks whether the lot still makes money after recovery rate, fees, freight, tax, repairs and lock risk.")
 
 st.subheader("🎯 Hunting profile")
-choice = st.selectbox("What do you want CRTC to hunt?", [
+choice = st.selectbox("What do you want Appraze to hunt?", [
     "Modern Computers & Laptops",
     "Phones & Tablets",
     "Amazon / Retail Returns",
@@ -60,7 +60,7 @@ if st.button("🚨 HUNT eBay NOW", type="primary"):
         st.error(f"The live hunt failed safely: {exc}")
 
 st.subheader("📋 Analyze a CTBids / Goodwill / GovDeals / auction listing")
-st.caption("These sources are intentionally user-input/authorized-feed routes until an approved API, feed, export, or written automation permission is available. Paste the listing facts here and CRTC will run the same brains used by automated sources.")
+st.caption("These sources are intentionally user-input/authorized-feed routes until an approved API, feed, export, or written automation permission is available. Paste the listing facts here and Appraze will run the same brains used by automated sources.")
 
 with st.form("listing_intake"):
     title = st.text_input("Listing title")
@@ -82,7 +82,7 @@ with st.form("listing_intake"):
     manifested = st.checkbox("Manifested / itemized")
     locked = st.checkbox("Activation/MDM/BIOS lock risk")
     pickup_only = st.checkbox("Pickup only")
-    submitted = st.form_submit_button("🔬 RUN CRTC HUNT ENGINE", type="primary")
+    submitted = st.form_submit_button("🔬 RUN APPRAZE HUNT ENGINE", type="primary")
 
 if submitted:
     listing = {
@@ -109,7 +109,7 @@ if submitted:
     }
     result = analyze_listing(listing, profile_key)
     a, b, c, d = st.columns(4)
-    a.metric("CRTC score", f"{result['combined_score']:.0f}/100")
+    a.metric("Appraze score", f"{result['combined_score']:.0f}/100")
     b.metric("Tier", result["tier"])
     c.metric("Max total acquisition", f"${result['acquisition']['economics']['max_total_acquisition']:,.2f}")
     d.metric("Headroom", f"${result['acquisition']['economics']['headroom']:,.2f}")
@@ -117,7 +117,7 @@ if submitted:
     if result["decision"] == "BUY_CANDIDATE":
         st.success("🟢 BUY CANDIDATE — still verify the listing and all auction terms before bidding.")
     elif result["decision"] == "INVESTIGATE":
-        st.warning("🟡 INVESTIGATE — CRTC sees potential, but one or more important facts remain uncertain.")
+        st.warning("🟡 INVESTIGATE — Appraze sees potential, but one or more important facts remain uncertain.")
     else:
         st.error("🔴 PASS — the modeled economics do not justify the risk yet.")
 
@@ -135,7 +135,7 @@ st.markdown("""
 - Repair/parts lots only when salvage value makes the downside attractive
 """)
 
-st.subheader("🚦 CRTC rules")
+st.subheader("🚦 Appraze rules")
 st.markdown("""
 **BUY** — modeled net economics pass the configured threshold.
 
@@ -144,4 +144,4 @@ st.markdown("""
 **PASS** — apparent retail value is not enough to justify the acquisition risk.
 """)
 
-st.warning("CRTC will not bypass CAPTCHAs, private APIs, robots controls, or anti-bot systems. For CTBids, ShopGoodwill, GovDeals and similar marketplaces, automated collection will only be enabled through an approved API/feed/export or written permission; otherwise the Android-friendly listing intake above is the live bridge.")
+st.warning("Appraze will not bypass CAPTCHAs, private APIs, robots controls, or anti-bot systems. For CTBids, ShopGoodwill, GovDeals and similar marketplaces, automated collection will only be enabled through an approved API/feed/export or written permission; otherwise the Android-friendly listing intake above is the live bridge.")

@@ -49,7 +49,7 @@ with st.container(border=True):
         "url": selected.get("url", ""),
     }
 
-    if st.button("🎯 MAKE CRTC DECISION", type="primary", use_container_width=True):
+    if st.button("🎯 MAKE APPRAZE DECISION", type="primary", use_container_width=True):
         result = build_deal_workspace(listing, market_value or None, confidence)
         st.session_state["crtc_deal_result"] = result
         st.session_state["crtc_deal_listing"] = listing
@@ -81,7 +81,7 @@ if result:
     if decision == "BUY":
         st.markdown("### 📦 Inventory intake")
         intake = build_inventory_intake(result_listing, result)
-        st.write("CRTC has prepared this item for inventory. Physical receipt and final cost still need verification.")
+        st.write("Appraze has prepared this item for inventory. Physical receipt and final cost still need verification.")
         st.json(intake)
         if st.button("📥 ADD TO INVENTORY INTAKE", type="primary", use_container_width=True):
             inventory = st.session_state.setdefault("crtc_inventory_intake", [])
@@ -93,7 +93,7 @@ if result:
         "Confirm the exact item/model and condition from the original listing.",
         "Verify market evidence is comparable to the actual item, not merely a similar-looking listing.",
         "Verify buyer premium and shipping/pickup costs before bidding.",
-        "Never exceed CRTC's maximum acquisition price without deliberately overriding the model.",
+        "Never exceed Appraze's maximum acquisition price without deliberately overriding the model.",
         "If evidence is weak or conflicting, keep the decision at REVIEW.",
     ]
     for i, item in enumerate(checks):
@@ -113,4 +113,4 @@ if intake_queue:
 else:
     st.caption("BUY decisions added here are pending physical acquisition and final receipt verification.")
 
-st.caption("CRTC · FIND → IDENTIFY → VALUE → DECIDE → BUY → TRACK → LIST → SELL → MEASURE")
+st.caption("Appraze · FIND → IDENTIFY → VALUE → DECIDE → BUY → TRACK → LIST → SELL → MEASURE")
