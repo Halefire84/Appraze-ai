@@ -250,6 +250,41 @@ function getProcessedSheet_() {
 // AUTH
 // ---------------------------------------------------------------------------
 
+// Defuses spreadsheet formula/CSV injection: a cell whose text starts with
+// =, +, -, or @ is evaluated as a formula by Google Sheets and by Excel on
+// CSV export/open (a well-known class of attack -- e.g. a display_name of
+// =HYPERLINK("http://evil.example","Click") or =IMPORTXML(...) executing
+// the moment the account owner opens the raw Sheet to manage the app).
+// This only matters for values stored in their OWN cell (a dedicated
+// column); values embedded inside a JSON payload_json blob are safe as-is,
+// since the cell's actual leading character is always { or [, never one of
+// the four formula-trigger characters, regardless of what the JSON
+// contains. Prefixing a single quote is Sheets/Excel's own standard
+// "treat as literal text" escape -- it does not change what's displayed.
+function sanitizeForSheetCell_(value) {
+  const text = String(value == null ? "" : value);
+  if (/^[=+\-@\t\r]/.test(text)) {
+    return "'" + text;
+  }
+  return text;
+}
+
+// Inverse of sanitizeForSheetCell_, for reading a value back out (e.g. on
+// login, after signup already wrote the sanitized form). Only strips a
+// leading apostrophe when it is immediately followed by one of the four
+// formula-trigger characters -- i.e. only a pattern sanitizeForSheetCell_
+// itself could have produced -- so a display name that genuinely starts
+// with an apostrophe (e.g. "'Ohana Estate Sales") is left untouched.
+// Whether Apps Script's setValue()/appendRow() actually replicates
+// Sheets' manual-entry "leading apostrophe = force text, strip on read"
+// convention isn't verifiable without a live Sheet from this session, so
+// this strips defensively either way -- a harmless no-op if the platform
+// already stripped it, a real fix if it didn't.
+function unsanitizeFromSheetCell_(value) {
+  const text = String(value == null ? "" : value);
+  return text.replace(/^'(?=[=+\-@\t\r])/, "");
+}
+
 function handleSignup_(sheet, params) {
   const username = String(params.username || "").trim().toLowerCase();
   const passwordHash = String(params.password_hash || "");
@@ -272,7 +307,10 @@ function handleSignup_(sheet, params) {
 
   const isAdmin = !!ADMIN_SETUP_CODE && timingSafeEqual_(adminCode, ADMIN_SETUP_CODE);
 
-  sheet.appendRow([username, passwordHash, displayName, isAdmin ? "TRUE" : "FALSE", "FALSE", new Date().toISOString()]);
+  // Sanitize only the copy written to the Sheet cell -- the response below
+  // returns the original displayName unchanged, so the app UI shows
+  // exactly what the person typed, not a leading apostrophe.
+  sheet.appendRow([username, passwordHash, sanitizeForSheetCell_(displayName), isAdmin ? "TRUE" : "FALSE", "FALSE", new Date().toISOString()]);
   return jsonResponse({ success: true, display_name: displayName, is_admin: isAdmin, is_paid: false, username: username });
 }
 
@@ -286,7 +324,7 @@ function handleLogin_(sheet, params) {
       if (String(data[i][1]) === passwordHash) {
         return jsonResponse({
           success: true,
-          display_name: data[i][2],
+          display_name: unsanitizeFromSheetCell_(data[i][2]),
           is_admin: String(data[i][3]).toUpperCase() === "TRUE",
           is_paid: String(data[i][4]).toUpperCase() === "TRUE",
           username: username,
@@ -774,7 +812,7 @@ function handleMarkProcessed_(sheet, params) {
   const names = fileNamesRaw.split(",");
   const now = new Date().toISOString();
   for (let i = 0; i < ids.length; i++) {
-    sheet.appendRow([ids[i], names[i] || "", now]);
+    sheet.appendRow([ids[i], sanitizeForSheetCell_(names[i] || ""), now]);
   }
   return jsonResponse({ success: true, count: ids.length });
 }
