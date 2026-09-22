@@ -3,11 +3,26 @@
 **Date:** 2026-09-22 · **Scope:** brief "APPRAZE — Claude Code brief: eBay SANDBOX publish
 round-trip proof" · **Branch:** `claude/beta-launch-sprint` (open as PR #29 at time of writing)
 
-**Status: code deliverables complete and tested (mocked). The live sandbox round-trip has
-NOT been executed — no real eBay sandbox credentials or a completed OAuth authorization exist
-anywhere accessible to this session. This is stated plainly rather than worked around, per the
-brief's own instruction: "Do not invent policy IDs, listing IDs, or status results. Report only
-what the API actually returned."**
+**Status: CODE COMPLETE, TESTS GREEN, LIVE PROOF RUN PENDING STARSHIP.** The sandbox OAuth
+tokens are gitignored secrets that live only on Starship's machine (the local session that
+built the original `ebay_sell.py`) — they are not in the bundle this session imported from, were
+never asked for, and were never invented. This session verified everything it could without
+them (mocked tests, both of `sandbox_proof.py`'s fail-fast paths run for real against this
+environment) and stops there deliberately, per the brief's own instruction: "Do not invent
+policy IDs, listing IDs, or status results. Report only what the API actually returned."
+
+**The exact command Starship must run, where the real tokens live, to complete the live proof:**
+
+```bash
+python3 sandbox_proof.py
+```
+
+(optionally `--category-id <id>` if eBay rejects the default `9355`). No setup beyond an
+existing `.ebay_tokens.json` with a valid refresh token is required — `sandbox_proof.py` creates
+or reuses the business policies and merchant location itself via
+`ensure_sandbox_listing_prerequisites()`, added in this session. See "What still needs the
+owner's real eBay developer keys" below for the full prerequisite list if authorization hasn't
+been done yet on this machine.
 
 ## What this session actually found first
 
