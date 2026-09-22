@@ -22,6 +22,8 @@ from storage import load_table, save_table
 from telemetry import log_event
 
 st.set_page_config(page_title="Appraze — Cross-List", page_icon="🔗", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 st.title("🔗 Appraze Cross-List")

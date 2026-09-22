@@ -6,6 +6,8 @@ from deal_workspace import build_deal_workspace
 from inventory_bridge import build_inventory_intake
 
 st.set_page_config(page_title="Appraze — Deal Workspace", page_icon="💰", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 st.title("💰 Appraze Deal Workspace")
