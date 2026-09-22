@@ -30,27 +30,30 @@ and sandbox publishing needs sandbox keys.
 6. eBay generates an **RuName** (looks like `Alex_Smith-AlexSmit-apprze-abcdefg`).
    **This RuName — not the URL — is `EBAY_SELL_REDIRECT_URI`.** Everyone gets this wrong once.
 
-## 2. Create a sandbox test user, policies, and a location
+## 2. Create a sandbox test user, then let the script set up policies/location
 
-Sandbox publishing needs a sandbox *seller* with business policies. Still on developer.ebay.com:
+Sandbox publishing needs a sandbox *seller* with business policies:
 
 1. **Sandbox → Test Users → Create test user.** Save the generated username and password;
    that's the account you'll log into when authorizing in step 4, and the account whose
    Seller Hub will show the listing.
 2. Sign in to <https://www.sandbox.ebay.com> as that test user and opt into **Business Policies**
-   (My eBay → Account → Business Policies). Create one each of:
-   - a **payment** policy → `EBAY_SELL_PAYMENT_POLICY_ID`
-   - a **shipping/fulfillment** policy → `EBAY_SELL_FULFILLMENT_POLICY_ID`
-   - a **return** policy → `EBAY_SELL_RETURN_POLICY_ID`
+   (My eBay → Account → Business Policies) — a sandbox test user needs to be opted in before any
+   policy can be created on the account, even via the API.
 
-   The policy IDs are easiest to read back from the Account Settings API, or from the URL when
-   you open each policy for editing.
-3. Create a **merchant location** — a warehouse the inventory ships from. The Sell Inventory API
-   creates these (`POST /sell/inventory/v1/location/{merchantLocationKey}`); the key is a string
-   you choose, e.g. `CRTC_WAREHOUSE` → `EBAY_SELL_MERCHANT_LOCATION_KEY`.
+**You do not need to manually create the payment/fulfillment/return policies or the merchant
+location yourself.** `sandbox_proof.py` (step 6 below) creates each one automatically the first
+time it runs and reuses them on every later run — see `ebay_sell.py`'s
+`ensure_sandbox_listing_prerequisites()`. `publish_master()` still refuses to make any HTTP call
+until all four IDs are set, so a genuinely missing one shows up as a clear error message rather
+than a confusing eBay rejection; `sandbox_proof.py` fills them in before it ever calls
+`publish_master()`.
 
-`publish_master()` refuses to make any HTTP call until all four of these are set, so a missing
-policy shows up as a clear error message rather than a confusing eBay rejection.
+If you'd rather create them by hand instead (e.g. to use specific existing policies), you still
+can, in Seller Hub → Account → Business Policies, and set the resulting IDs as
+`EBAY_SELL_PAYMENT_POLICY_ID` / `EBAY_SELL_FULFILLMENT_POLICY_ID` / `EBAY_SELL_RETURN_POLICY_ID` /
+`EBAY_SELL_MERCHANT_LOCATION_KEY` per step 3 below — `ensure_sandbox_listing_prerequisites()`
+reuses whatever is already set instead of creating a duplicate.
 
 ## 3. Put the keys where the app reads them
 
@@ -88,6 +91,12 @@ If you ever paste a key into a commit, treat it as burned and regenerate it in t
 Publishing needs a *user* token, so this step needs a browser once. The refresh token eBay hands
 back lasts ~18 months; after this you won't do it again.
 
+**Scopes requested:** `sell.inventory`, `sell.inventory.readonly`, and `sell.account` (the last
+one is required for the policy/location builders in step 2 above — creating or listing a
+business policy or a merchant location is an Account API call, not an Inventory API call).
+If you authorized before `sell.account` was added, the stored token does not have it and cannot
+gain it via refresh — delete `.ebay_tokens.json` and redo this step from scratch.
+
 ```bash
 cd ~/workspace/crtc-work
 
@@ -112,7 +121,56 @@ Verify the token works:
 python3 -c "import ebay_sell; print(bool(ebay_sell.get_valid_access_token()))"
 ```
 
-## 5. Publish one sandbox listing
+## 5. Run the round-trip proof
+
+`sandbox_proof.py` is the fastest way to confirm everything above actually works, end to end,
+without touching the Streamlit app. It authenticates, creates/reuses the three business policies
+and the merchant location, publishes one obvious throwaway test listing, polls until it's ACTIVE,
+and withdraws it again — printing every step. Run by hand only; it is never invoked by the app,
+a test, or CI (there are no real credentials in CI, and there should never be).
+
+```bash
+python3 sandbox_proof.py
+```
+
+Optional: `--category-id <id>` to override the default test category if eBay rejects `9355`
+("Cell Phones & Smartphones" — a documented example category, not verified against every
+sandbox account's category tree).
+
+**Expected output** on a fully successful run:
+
+```
+[sandbox_proof] Authenticating (refreshing the access token if needed)...
+[sandbox_proof] Authenticated.
+[sandbox_proof] Ensuring business policies and merchant location exist (reuse-if-exists)...
+[sandbox_proof] payment_policy_id      = 6196932000
+[sandbox_proof] fulfillment_policy_id  = 6196933000
+[sandbox_proof] return_policy_id       = 6196934000
+[sandbox_proof] merchant_location_key  = appraze-test-warehouse
+[sandbox_proof] (saved to ebay_config.json)
+[sandbox_proof] Test item: SKU=APPRAZE-SANDBOX-PROOF-1758... title='SANDBOX TEST - DELETE ME - Appraze publish proof' price=$1.00 qty=1 condition=NEW category=9355
+[sandbox_proof] Publishing to eBay sandbox (inventory item -> offer -> publish)...
+[sandbox_proof] Published. listingId=<real eBay listingId> offerId=<real eBay offerId>
+[sandbox_proof] Polling getOfferStatus until ACTIVE (timeout 120s)...
+[sandbox_proof] offer <offerId> status: PUBLISHED
+[sandbox_proof] Listing is live on eBay sandbox.
+[sandbox_proof] Sandbox Seller Hub (view your active listings): https://www.sandbox.ebay.com/sh/lst/active
+[sandbox_proof] listingId=<...> / offerId=<...> / SKU=APPRAZE-SANDBOX-PROOF-...
+[sandbox_proof] Withdrawing offer <offerId> (cleanup -- never leave a live sandbox test listing behind)...
+[sandbox_proof] offer <offerId> status: ENDED
+[sandbox_proof] Withdraw confirmed. Final status: ENDED
+```
+
+exit code `0`. The placeholder-shaped IDs above (`6196932000`, etc.) are illustrative only —
+this doc has never been updated from an actual run; your real output will have eBay's real IDs.
+Every listed ID and status line in a real run should be copied verbatim into
+`reports/latest-session-report.md` when this is actually executed, never retyped from memory.
+
+On any failure, the script prints exactly which step failed and eBay's own error message, and
+still exits nonzero even if the listing had already gone ACTIVE but the withdraw step then failed
+— see the Troubleshooting table below.
+
+## 6. Publish one sandbox listing from the app instead
 
 ```bash
 streamlit run app.py
@@ -143,7 +201,7 @@ print(ebay_sell.publish_master(master))
 "
 ```
 
-## 6. Verify, then withdraw
+## 7. Verify, then withdraw manually (only if not using sandbox_proof.py, which does this for you)
 
 1. Sign in to <https://www.sandbox.ebay.com> as the test user → **Seller Hub → Listings → Active**.
    Your listing should be there with the title and price from the master record.
@@ -179,3 +237,6 @@ real is posted.
 | `errorId 25002 ... SKU already exists` | The SKU is on another offer; withdraw it or use a new SKU. |
 | `eBay sandbox is not authorized yet` | No `.ebay_tokens.json` — run step 4. |
 | Listing publishes but Seller Hub is empty | You authorized as your real account instead of the sandbox test user. |
+| `could not create/reuse a business policy or the merchant location` (403 / insufficient scope) | The stored token was authorized before `sell.account` was added to `DEFAULT_SCOPES`. Delete `.ebay_tokens.json` and redo step 4 from scratch — a refresh cannot add a scope to an existing token. |
+| Policy creation rejected (400, e.g. a missing/invalid field) | The exact JSON body `create_payment_policy`/`create_fulfillment_policy`/`create_return_policy`/`create_merchant_location` send has never been run against a real sandbox account — see `ebay_sell.py`'s docstrings on each. eBay's error message (surfaced in full, never swallowed) says exactly which field it rejected; fix that field's value, not the whole approach. |
+| `sandbox_proof.py` exits nonzero after printing "Listing is live" | The publish and ACTIVE poll both succeeded, but the withdraw step afterward failed or didn't confirm ENDED in time. The listing may still be live — check Seller Hub and withdraw it manually if so; the script's own log names the exact offer/listing ID to look for. |
