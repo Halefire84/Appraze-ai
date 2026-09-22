@@ -3,6 +3,52 @@
 Last updated: 2026-09-22 (follow-up session, on `main` directly — the
 2026-09-21 session's branch was squash-merged as PR #25 and auto-deleted).
 
+## 2026-09-22 (later): telemetry.py — operational error/event logging
+
+New: `telemetry.py`. Best-effort logging (never raises, never blocks a
+user-facing action, 5s timeout) to a new shared `event_log` table via a
+new Apps Script action `log_event` (`AppsScript_Code.gs::handleLogEvent_`
+— atomic lock+append+trim, capped at 300 entries so the payload_json cell
+never approaches Google Sheets' ~50k-char per-cell limit). This is
+diagnostic visibility only, NOT a system of record — durable financial
+data still lives in `sales_log`/`AIUsage` with their own precedence/
+idempotency rules, untouched by this.
+
+Two entry points:
+- `log_event(...)` — for Streamlit-app callers (`app.py`), reads
+  APPS_SCRIPT_URL/TOKEN via `auth.py`/`st.secrets`.
+- `log_event_standalone(...)` — for callers outside Streamlit (
+  `stripe_webhook_server.py`), reads the same two values from plain OS
+  environment variables, matching `webhook_store.py`'s existing
+  convention.
+
+Wired into: `stripe_webhook_server.py` (signature failures, malformed
+webhook bodies, event-processing failures, sales_log reconciliation
+failures — the actual payment-event error paths) and `app.py`'s AI
+Analyzer (HTTPError/JSON-decode/unexpected-exception paths). Not yet
+wired into `decision_policy.py`'s callers (financial-decision outcomes
+beyond errors) or POS checkout — deliberately started with the two
+highest-value, most contained call sites rather than instrumenting
+everything at once; a natural next step for a follow-up pass.
+
+Admin-only read-only viewer: `tab_about` in `app.py`, gated on
+`st.session_state.get("user_is_admin", False)` — shows the most recent
+100 logged events via `telemetry.load_recent_events()`.
+
+This closes the "no observability around financial decisions and payment
+events" gap noted under Known Limitations below (P2 item 14 in the
+owner's standing priority list) — at least for the error/payment-failure
+half of it; decision-outcome logging (successful BUY/PASS/REVIEW
+verdicts, not just failures) is still open.
+
+`tests/test_telemetry.py` — 9 tests, all mocked (no real network calls),
+covering: never-raises under network failure, never-raises under a
+config-lookup failure, correct payload shape, missing-env-vars silent
+no-op, and `load_recent_events()`'s newest-first/limit/failure behavior.
+
+Tests: `python3 -m pytest -q` → 382 passed, 0 failed (373 prior + 9 new).
+`node --check` on `AppsScript_Code.gs` → clean.
+
 This file is the authoritative, self-contained state summary for the next
 agent. `CRTC_HANDOFF.md` is a longer append-only session log kept for
 history; this file is the current-state snapshot. If the two disagree,

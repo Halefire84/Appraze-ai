@@ -52,6 +52,16 @@ const AI_ADMIN_MONTHLY_LIMIT = 500;
 const AI_ADMIN_DAILY_LIMIT = 25;
 const AI_RESERVATION_TTL_MS = 15 * 60 * 1000;
 
+// Operational event log (errors + financial-decision/payment events), kept
+// as a normal "table" row in the Storage sheet under admin_shared -- no new
+// sheet needed. Capped so the payload_json cell never approaches Google
+// Sheets' ~50,000-character per-cell limit; the log is meant for recent
+// diagnostic visibility, not a permanent audit trail (durable financial
+// records already live in sales_log/AIUsage, which have their own
+// precedence/idempotency rules and are never trimmed).
+const EVENT_LOG_TABLE = "event_log";
+const EVENT_LOG_MAX_ENTRIES = 300;
+
 // Supported file types for invoice/inventory scanning — images and PDFs only
 // (matches what Claude's vision API can read directly).
 const SUPPORTED_MIME_TYPES = [
@@ -101,6 +111,8 @@ function handleRequest(e) {
         return handleReleaseAiUsage_(getAiUsageSheet_(), params);
       case "get_ai_usage":
         return handleGetAiUsage_(getUsersSheet_(), getAiUsageSheet_(), params);
+      case "log_event":
+        return handleLogEvent_(getStorageSheet_(), params);
       default:
         return jsonResponse({ success: false, error: "unknown action" });
     }
@@ -415,6 +427,57 @@ function handleUpdateSalesLogStatus_(sheet, params) {
       }
     }
     return jsonResponse({ success: true, found: false }); // sales_log table doesn't exist yet
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Appends one diagnostic entry to the shared event_log table. Best-effort
+// by design from the caller's side (storage.py's log_event() never raises),
+// but this handler itself is atomic (lock + read + append + trim + write)
+// so concurrent loggers (two Streamlit sessions, the webhook service) can
+// never race and silently drop each other's entry the way a naive
+// load-then-save round trip could.
+function handleLogEvent_(sheet, params) {
+  const level = String(params.level || "INFO").toUpperCase().slice(0, 20);
+  const eventType = String(params.event_type || "").slice(0, 60);
+  const source = String(params.source || "").slice(0, 80);
+  const message = String(params.message || "").slice(0, 500);
+  let context = String(params.context || "").slice(0, 1000);
+
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level: level,
+    event_type: eventType,
+    source: source,
+    message: message,
+    context: context,
+  };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ownerKey = "admin_shared";
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === ownerKey && data[i][1] === EVENT_LOG_TABLE) {
+        let rows;
+        try {
+          rows = JSON.parse(data[i][2] || "[]");
+        } catch (e) {
+          rows = []; // corrupted payload -- start fresh rather than fail every future log call
+        }
+        rows.push(entry);
+        if (rows.length > EVENT_LOG_MAX_ENTRIES) {
+          rows = rows.slice(rows.length - EVENT_LOG_MAX_ENTRIES);
+        }
+        sheet.getRange(i + 1, 3).setValue(JSON.stringify(rows));
+        sheet.getRange(i + 1, 4).setValue(new Date().toISOString());
+        return jsonResponse({ success: true });
+      }
+    }
+    sheet.appendRow([ownerKey, EVENT_LOG_TABLE, JSON.stringify([entry]), new Date().toISOString()]);
+    return jsonResponse({ success: true });
   } finally {
     lock.releaseLock();
   }
