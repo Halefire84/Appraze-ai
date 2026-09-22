@@ -255,13 +255,23 @@ def login(username: str, password: str) -> AuthResult:
         return AuthResult(False, error=f"connection error: {e}")
 
 
-def mark_paid(username: str) -> bool:
+def mark_paid(username: str, session_id: str = "") -> bool:
     """Called once a Stripe Checkout Session is verified as paid — persists it
-    so the person doesn't have to pay again on their next login."""
+    so the person doesn't have to pay again on their next login.
+
+    session_id should always be passed by real callers (the Stripe Checkout
+    Session id that was just verified). AppsScript_Code.gs's handleSetPaid_
+    uses it to reject replaying the same already-redeemed session_id against
+    a second account -- verify_checkout_session() only confirms Stripe's own
+    payment_status and has no idea which app account is asking, and the
+    ?session_id= it's given comes back through the browser's own URL, which
+    is fully editable. Without that check, one real payment's session_id
+    could be pasted into a second account's Pricing page URL and mark that
+    account paid too, off the same payment."""
     try:
         resp = requests.post(
             _apps_script_url(),
-            data={"token": _token(), "action": "set_paid", "username": username},
+            data={"token": _token(), "action": "set_paid", "username": username, "session_id": session_id},
             timeout=15,
         )
         resp.raise_for_status()

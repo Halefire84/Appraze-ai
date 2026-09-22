@@ -28,7 +28,7 @@ if _session_id and not st.session_state.get("user_is_paid", False):
     result = verify_checkout_session(_session_id)
     if result.paid:
         username = st.session_state.get("username", "")
-        if username and mark_paid(username):
+        if username and mark_paid(username, _session_id):
             st.session_state.user_is_paid = True
             st.success("Payment confirmed — your account is now on a paid plan. Thanks for subscribing!")
             log_event("INFO", "billing", "pages/8_Pricing", "subscription payment confirmed", {"username": username})

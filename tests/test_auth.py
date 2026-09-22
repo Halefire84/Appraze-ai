@@ -256,6 +256,37 @@ class TestMarkPaid(unittest.TestCase):
 
     @mock.patch("auth.requests")
     @mock.patch("auth.st")
+    def test_session_id_is_forwarded_so_the_backend_can_reject_replay(self, mock_st, mock_requests):
+        # AppsScript_Code.gs's handleSetPaid_ uses session_id to stop the
+        # same real Stripe payment from being replayed against a second
+        # account -- this must actually reach the backend, not get dropped.
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True}
+        mock_requests.post.return_value = resp
+
+        mark_paid("alex", "cs_test_abc123")
+        call_kwargs = mock_requests.post.call_args.kwargs
+        self.assertEqual(call_kwargs["data"]["session_id"], "cs_test_abc123")
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_backend_rejection_of_replayed_session_returns_false(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": False, "error": "This payment has already been applied to an account."}
+        mock_requests.post.return_value = resp
+
+        self.assertFalse(mark_paid("mallory", "cs_test_already_used"))
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
     def test_backend_failure_returns_false(self, mock_st, mock_requests):
         mock_st.secrets.get.side_effect = lambda k, default=None: {
             "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",

@@ -42,6 +42,17 @@ const STORAGE_HEADER = ["owner_key", "table", "payload_json", "updated_at"];
 const PROCESSED_SHEET_NAME = "ProcessedFiles";
 const PROCESSED_HEADER = ["file_id", "file_name", "processed_at"];
 
+// Prevents one real Stripe payment from being replayed across multiple
+// accounts. billing.verify_checkout_session() is explicitly "safe to call
+// repeatedly" and only checks Stripe's own payment_status -- it does not
+// know or care which app account is asking, and the ?session_id= it reads
+// comes back from the browser's own URL, which is fully attacker-editable.
+// Without this table, logging into a second account and navigating to
+// .../Pricing?session_id=<a real, already-successful session id> would
+// mark that second account paid too, off the same single payment.
+const REDEEMED_SESSIONS_SHEET_NAME = "RedeemedStripeSessions";
+const REDEEMED_SESSIONS_HEADER = ["session_id", "username", "redeemed_at"];
+
 // Server-side Appraze AI usage controls. These limits are enforced here,
 // not in Streamlit session state, so browser reruns cannot reset them.
 const AI_USAGE_SHEET_NAME = "AIUsage";
@@ -69,6 +80,17 @@ const SUPPORTED_MIME_TYPES = [
 ];
 const MAX_FILES_PER_SCAN = 12; // keeps each response small and fast
 
+// handleScanFolder_ below runs under the deploying owner's own Drive
+// access ("Execute as: Me") and returns full file contents (base64) --
+// DriveApp.getFoldersByName() matches ANY folder with that exact name
+// ANYWHERE in that Drive, not just a designated business folder. Without
+// this allowlist, anyone holding the shared TOKEN could pass an arbitrary
+// folder_name and read back the contents of any matching folder in the
+// owner's entire personal/business Drive, not only invoices/inventory.
+// Add a name here only for a folder that is genuinely safe to expose this
+// way.
+const ALLOWED_SCAN_FOLDER_NAMES = ["Invoices", "Inventory"];
+
 function doGet(e) {
   return handleRequest(e);
 }
@@ -79,10 +101,33 @@ function doPost(e) {
   return handleRequest(e);
 }
 
+// Constant-time string comparison -- `!==` short-circuits on the first
+// differing character, which leaks a timing signal an attacker could use
+// to guess TOKEN one character at a time. Apps Script's own network/
+// execution jitter makes this a low-probability attack in practice, but
+// the fix costs nothing and this endpoint is the one thing standing
+// between "anyone with the link" and every account's private data.
+function timingSafeEqual_(a, b) {
+  a = String(a == null ? "" : a);
+  b = String(b == null ? "" : b);
+  // diff starts at 1 (forces a false return) when lengths differ, but the
+  // loop still runs the full maxLen either way -- length itself is a far
+  // smaller signal to leak than which character position first mismatches,
+  // which is what `!==`'s short-circuit exposed.
+  var diff = a.length === b.length ? 0 : 1;
+  var maxLen = Math.max(a.length, b.length);
+  for (var i = 0; i < maxLen; i++) {
+    var ca = i < a.length ? a.charCodeAt(i) : 0;
+    var cb = i < b.length ? b.charCodeAt(i) : 0;
+    diff |= ca ^ cb;
+  }
+  return diff === 0;
+}
+
 function handleRequest(e) {
   try {
     const params = e.parameter;
-    if (params.token !== TOKEN) {
+    if (!timingSafeEqual_(params.token, TOKEN)) {
       return jsonResponse({ success: false, error: "unauthorized" });
     }
 
@@ -98,7 +143,7 @@ function handleRequest(e) {
       case "update_sales_log_status":
         return handleUpdateSalesLogStatus_(getStorageSheet_(), params);
       case "set_paid":
-        return handleSetPaid_(getUsersSheet_(), params);
+        return handleSetPaid_(getUsersSheet_(), getRedeemedSessionsSheet_(), params);
       case "scan_folder":
         return handleScanFolder_(params);
       case "mark_processed":
@@ -225,7 +270,7 @@ function handleSignup_(sheet, params) {
     }
   }
 
-  const isAdmin = !!ADMIN_SETUP_CODE && adminCode === ADMIN_SETUP_CODE;
+  const isAdmin = !!ADMIN_SETUP_CODE && timingSafeEqual_(adminCode, ADMIN_SETUP_CODE);
 
   sheet.appendRow([username, passwordHash, displayName, isAdmin ? "TRUE" : "FALSE", "FALSE", new Date().toISOString()]);
   return jsonResponse({ success: true, display_name: displayName, is_admin: isAdmin, is_paid: false, username: username });
@@ -253,11 +298,17 @@ function handleLogin_(sheet, params) {
   return jsonResponse({ success: false, error: "no account with that username" });
 }
 
-function handleSetPaid_(sheet, params) {
-  const username = String(params.username || "").trim().toLowerCase();
-  if (!username) {
-    return jsonResponse({ success: false, error: "username required" });
+function getRedeemedSessionsSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(REDEEMED_SESSIONS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(REDEEMED_SESSIONS_SHEET_NAME);
+    sheet.appendRow(REDEEMED_SESSIONS_HEADER);
   }
+  return sheet;
+}
+
+function setPaidForUser_(sheet, username) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).toLowerCase() === username) {
@@ -266,6 +317,43 @@ function handleSetPaid_(sheet, params) {
     }
   }
   return jsonResponse({ success: false, error: "no account with that username" });
+}
+
+function handleSetPaid_(sheet, redeemedSheet, params) {
+  const username = String(params.username || "").trim().toLowerCase();
+  const sessionId = String(params.session_id || "").trim();
+  if (!username) {
+    return jsonResponse({ success: false, error: "username required" });
+  }
+  if (!sessionId) {
+    // No Stripe session to guard against replay of (e.g. a future
+    // hand-triggered admin action) -- every real call from
+    // pages/8_Pricing.py always supplies one.
+    return setPaidForUser_(sheet, username);
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const redeemedData = redeemedSheet.getDataRange().getValues();
+    for (let i = 1; i < redeemedData.length; i++) {
+      if (String(redeemedData[i][0]) === sessionId) {
+        const redeemedBy = String(redeemedData[i][1]).toLowerCase();
+        if (redeemedBy === username) {
+          // Same user re-confirming the same payment (e.g. a page
+          // refresh) -- harmless, idempotent.
+          return jsonResponse({ success: true });
+        }
+        // Same session_id, different account -- exactly the replay this
+        // table exists to stop. Never mark a second account paid off it.
+        return jsonResponse({ success: false, error: "This payment has already been applied to an account." });
+      }
+    }
+    redeemedSheet.appendRow([sessionId, username, new Date().toISOString()]);
+    return setPaidForUser_(sheet, username);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -632,6 +720,12 @@ function handleScanFolder_(params) {
   const folderName = String(params.folder_name || "").trim();
   if (!folderName) {
     return jsonResponse({ success: false, error: "folder_name is required" });
+  }
+  if (ALLOWED_SCAN_FOLDER_NAMES.indexOf(folderName) === -1) {
+    return jsonResponse({
+      success: false,
+      error: "folder_name is not on the allowed list. Add it to ALLOWED_SCAN_FOLDER_NAMES in Code.gs if this folder is meant to be scanned.",
+    });
   }
 
   const folders = DriveApp.getFoldersByName(folderName);

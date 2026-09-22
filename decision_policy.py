@@ -379,8 +379,14 @@ def evaluate_deal(
             warnings=warnings,
         )
 
-    # Costs complete — apply 70% acquisition rule
-    assert max_bid_or_price is not None
+    # Costs complete — apply 70% acquisition rule. max_bid_or_price is
+    # guaranteed non-None here (premium_unknown returned early above when
+    # is_auction and premium_pct was None; otherwise it's always set), but
+    # this is a financial decision engine's internal invariant -- an
+    # explicit check fails identically in normal and `python -O` (assert
+    # is stripped under -O) runs, with a clear message either way.
+    if max_bid_or_price is None:
+        raise RuntimeError("Internal error: max_bid_or_price was not computed before the BUY/PASS comparison.")
     if price_f <= max_bid_or_price:
         # Acquisition BUY under 70% rule
         acquisition_decision = DECISION_BUY
