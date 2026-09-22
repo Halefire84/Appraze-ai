@@ -1,7 +1,92 @@
 # CRTC / Appraze — Agent Handoff
 
-Last updated: 2026-09-22 (beta-launch sprint, `claude/beta-launch-sprint`,
+Last updated: 2026-09-22 (branch-merge session, `claude/beta-launch-sprint`,
 open as PR #29, not yet merged).
+
+## 2026-09-22 (later): merged a second, independently-evolved branch
+
+Mid-security-audit, discovered `origin/claude/continue-from-yesterday-3zx97l`
+-- a separate, already-pushed remote branch with 21 commits of independent
+overnight work (diverged from `main` 2026-09-20, never merged, this session
+had no visibility into it until a security-audit tangent led to finding it).
+It touched **every file** this branch had also touched: `auth.py`,
+`decision_policy.py`, `AppsScript_Code.gs`, all the rebrand pages,
+`requirements.txt`, `.gitignore`, `.streamlit/config.toml`, `AUTH_SETUP.md`.
+User chose to merge the best of both rather than pick a side. What that
+branch had that this one didn't, and vice versa, mattered a lot -- each
+side had real safety-critical work the other lacked:
+
+**Ported in from that branch (their unique value):**
+- Invite-code-gated beta signup (`_beta_signup`/`_beta_login` in auth.py,
+  `CRTC_BETA_INVITE_CODES` secret) -- closes the exact open-signup /
+  unlimited-free-AI-quota abuse vector this session's own security audit
+  found independently, before discovering they'd already solved it.
+- `purchase_tax` as its own tracked cost component in `evaluate_deal()`.
+- `flip_ledger.calculate_flip_profit()`'s fee-basis fix (fee charged on
+  sale price alone, excluding buyer-paid shipping -- wrong per eBay's and
+  Mercari's actual published fee schedules).
+- Per-plan Stripe subscriptions (`subscription_plans.py`'s researched
+  tier restructuring, `billing.plan_payment_link()`, the per-tier Pricing
+  page UI, app.py's subscription-checkout-return handler).
+- Sourced fee-guidance help text on the Profit Calculator/Inventory
+  sliders, a visit counter, a Feedback/bug-report page, a Legal-docs
+  page + 6 real document templates, Android/iOS/Windows app icons at
+  every required size, `ui_theme.py`'s shared CSS (fonts, hidden
+  Streamlit chrome, card/tab styling) + the `.streamlit/config.toml`
+  `toolbarMode="minimal"` it depends on, `APPRAZE_BRAND.md` as the new
+  authoritative brand doc, DEAL-MATH.md/BACKLOG.md/LAUNCH_CHECKLIST.md.
+
+**Kept from this branch instead of taking theirs (regressions their
+branch had relative to work already on `main`/this branch):**
+- Brute-force login lockout -- entirely absent on their side; restored
+  and extended to also cover beta-account login (which their version
+  never had at all).
+- `buyer_premium_amount` (not the old ambiguous `buyer_premium` key) --
+  their pages still had the pre-fix key name.
+- `decision_policy.py`'s negative-cost-input rejection and zero-value-BUY
+  rejection (both absent on their side; their `purchase_tax` addition
+  was ported onto THIS branch's file, not taken wholesale).
+- `stripe_webhook_server.py`'s durable `event_id` webhook-replay
+  idempotency and all `telemetry.log_event_standalone()` calls -- both
+  missing on their side (predates their fork). Their file was not
+  merged in at all; this branch's is strictly more complete.
+- This branch's own tonight-built security fixes, none of which existed
+  on their side: Stripe session-replay lock (`RedeemedStripeSessions`),
+  `timingSafeEqual_` token/admin-code comparison, `ALLOWED_SCAN_FOLDER_NAMES`
+  Drive-folder allowlist, `sanitizeForSheetCell_`/formula-injection
+  defense, the real logo image on the login screen (theirs used generic
+  "## Appraze(tm)" text).
+
+**Combined where both sides had real, non-overlapping value on the exact
+same mechanism (the trickiest part):** `mark_paid()`/`handleSetPaid_` now
+take both `session_id` (this branch's replay lock) and `plan` (their
+multi-tier billing) -- neither branch alone had both. app.py's ported
+subscription-checkout-return handler was NOT copied verbatim: their
+version called `mark_paid(username, plan_key)` positionally, which would
+have silently landed the plan key in the `session_id` parameter slot
+(breaking the replay lock and never recording the plan) given this
+branch's `mark_paid(username, session_id="", plan="")` signature -- fixed
+to pass both as explicit keywords.
+
+**Verification approach**, since `AppsScript_Code.gs` has no test runner
+in this repo: every new/changed `.gs` function's decision logic was
+extracted into a standalone Node script and exercised against realistic
+cases (timing-safe comparison across 10 inputs including a length-
+mismatch edge case that caught a real bug in an earlier draft before it
+was ever committed; the session-redemption lock across 7 scenarios
+including cross-account replay and same-user idempotent re-confirm; the
+plan+session_id combination). Every `.gs` change is still unverified
+against a live deployed Sheet -- needs a real redeploy + smoke test.
+
+**Deliberately not ported**, given remaining scope: trademark/copyright
+header comments and consistent Appraze(tm) mark usage across every page
+(cosmetic only), `reports/` added to `.gitignore` (would conflict with
+this branch's own already-committed, credential-free session report).
+
+Full test suite after every merge step: `python3 -m pytest -q` -> 497
+passed, 0 failed. `flake8 --select=E9,F63,F7,F82`: 0 findings throughout.
+
+## 2026-09-22 (beta-launch sprint): rebrand, decision-engine hardening, auth hardening
 
 ## 2026-09-22 (beta-launch sprint): rebrand, decision-engine hardening, auth hardening
 
