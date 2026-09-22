@@ -1,8 +1,33 @@
 # CRTC / Appraze — Agent Handoff
 
 Last updated: 2026-09-22 (watermark restoration + abuse-lockout session,
-`claude/beta-launch-sprint`; PR #29 was merged externally mid-session, this
-branch now tracks PR #30).
+`claude/beta-launch-sprint`, open as PR #30; this update also merges in
+`main`'s own parallel work -- see the merge note right below this line).
+
+## 2026-09-22 (merge): brought `main`'s parallel Starship/eBay-sandbox work into this branch
+
+While driving PR #30 to a mergeable state, found `origin/main` had moved
+independently since this branch's fork point (`ae27b2b`), picking up 8
+commits from a separate session ("Starship," per its own commit messages)
+that this branch had no visibility into: its own independent brute-force
+lockout + bcrypt-admin-hash fix, its own independent negative-cost/
+zero-value-BUY rejection fix, a rebrand-text pass, and the eBay Sell API
+sandbox integration (`ebay_sell.py`, `sandbox_proof.py`,
+`docs/EBAY_SELL_SETUP.md`, `tests/test_ebay_sell.py`) -- all merged into
+`main` directly, bypassing this branch entirely.
+
+This produced real conflicts in `auth.py`, `decision_policy.py`,
+`crtc_holy_grail.py`, and `tests/test_auth.py`, because both sides had
+independently built the *same* fixes (brute-force lockout,
+negative-cost/zero-value-BUY rejection) after diverging from the same
+point. Each conflict was resolved by keeping this branch's version where
+it was a strict superset (this branch's brute-force lockout already covers
+Admin + tester + beta-account login; main's only covered Admin) and by
+manually reconciling anywhere the two implementations differed in a way
+that mattered, rather than blindly taking one side. See the resolution
+notes in the merge commit itself for the file-by-file detail. Full test
+suite + lint re-run after resolution, per this session's standing
+discipline -- see the merge commit message for the actual numbers.
 
 ## 2026-09-22 (latest): watermark/memorial restoration + abuse-lockout + branch survey
 
@@ -225,8 +250,6 @@ this branch's own already-committed, credential-free session report).
 
 Full test suite after every merge step: `python3 -m pytest -q` -> 497
 passed, 0 failed. `flake8 --select=E9,F63,F7,F82`: 0 findings throughout.
-
-## 2026-09-22 (beta-launch sprint): rebrand, decision-engine hardening, auth hardening
 
 ## 2026-09-22 (beta-launch sprint): rebrand, decision-engine hardening, auth hardening
 
