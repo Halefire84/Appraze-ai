@@ -35,7 +35,7 @@ with st.container(border=True):
         expected_resale = st.number_input("Expected resale if everything worked", min_value=0.0, value=1000.0, step=100.0)
         recovery_rate = st.slider("Expected usable/recoverable %", 0, 100, 75) / 100
     with c2:
-        buyer_premium = st.number_input("Buyer premium / fees", min_value=0.0, value=0.0, step=10.0)
+        buyer_premium_amount = st.number_input("Buyer premium / fees", min_value=0.0, value=0.0, step=10.0)
         tax = st.number_input("Tax", min_value=0.0, value=0.0, step=10.0)
         freight = st.number_input("Freight / pickup cost", min_value=0.0, value=0.0, step=10.0)
     with c3:
@@ -77,7 +77,7 @@ listing = {
     "current_bid": current_bid,
     "expected_resale": expected_resale,
     "recovery_rate": recovery_rate,
-    "buyer_premium": buyer_premium,
+    "buyer_premium_amount": buyer_premium_amount,
     "tax": tax,
     "freight": freight,
     "repair_cost": repair_cost,

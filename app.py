@@ -25,6 +25,7 @@ from auth import require_auth, logout
 from pos import create_pos_checkout, check_payment_status
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
+from telemetry import log_event, load_recent_events
 from commercial_protection import render_proprietary_watermark
 from ai_usage import (
     MAX_DESCRIPTION_CHARS, MAX_IMAGE_BYTES, reserve_ai_call,
@@ -1057,10 +1058,13 @@ with tab_ai:
                 except urllib.error.HTTPError as e:
                     # Do not surface provider response bodies to customers.
                     st.error(f"Appraze AI service error (HTTP {e.code}). Please try again later.")
+                    log_event("ERROR", "ai_analyzer", "app.py", "Anthropic HTTPError", {"status": e.code})
                 except json.JSONDecodeError:
                     st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
+                    log_event("ERROR", "ai_analyzer", "app.py", "AI response was not valid JSON")
                 except Exception as e:
                     st.error(f"Something went wrong: {e}")
+                    log_event("ERROR", "ai_analyzer", "app.py", "unexpected AI Analyzer failure", {"error": str(e)})
 
         if st.session_state.get("ai_last_result"):
             parsed = st.session_state.ai_last_result
@@ -1150,6 +1154,26 @@ with tab_about:
             "*Built for my family, and for the next generation of Cooper "
             "River Trading Co.*"
         )
+
+    if st.session_state.get("user_is_admin", False):
+        st.markdown("---")
+        st.markdown("#### System Log (admin only)")
+        st.caption(
+            "Recent errors and financial-decision/payment events logged via telemetry.py. "
+            "Best-effort diagnostics, not a system of record -- capped to the most recent 300 entries."
+        )
+        if st.button("Refresh log"):
+            st.session_state.pop("_recent_events_cache", None)
+        if "_recent_events_cache" not in st.session_state:
+            st.session_state["_recent_events_cache"] = load_recent_events(limit=100)
+        events = st.session_state["_recent_events_cache"]
+        if not events:
+            st.info("No logged events yet.")
+        else:
+            events_df = pd.DataFrame(events).reindex(
+                columns=["timestamp", "level", "event_type", "source", "message", "context"]
+            )
+            st.dataframe(events_df, use_container_width=True, height=320)
 
 st.markdown("---")
 st.caption("Appraze · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")

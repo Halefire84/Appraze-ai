@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse
 
 from stripe_webhooks import StripeWebhookError, process_webhook_event, verify_stripe_signature
 from webhook_store import update_sales_log_status
+from telemetry import log_event_standalone
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("stripe_webhook_server")
@@ -62,21 +63,25 @@ async def stripe_webhook(request: Request):
         valid = verify_stripe_signature(payload, signature_header, webhook_secret)
     except StripeWebhookError as e:
         logger.warning("Webhook signature check failed: %s", e)
+        log_event_standalone("WARNING", "webhook", "stripe_webhook_server", "signature check failed", {"error": str(e)})
         return JSONResponse(status_code=400, content={"error": str(e)})
 
     if not valid:
         logger.warning("Webhook signature did not match — rejecting.")
+        log_event_standalone("WARNING", "webhook", "stripe_webhook_server", "signature did not match")
         return JSONResponse(status_code=400, content={"error": "invalid signature"})
 
     try:
         event = await request.json()
     except Exception:
+        log_event_standalone("ERROR", "webhook", "stripe_webhook_server", "malformed JSON body")
         return JSONResponse(status_code=400, content={"error": "malformed JSON body"})
 
     try:
         update = process_webhook_event(event)
     except StripeWebhookError as e:
         logger.warning("Event processing failed: %s", e)
+        log_event_standalone("ERROR", "webhook", "stripe_webhook_server", "event processing failed", {"error": str(e), "event_type": event.get("type")})
         return JSONResponse(status_code=400, content={"error": str(e)})
 
     if update is None:
@@ -103,6 +108,11 @@ def _apply_update(update: dict) -> None:
     result = update_sales_log_status(update["invoice_id"], update["new_status"], event_id=update.get("event_id", ""))
     if not result.success:
         logger.warning("Could not update sales_log for invoice_id=%s: %s", update["invoice_id"], result.error)
+        log_event_standalone(
+            "ERROR", "payment", "stripe_webhook_server",
+            "sales_log reconciliation failed",
+            {"invoice_id": update["invoice_id"], "new_status": update["new_status"], "error": result.error},
+        )
         return
     found = bool((result.payload or {}).get("found"))
     applied = bool((result.payload or {}).get("applied"))

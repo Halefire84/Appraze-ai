@@ -261,7 +261,6 @@ def evaluate_deal(
         if c.state in (COST_KNOWN, COST_NA) and c.unit == "USD" and c.amount is not None:
             known_addons += c.amount
     all_in = round(price_f + known_addons, 2)
-    costs_complete = len(material_unknown) == 0 and not premium_unknown
 
     # Max bid / max price under the 70% acquisition rule
     max_bid_or_price: Optional[float] = None
@@ -282,13 +281,6 @@ def evaluate_deal(
     # Projected ROI at the *current* price (using known costs only)
     # Use finance.calc_deal with premium; shipping is added into true cost manually when known.
     effective_premium = premium_pct if (is_auction and premium_pct is not None) else 0.0
-    # calc_deal applies premium to cost; we need shipping in the cost base.
-    cost_for_roi = price_f
-    if ship is not None:
-        # Fold known shipping into an equivalent pre-premium cost so calc_deal stays consistent,
-        # or apply after. Simpler: compute true_cost ourselves.
-        pass
-    true_cost = price_f * (1 + effective_premium / 100.0) + (ship or 0.0) + (fees or 0.0)
     deal = calc_deal(cost=price_f, resale_value=value_f, fee_pct=resale_fee_pct, premium_pct=effective_premium)
     # Adjust ROI if shipping was known (calc_deal does not include shipping)
     if ship is not None or fees is not None:

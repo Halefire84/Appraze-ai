@@ -75,7 +75,7 @@ with st.form("listing_intake"):
         quantity = st.number_input("Quantity", min_value=1, value=1, step=1)
     with right:
         cpu_generation = st.number_input("Intel CPU generation (0 = unknown)", min_value=0, max_value=20, value=0, step=1)
-        buyer_premium = st.number_input("Buyer premium / fees", min_value=0.0, value=0.0, step=5.0)
+        buyer_premium_amount = st.number_input("Buyer premium / fees", min_value=0.0, value=0.0, step=5.0)
         freight = st.number_input("Freight / travel", min_value=0.0, value=0.0, step=10.0)
         repair_cost = st.number_input("Repair/accessory cost", min_value=0.0, value=0.0, step=10.0)
     tested = st.checkbox("Tested / powers on")
@@ -98,7 +98,7 @@ if submitted:
         "recovery_rate": recovery_rate,
         "quantity": quantity,
         "cpu_generation": cpu_generation or None,
-        "buyer_premium": buyer_premium,
+        "buyer_premium_amount": buyer_premium_amount,
         "freight": freight,
         "repair_cost": repair_cost,
         "tested": tested,

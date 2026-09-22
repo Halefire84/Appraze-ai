@@ -1,3 +1,59 @@
+> **STATUS (2026-09-22, later — handoff for parallel ChatGPT work):**
+> Read `.agent/HANDOFF.md` first — it is the current-state snapshot with
+> file/test evidence, updated today. This banner is the fast summary.
+>
+> **Done and pushed** (branch `claude/chatgpt-crosscheck-buyer-premium-fix`
+> on `Halefire84/Appraze-ai`, not yet merged to `main` — check
+> `git log origin/main..origin/claude/chatgpt-crosscheck-buyer-premium-fix`
+> before assuming which branch has what):
+> - Sessions 1-5 and most of 8-9 from this pack's original plan — done,
+>   cross-checked against actual source, not just claimed.
+> - A real unit-collision bug in `acquisition_hunter.py` (`buyer_premium`
+>   meant dollars there, percent points in `decision_policy.py` — same
+>   key, two conventions) — fixed, renamed to `buyer_premium_amount`.
+> - `telemetry.py` — best-effort error/payment-event logging to a new
+>   `event_log` table, wired into Stripe webhook failures and AI Analyzer
+>   errors, with an admin-only viewer in the app.
+> - **The paid-subscription flow was completely unwired until today** —
+>   `billing.py`/`auth.mark_paid()` existed but nothing called them, not
+>   even the owner could mark an account paid through the app. Fixed:
+>   `pages/8_Pricing.py` now has a real Subscribe button + Stripe
+>   session-verify + account-upgrade flow. NOT yet tested with a real
+>   payment (needs live/test Stripe credentials nobody here has).
+> - `crtc.py` (confirmed dead code) removed; `CRTC_GAP_CLOSURE_REPORT.md`
+>   (contained a factually wrong claim) removed.
+> - A `/loop` self-paced hardening pass is running against this repo —
+>   expect small commits to show up on their own; check `git log` before
+>   assuming a fix is still needed.
+> - **eBay real listing publishing** — `ebay_listing.py` (new) +
+>   `pages/5_Cross_List.py` now do real eBay listing creation via the
+>   Sell Inventory API (Authorization Code OAuth, seller connects their
+>   own account once). Built and unit-tested (25 tests, all mocked), NOT
+>   yet exercised against a real eBay account — needs the owner to (1)
+>   register an OAuth redirect ("RuName") in eBay's Developer Portal, (2)
+>   set up payment/return/fulfillment business policies in Seller Hub,
+>   (3) confirm Sell API access for whichever environment they test in.
+>   None of those three are things this session or you can do — external,
+>   human-gated, same category as Stripe's live-credential gap above.
+>   Every other marketplace (Etsy, Facebook Marketplace, Mercari,
+>   Poshmark, Depop) is still deliberately draft-only: none has a public
+>   API for third-party listing tools, and reaching them the way
+>   competitor tools do (browser automation against each site's own web
+>   form) is explicitly against this project's own rules
+>   (`SECURITY_RELEASE_CHECKLIST.md`) — don't build that as a workaround.
+>
+> **Still genuinely open — good next targets for you:**
+> - Session 6 (financial-input validation at every UI boundary, not just
+>   the core engine) and Session 7 (dedicated security pass) from this
+>   pack's original plan.
+> - The real eBay OAuth/policy dry run described above, once the owner
+>   completes eBay's own setup steps.
+> - Whether the Google Apps Script backend's OAuth "app is blocked" issue
+>   (mentioned in the owner's own conversion-plan doc as a launch
+>   blocker) is resolved — nobody in this session has visibility into
+>   Google Cloud Console to check.
+> - Real Stripe test-mode dry run end-to-end (nobody has done one yet).
+
 # CRTC → ChatGPT / Claude Full Handoff Pack
 **Date:** 2026-09-19  
 **Product:** CRTC (Cooper River Trading Co.) — resale deal radar, max-bid math, flip ledger  

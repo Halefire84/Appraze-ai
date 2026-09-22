@@ -1,5 +1,10 @@
 # CRTC Finish Prompt Pack (VS Code / Claude Code)
 
+> **STATUS (2026-09-22):** Work directly on `main` in
+> `Halefire84/Appraze-ai` — there is no `CRTC-P0-hardened.zip` to unzip,
+> its content is already merged. Sessions 1-5, 8, 9 are done (see
+> `.agent/HANDOFF.md`). Start at Session 6 if resuming.
+
 **Workspace:** Unzip `CRTC-P0-hardened.zip` and open that folder only.  
 **Order:** Session 0 → 9. One session per chat. Do not skip ahead if tests fail.  
 **Models:** Sonnet 5 default · Opus 5 only if stuck on architecture/security.
