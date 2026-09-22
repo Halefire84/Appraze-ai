@@ -191,6 +191,24 @@ def evaluate_deal(
     price_f = _safe_float(price)
     value_f = _safe_float(market_value)
 
+    if value_f == 0.0:
+        # Zero resale value is valid input (not negative, not malformed) but
+        # can never justify a BUY -- there is no profit potential to acquire
+        # regardless of price, including the degenerate price=$0 case.
+        return DealDecision(
+            decision=DECISION_REVIEW,
+            reason="Market value is $0; there is no resale value to justify an acquisition.",
+            market_value=0.0,
+            confidence=confidence,
+            acquisition_target_all_in=0.0,
+            max_bid_or_price=None,
+            all_in_cost=None,
+            projected_roi_pct=None,
+            roi_tier="pass",
+            roi_tier_label=DECISION_PASS,
+            costs_complete=False,
+        )
+
     if price_f is None:
         return DealDecision(
             decision=DECISION_REVIEW,
@@ -223,9 +241,24 @@ def evaluate_deal(
     target_all_in = round(value_f * (ACQUISITION_TARGET_PCT / 100.0), 2)
 
     # --- Build cost components with explicit states ---
+    # A negative premium/shipping/fee is not a real-world value -- it would
+    # silently REDUCE all_in cost below price_f, which could manufacture a
+    # false BUY out of malformed input. _safe_float() only screens
+    # None/bool/NaN/Inf, not sign, so negative cost inputs are treated the
+    # same as UNKNOWN here rather than accepted at face value (F-10/F-11
+    # class of finding: a malformed number must never produce BUY).
     premium_pct = _safe_float(buyer_premium_pct)
+    if premium_pct is not None and premium_pct < 0:
+        warnings.append(f"Ignored negative buyer_premium_pct={premium_pct} (treated as unknown).")
+        premium_pct = None
     ship = _safe_float(shipping)
+    if ship is not None and ship < 0:
+        warnings.append(f"Ignored negative shipping={ship} (treated as unknown).")
+        ship = None
     fees = _safe_float(other_fees)
+    if fees is not None and fees < 0:
+        warnings.append(f"Ignored negative other_fees={fees} (treated as unknown).")
+        fees = None
 
     if is_auction:
         if premium_pct is None:
