@@ -1,5 +1,10 @@
 # Appraze — Brand Source of Truth
 
+**Superseded by `APPRAZE_BRAND.md`** (2026-09-21 final branding decision) — that
+file is now the single source of truth for product branding. This file is kept
+for history; the two do not conflict (both say Appraze/CRTC the same way),
+but APPRAZE_BRAND.md is more current (trademark usage, retired-names list).
+
 **Product:** Appraze
 
 **Tagline:** Complete Resale Business Suite
