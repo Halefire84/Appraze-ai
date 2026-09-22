@@ -1,27 +1,21 @@
 import streamlit as st
 
 from subscription_plans import PLANS
-from billing import plan_payment_link
 
 st.set_page_config(page_title="Appraze Pricing", page_icon="💳", layout="wide")
 from ui_theme import inject_theme
 inject_theme()
-from auth import require_auth
+from auth import require_auth, _secret
 require_auth()
 
 st.title("💳 Appraze Pricing")
 st.caption("Pay for opportunity intelligence — not another spreadsheet.")
 
 # ---------------------------------------------------------------------------
-# Per-plan Stripe Payment Links (billing.plan_payment_link), replacing the
-# earlier single fixed-price link (billing.payment_link_url, now legacy --
-# nothing calls it). Each plan's "After payment" redirect sends the
-# customer back to the app root with ?sub_plan=<key>&sub_session_id=...,
-# which app.py's SUBSCRIPTION CHECKOUT RETURN handler verifies and records
-# -- that verification happens once, in app.py, not duplicated here, since
-# a direct page navigation to this page never re-runs app.py's top-level
-# code but DOES see whatever app.py already wrote into st.session_state
-# earlier in the same browser session.
+# Payments are manual for now -- Cash App + emailed receipt, activated by
+# hand. Deliberately NOT wired to billing.plan_payment_link()/Stripe here:
+# no live checkout flow exists yet, so this page must never look like one.
+# Google Play Billing is planned for the Android launch, not this page.
 # ---------------------------------------------------------------------------
 _current_plan = st.session_state.get("user_plan", "free")
 if st.session_state.get("user_is_admin"):
@@ -31,54 +25,51 @@ elif _current_plan and _current_plan != "free":
 else:
     st.info("You're on the Free plan.")
 
-st.info("Launch strategy: keep the Free tier useful, make Appraiser the obvious flagship, and add higher-volume tiers only as real demand appears.")
-
 cols = st.columns(len(PLANS))
 for col, plan in zip(cols, PLANS):
     with col:
         with st.container(border=True):
-            if plan.key == "appraiser":
-                st.markdown("**🏆 MOST POPULAR**")
             st.subheader(plan.name)
             st.markdown("Free" if plan.monthly_price == 0 else f"**${plan.monthly_price}/mo**")
             st.caption(plan.tagline)
             st.write(f"**{plan.analyses_per_month:,}** AI analyses / month")
             st.write("✅ Holy Grail hunting" if plan.hunt_enabled else "• Manual analysis")
-            st.write("✅ Alerts" if plan.alerts_enabled else "• Basic results")
+            st.write("✅ Deal alerts" if plan.alerts_enabled else "• —")
+            st.write("✅ Inventory tracking" if plan.inventory_tracking else "• —")
             st.write("✅ Advanced sources" if plan.advanced_sources else "• Core sources")
-            st.write("✅ Liquidation & surplus" if plan.liquidation else "• —")
-            st.write("✅ Financial intelligence" if plan.financial_intelligence else "• —")
+            st.write("✅ Liquidation intel" if plan.liquidation else "• —")
             st.write("✅ Batch analysis" if plan.batch_analysis else "• —")
-            st.write("✅ Priority hunting" if plan.priority else "• Standard priority")
+            st.write("✅ Priority support" if plan.priority else "• Standard priority")
+            st.write("✅ Financial intelligence" if plan.financial_intelligence else "• —")
             if plan.team_seats > 1:
                 st.write(f"✅ {plan.team_seats} team seats")
+
+            if plan.prepay_3mo:
+                st.caption(f"Prepay 3 mo: **${plan.prepay_3mo}** · 6 mo: **${plan.prepay_6mo}** (~30% off)")
 
             if plan.key == _current_plan:
                 st.button("Current plan", disabled=True, use_container_width=True, key=f"current_{plan.key}")
             elif plan.monthly_price == 0:
-                st.caption("No signup needed — this is what you start with.")
+                st.caption("Sign up with email verification — this is what you start with.")
             else:
-                link = plan_payment_link(plan.key)
-                if link:
-                    button_type = "primary" if plan.key == "appraiser" else "secondary"
-                    st.link_button(f"Subscribe to {plan.name}", link, use_container_width=True, type=button_type)
-                else:
-                    st.button("Not yet available", disabled=True, use_container_width=True, key=f"unavail_{plan.key}")
+                st.caption("See \"How to subscribe\" below.")
 
 st.divider()
-st.subheader("Why Appraiser is the flagship")
-st.markdown("""
-**$59/month** is designed around the feature that makes Appraze different: finding opportunities the market overlooked.
+st.subheader("How to subscribe (manual for now)")
+_cashtag = _secret("PAYMENTS_CASHTAG", "")
+_contact_email = _secret("PAYMENTS_CONTACT_EMAIL", "")
+st.markdown(f"""
+Appraze isn't wired to automated billing yet — every subscription is activated by hand:
 
-- Holy Grail opportunity hunting
-- Information-failure scoring
-- Max-bid intelligence
-- Auction and liquidation research
-- Opportunity alerts
-- AI valuation and listing intelligence
-- Financial intelligence as that layer comes online
+1. Send your plan's monthly price (or a 3-month / 6-month prepay total for ~30% off) via Cash App to
+   **{_cashtag or "(Cash App tag not yet configured — contact us for details)"}**.
+2. Email your payment receipt and your Appraze username to
+   **{_contact_email or "(contact email not yet configured)"}**.
+3. We'll activate your account by hand, usually within one business day.
 
-The goal is simple: **one profitable find should be capable of paying for the subscription.**
+Cross-listing (auto-publishing to eBay/Facebook/Mercari) is **coming soon** and not included in any plan yet — every plan today gets marketplace-ready listing drafts you copy and paste yourself.
+
+Google Play Billing (in-app purchase on Android) arrives at the Android launch — this manual flow is only for the web app in the meantime.
 """)
 
-st.caption("Payment links are configured separately through Stripe. No card data is handled by Appraze source code.")
+st.caption("No card data is ever handled by Appraze source code — Cash App and email are outside this app entirely.")

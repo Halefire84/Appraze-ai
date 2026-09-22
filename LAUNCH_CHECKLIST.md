@@ -44,14 +44,14 @@ launching:
   today (creates a real Stripe Checkout Session per sale, no card data
   touches Appraze). This is what needs to go live for you to charge your
   own resale customers.
-- **Subscription Pricing page** (`pages/8_💳_Pricing.py`) — **now has
-  real Subscribe buttons** (added 2026-09-21), one per paid plan, each
-  driven by its own Stripe Payment Link — see DEPLOY.md's "Card
-  payments" section for exact setup steps and the new
-  `STRIPE_PAYMENT_LINK_<PLAN>` secrets it needs. A plan with no secret
-  configured shows a disabled "Not yet available" button instead of a
-  broken link, so you can launch with just Appraiser (the flagship) live
-  and add the rest later.
+- **Subscription Pricing page** (`pages/8_💳_Pricing.py`) — **deliberately
+  manual as of 2026-09-22**, not automated billing. It shows the current
+  plan catalog and "how to subscribe" instructions (Cash App + emailed
+  receipt, activated by hand) instead of live Stripe Payment Link
+  buttons — `billing.plan_payment_link()` still exists and works if you
+  want to wire real Subscribe buttons back in later (see DEPLOY.md's
+  "Card payments" section and the `STRIPE_PAYMENT_LINK_<PLAN>` secrets
+  it reads), but nothing on this page calls it right now.
 
   **Important gap found while wiring this up:** the login gate every
   page actually uses (`auth.require_auth()`) only supports the one
@@ -73,13 +73,17 @@ launching:
   actually use end-to-end.
 - Also not yet built: nothing in the app currently checks a user's plan
   to gate a feature (`subscription_plans.feature_enabled()` exists and
-  is unit-tested, but nothing calls it). Buying Appraiser today records
-  "appraiser" as your plan; it doesn't unlock anything extra yet.
-- Pricing tiers were renamed/restructured 2026-09-21 based on
-  `COMPETITIVE-GAPS.md`'s research — "Hunter" is retired (renamed
-  "Appraiser"), and a new "Analyst" tier ($35/mo) sits between Scout and
-  Appraiser. See `subscription_plans.py`'s module docstring for the
-  reasoning.
+  is unit-tested, but nothing calls it). Recording a plan on an account
+  doesn't unlock anything extra yet.
+- Pricing tiers were fully replaced 2026-09-22: Free $0 / Starter $25 /
+  Pro $50 / Business $100 / Enterprise $200, all round numbers, plus
+  3-month/6-month prepay options at ~30% off. The prior lineup (Scout/
+  Analyst/Appraiser/Operator/Pro) is retired — no plan key or name from
+  it should appear anywhere. Payments are manual for now (Cash App +
+  emailed receipt, activated by hand — see `pages/8_💳_Pricing.py`); the
+  Stripe Payment Link flow below is not currently wired to the Pricing
+  page. See `subscription_plans.py`'s module docstring for the current
+  catalog.
 
 Steps to take Stripe live (POS and/or subscriptions):
 1. In your Stripe Dashboard, toggle out of test mode (or use a separate

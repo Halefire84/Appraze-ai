@@ -442,7 +442,7 @@ def mark_paid(username: str, session_id: str = "", plan: str = "") -> bool:
     could be pasted into a second account's Pricing page URL and mark that
     account paid too, off the same payment.
 
-    plan is one of subscription_plans.PLANS' keys (e.g. "appraiser"); omit
+    plan is one of subscription_plans.PLANS' keys (e.g. "starter"); omit
     it to mark paid without changing which plan is on file."""
     try:
         payload = {"token": _token(), "action": "set_paid", "username": username, "session_id": session_id}
