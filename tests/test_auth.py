@@ -19,6 +19,8 @@ from auth import (
     AuthResult,
     _admin_credentials_configured,
     _admin_login,
+    _beta_login,
+    _beta_signup,
     logout,
     mark_paid,
     require_auth,
@@ -428,6 +430,164 @@ class TestLoginLockout(unittest.TestCase):
         self.assertIn("too many", locked_result.error.lower())
         # The lockout must short-circuit before ever calling Apps Script again.
         self.assertEqual(mock_requests.post.call_count, 5)
+
+
+class TestBetaInviteSignup(unittest.TestCase):
+    """_beta_signup()/_beta_login() -- invite-code-gated beta access, ported
+    from a parallel session's branch onto this one's auth.py. Reuses the
+    existing Apps Script save_data/load_data backend (table
+    "beta_accounts"), so every test mocks that instead of hitting a
+    dedicated endpoint."""
+
+    def setUp(self):
+        import auth
+        auth._failed_login_attempts.clear()
+
+    def _secrets(self, invite_codes="ALPHA,BETA", **script):
+        base = {
+            "CRTC_BETA_INVITE_CODES": invite_codes,
+            "APPS_SCRIPT_URL": "https://script.google.com/fake",
+            "APPS_SCRIPT_TOKEN": "fake-token",
+        }
+        base.update(script)
+        return base
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_signup_with_valid_code_succeeds(self, mock_st, mock_requests):
+        secrets = self._secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        # First call: load existing accounts (none yet). Second: save.
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {"success": True, "payload": "[]"}
+        save_resp = mock.Mock()
+        save_resp.raise_for_status.return_value = None
+        save_resp.json.return_value = {"success": True}
+        mock_requests.post.side_effect = [load_resp, save_resp]
+
+        result = _beta_signup("newuser", "password123", "New User", "alpha")
+        self.assertTrue(result.success)
+        self.assertEqual(result.plan, "beta")
+        self.assertTrue(result.is_paid)
+        self.assertFalse(result.is_admin)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_signup_with_invalid_code_fails(self, mock_st, mock_requests):
+        secrets = self._secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        result = _beta_signup("newuser", "password123", "New User", "WRONG-CODE")
+        self.assertFalse(result.success)
+        self.assertIn("invite code", result.error.lower())
+        mock_requests.post.assert_not_called()  # rejected before any network call
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_signup_rejects_already_used_invite_code(self, mock_st, mock_requests):
+        secrets = self._secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": '[{"username": "existing", "invite_code": "ALPHA", "password_hash": "x"}]',
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_signup("seconduser", "password123", "Second", "alpha")
+        self.assertFalse(result.success)
+        self.assertIn("already been used", result.error)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_signup_rejects_taken_username(self, mock_st, mock_requests):
+        secrets = self._secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": '[{"username": "existing", "invite_code": "OTHER", "password_hash": "x"}]',
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_signup("existing", "password123", "Existing", "beta")
+        self.assertFalse(result.success)
+        self.assertIn("already taken", result.error)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_login_with_correct_password_succeeds(self, mock_st, mock_requests):
+        import bcrypt as _bcrypt
+        secrets = self._secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        stored_hash = _bcrypt.hashpw(b"password123", _bcrypt.gensalt()).decode()
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": f'[{{"username": "betauser", "display_name": "Beta User", "password_hash": "{stored_hash}"}}]',
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_login("betauser", "password123")
+        self.assertIsNotNone(result)
+        self.assertTrue(result.success)
+        self.assertEqual(result.plan, "beta")
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_login_with_wrong_password_fails(self, mock_st, mock_requests):
+        import bcrypt as _bcrypt
+        secrets = self._secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        stored_hash = _bcrypt.hashpw(b"password123", _bcrypt.gensalt()).decode()
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": f'[{{"username": "betauser", "password_hash": "{stored_hash}"}}]',
+        }
+        mock_requests.post.return_value = load_resp
+
+        result = _beta_login("betauser", "wrong-password")
+        self.assertIsNotNone(result)
+        self.assertFalse(result.success)
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_login_returns_none_when_beta_not_enabled(self, mock_st, mock_requests):
+        secrets = self._secrets(invite_codes="")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        self.assertIsNone(_beta_login("anyone", "anything"))
+        mock_requests.post.assert_not_called()
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_beta_login_locks_out_after_max_attempts(self, mock_st, mock_requests):
+        # A wrong-password attempt only records a failure when the username
+        # actually matches an existing account (see _beta_login) -- an
+        # unknown username falls through to `return None` without ever
+        # touching the lockout counter, so this test needs a real account.
+        import bcrypt as _bcrypt
+        secrets = self._secrets()
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        stored_hash = _bcrypt.hashpw(b"correct-password", _bcrypt.gensalt()).decode()
+        load_resp = mock.Mock()
+        load_resp.raise_for_status.return_value = None
+        load_resp.json.return_value = {
+            "success": True,
+            "payload": f'[{{"username": "betauser", "password_hash": "{stored_hash}"}}]',
+        }
+        mock_requests.post.return_value = load_resp
+
+        for _ in range(5):
+            result = _beta_login("betauser", "wrong-password")
+            self.assertFalse(result.success)
+        locked_result = _beta_login("betauser", "wrong-password")
+        self.assertIsNotNone(locked_result)
+        self.assertIn("too many", locked_result.error.lower())
 
 
 if __name__ == "__main__":
