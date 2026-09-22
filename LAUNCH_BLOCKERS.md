@@ -26,11 +26,12 @@ Last verified: 2026-09-22 — `python3 -m pytest tests/ -q` -> 497 passed, 0 fai
 - [x] Spreadsheet formula/CSV injection via display_name defused
 - [x] Timing-unsafe secret comparisons (token, admin invite code) replaced with constant-time compare
 - [x] Escalating abuse-detection lockout (temp lockout -> permanent/admin-required after repeated bot-like abuse) — done 2026-09-22, `checkAndRecordAbuseAttempt_` in `AppsScript_Code.gs`, gates `reserve_ai_usage`
-- [ ] Dedicated security audit written up (`SECURITY_NOTES.md` — Session 7 of `CRTC_SESSION_PROMPTS.md` not yet done as a standalone artifact); a real audit pass happened 2026-09-22 (see `.agent/HANDOFF.md`) but hasn't been written up as its own document
+- [x] Dedicated security audit written up (`SECURITY_NOTES.md`) — done 2026-09-22: fresh `bandit`/`pip-audit` runs (9 Low/Medium findings, all reviewed, 0 High; deps clean), prompt-injection/formula-injection/self-XSS boundary re-verified, IDOR protections traced through every Apps Script action, the API's shared-TOKEN trust model flagged as a human decision point for anything past a small beta
 
-**Stage A status: CLOSE.** The financial/webhook/category/SKU/auth/abuse
-hardening is done and tested. The remaining gap is writing up the
-2026-09-22 security-audit findings as a standalone `SECURITY_NOTES.md`.
+**Stage A status: CLOSE.** The financial/webhook/category/SKU/auth/abuse/
+security-audit hardening is done, tested, and written up. See
+`SECURITY_NOTES.md` for what still needs a human before a wider beta
+(the shared-TOKEN trust model, live Apps Script deployment testing).
 
 ## Stage B — Friendly free beta (5–10 trusted resellers, target Oct 1 2026)
 
