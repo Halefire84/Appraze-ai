@@ -231,8 +231,29 @@ def test_master_to_offer_is_fixed_price_with_policies():
     assert offer["format"] == "FIXED_PRICE"
     assert offer["pricingSummary"]["price"] == {"value": "129.50", "currency": "USD"}
     assert offer["listingPolicies"]["fulfillmentPolicyId"] == "FP-1"
-    assert offer["merchantLocationKey"] == "CRTC_WAREHOUSE"
     assert offer["categoryId"] == "20624"
+
+
+def test_master_to_offer_never_sends_the_configured_location_key():
+    # The stored merchant-location key is invalid for real sandbox sellers
+    # ("Location information not found" on createOffer) — publish_master()
+    # resolves a real one via find_merchant_location_key() instead.
+    offer = master_to_offer(SAMPLE_MASTER, _config(merchant_location_key="STALE_KEY"))
+    assert "merchantLocationKey" not in offer
+
+
+def test_inventory_item_passes_through_ebay_aspects():
+    item = master_to_inventory_item({
+        "sku": "S",
+        "title": "T",
+        "ebay_aspects": {"Brand": "Unbranded", "Type": ["Mixing Bowl"]},
+    })
+    assert item["product"]["aspects"] == {"Brand": ["Unbranded"], "Type": ["Mixing Bowl"]}
+
+
+def test_inventory_item_omits_aspects_when_not_a_dict():
+    item = master_to_inventory_item({"sku": "S", "title": "T", "ebay_aspects": "not-a-dict"})
+    assert "aspects" not in item["product"]
 
 
 # --- client / publish -------------------------------------------------------
@@ -244,6 +265,7 @@ def test_publish_happy_path_calls_sandbox_endpoints_in_order():
     session = MagicMock()
     session.request.side_effect = [
         _response(204),                                     # PUT inventory_item
+        _response(200, {"locations": [{"merchantLocationKey": "LOC-1", "merchantLocationStatus": "ENABLED"}]}),
         _response(200, {"offers": []}),                     # GET offer?sku=
         _response(201, {"offerId": "OFFER-9"}),             # POST offer
         _response(200, {"listingId": "LISTING-7"}),         # POST publish
@@ -253,15 +275,20 @@ def test_publish_happy_path_calls_sandbox_endpoints_in_order():
 
     calls = [(c.args[0], c.args[1]) for c in session.request.call_args_list]
     assert calls[0] == ("PUT", "https://api.sandbox.ebay.com/sell/inventory/v1/inventory_item/CRTC-1042")
-    assert calls[2] == ("POST", "https://api.sandbox.ebay.com/sell/inventory/v1/offer")
-    assert calls[3] == ("POST", "https://api.sandbox.ebay.com/sell/inventory/v1/offer/OFFER-9/publish")
+    assert calls[3] == ("POST", "https://api.sandbox.ebay.com/sell/inventory/v1/offer")
+    assert calls[4] == ("POST", "https://api.sandbox.ebay.com/sell/inventory/v1/offer/OFFER-9/publish")
     assert all("api.sandbox.ebay.com" in url for _, url in calls)
+
+    # The resolved (live, ENABLED) location key is attached to the created offer.
+    create_offer_body = session.request.call_args_list[3].kwargs["json"]
+    assert create_offer_body["merchantLocationKey"] == "LOC-1"
 
 
 def test_publish_updates_existing_offer_instead_of_duplicating():
     session = MagicMock()
     session.request.side_effect = [
         _response(204),                                     # PUT inventory_item
+        _response(200, {"locations": []}),                  # GET location (none found)
         _response(200, {"offers": [{"offerId": "OFFER-EXISTING"}]}),
         _response(204),                                     # PUT offer (update)
         _response(200, {"listingId": "LISTING-7"}),
@@ -269,7 +296,26 @@ def test_publish_updates_existing_offer_instead_of_duplicating():
     result = publish_master(SAMPLE_MASTER, config=_config(), client=_client(session))
     assert result["offer_id"] == "OFFER-EXISTING"
     methods = [c.args[0] for c in session.request.call_args_list]
-    assert methods == ["PUT", "GET", "PUT", "POST"]
+    assert methods == ["PUT", "GET", "GET", "PUT", "POST"]
+
+    # No location was found, so none is forced onto the update body.
+    update_offer_body = session.request.call_args_list[3].kwargs["json"]
+    assert "merchantLocationKey" not in update_offer_body
+
+
+def test_publish_master_treats_no_existing_offer_404_as_none_not_fatal():
+    """find_offer_id's GET 404s ('Offer is not available') for a SKU with no
+    offer yet — publish_master must still proceed to createOffer, not raise."""
+    session = MagicMock()
+    session.request.side_effect = [
+        _response(204),                                          # PUT inventory_item
+        _response(200, {"locations": []}),                       # GET location
+        _response(404, {"errors": [{"errorId": 11800, "message": "Offer is not available"}]}),
+        _response(201, {"offerId": "OFFER-9"}),                  # POST offer
+        _response(200, {"listingId": "LISTING-7"}),
+    ]
+    result = publish_master(SAMPLE_MASTER, config=_config(), client=_client(session))
+    assert result["offer_id"] == "OFFER-9"
 
 
 def test_api_error_is_surfaced_cleanly():
@@ -302,7 +348,7 @@ def test_publish_without_sku_raises_before_http():
 def test_missing_listing_id_on_publish_is_an_error():
     session = MagicMock()
     session.request.side_effect = [
-        _response(204), _response(200, {"offers": []}),
+        _response(204), _response(200, {"locations": []}), _response(200, {"offers": []}),
         _response(201, {"offerId": "OFFER-9"}), _response(200, {}),
     ]
     with pytest.raises(EbaySellError) as exc:
@@ -319,6 +365,52 @@ def test_withdraw_and_status_hit_sandbox_cleanup_endpoints():
     urls = [c.args[1] for c in session.request.call_args_list]
     assert urls[0].endswith("/offer/OFFER-9")
     assert urls[1].endswith("/offer/OFFER-9/withdraw")
+
+
+def test_find_offer_id_returns_none_on_404_instead_of_raising():
+    """eBay 404s ('Offer is not available') for a SKU with no offer yet —
+    that's a normal 'no existing offer' result, not a failure."""
+    session = MagicMock()
+    session.request.return_value = _response(404, {"errors": [{"errorId": 11800, "message": "Offer is not available"}]})
+    assert _client(session).find_offer_id("NO-SUCH-SKU") is None
+
+
+def test_find_offer_id_still_raises_on_other_errors():
+    session = MagicMock()
+    session.request.return_value = _response(500, {"errors": [{"errorId": 1, "message": "boom"}]})
+    with pytest.raises(EbaySellError):
+        _client(session).find_offer_id("SOME-SKU")
+
+
+def test_publish_offer_sends_a_real_json_body_not_none():
+    """A bodyless POST 411s at eBay's sandbox edge; requests only sets
+    Content-Length when a json body is actually passed."""
+    session = MagicMock()
+    session.request.return_value = _response(200, {"listingId": "LISTING-7"})
+    _client(session).publish_offer("OFFER-9")
+    assert session.request.call_args.kwargs["json"] == {}
+
+
+def test_withdraw_offer_sends_a_real_json_body_not_none():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"listingId": "LISTING-7"})
+    _client(session).withdraw_offer("OFFER-9")
+    assert session.request.call_args.kwargs["json"] == {}
+
+
+def test_find_merchant_location_key_returns_first_enabled_location():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"locations": [
+        {"merchantLocationKey": "DISABLED-LOC", "merchantLocationStatus": "DISABLED"},
+        {"merchantLocationKey": "LOC-OK", "merchantLocationStatus": "ENABLED"},
+    ]})
+    assert _client(session).find_merchant_location_key() == "LOC-OK"
+
+
+def test_find_merchant_location_key_returns_none_when_no_locations_exist():
+    session = MagicMock()
+    session.request.return_value = _response(200, {"locations": []})
+    assert _client(session).find_merchant_location_key() is None
 
 
 def test_inventory_item_request_sends_content_language_header():

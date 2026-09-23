@@ -424,6 +424,17 @@ def master_to_inventory_item(master: Dict[str, Any]) -> Dict[str, Any]:
         if value:
             product[ebay_key] = [value] if ebay_key in {"upc"} else value
 
+    # Some categories require item specifics (aspects) beyond brand/mpn/upc
+    # (e.g. "Type") to publish. The app doesn't collect these yet, so pass
+    # through an optional pre-built map rather than guessing per category.
+    aspects = master.get("ebay_aspects")
+    if isinstance(aspects, dict) and aspects:
+        product["aspects"] = {
+            str(name): [str(v) for v in (values if isinstance(values, list) else [values])]
+            for name, values in aspects.items()
+            if str(name).strip()
+        }
+
     item: Dict[str, Any] = {
         "product": product,
         "condition": map_condition(master.get("condition")),
@@ -453,8 +464,11 @@ def master_to_offer(master: Dict[str, Any], config: EbayConfig) -> Dict[str, Any
             "paymentPolicyId": config.payment_policy_id,
             "returnPolicyId": config.return_policy_id,
         },
-        "merchantLocationKey": config.merchant_location_key,
     }
+    # No merchantLocationKey here: config's stored key can go stale (renamed
+    # or deleted in the sandbox account), which 404s createOffer with "Location
+    # information not found". publish_master() resolves the seller's actual
+    # location at publish time instead of trusting this config value.
     description = str(master.get("description") or "").strip()
     if description:
         offer["listingDescription"] = description
@@ -515,19 +529,32 @@ class EbaySellClient:
             headers["Content-Language"] = "en-US"
         return headers
 
-    def _request(self, method: str, path: str, *, json_body: Any = None, content_language: bool = False) -> Dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Any = None,
+        content_language: bool = False,
+        treat_404_as_empty: bool = False,
+    ) -> Dict[str, Any]:
         url = f"{INVENTORY_BASE}{path}"
+        # eBay's sandbox edge 411s a POST with no body at all; always send a
+        # real JSON body (even just {}) so Content-Length is set correctly.
+        body = {} if json_body is None and method in ("POST", "PUT") else json_body
         try:
             resp = self.session.request(
                 method,
                 url,
                 headers=self._headers(content_language=content_language),
-                json=json_body,
+                json=body,
                 timeout=_TIMEOUT,
             )
         except requests.exceptions.RequestException as exc:
             raise EbaySellError(f"eBay sandbox request failed ({method} {path}): {exc}") from exc
         if resp.status_code >= 400:
+            if treat_404_as_empty and resp.status_code == 404:
+                return {}
             raise EbaySellError(
                 f"eBay sandbox {method} {path} failed (HTTP {resp.status_code}): {_error_summary(resp)}"
             )
@@ -553,6 +580,21 @@ class EbaySellClient:
     def get_inventory_item(self, sku: str) -> Dict[str, Any]:
         return self._request("GET", f"/inventory_item/{urllib.parse.quote(str(sku), safe='')}")
 
+    # -- location ------------------------------------------------------------
+    def find_merchant_location_key(self) -> Optional[str]:
+        """An ENABLED merchant location key that actually exists for this seller.
+
+        publishOffer resolves <Item.Country> from the offer's merchantLocationKey.
+        A missing/invalid key fails createOffer ("Location information not
+        found"); no key at all fails publishOffer ("No <Item.Country> exists").
+        Config's stored key can go stale, so look up what's real instead.
+        """
+        data = self._request("GET", "/location")
+        for location in data.get("locations") or []:
+            if location.get("merchantLocationStatus") == "ENABLED" and location.get("merchantLocationKey"):
+                return str(location["merchantLocationKey"])
+        return None
+
     # -- offer -------------------------------------------------------------
     def create_offer(self, sku: str, offer_dict: Dict[str, Any]) -> str:
         """Create a fixed-price offer and return its offerId."""
@@ -566,9 +608,15 @@ class EbaySellClient:
         return str(offer_id)
 
     def find_offer_id(self, sku: str) -> Optional[str]:
-        """Existing offerId for a SKU, if any — createOffer 409s on duplicates."""
+        """Existing offerId for a SKU, if any — createOffer 409s on duplicates.
+
+        eBay returns HTTP 404 ("Offer is not available") when the SKU has no
+        offer yet — that's a normal "no existing offer" result, not a failure.
+        """
         data = self._request(
-            "GET", f"/offer?sku={urllib.parse.quote(str(sku), safe='')}&marketplace_id={self.config.marketplace_id}"
+            "GET",
+            f"/offer?sku={urllib.parse.quote(str(sku), safe='')}&marketplace_id={self.config.marketplace_id}",
+            treat_404_as_empty=True,
         )
         offers = data.get("offers") or []
         for offer in offers:
@@ -626,6 +674,9 @@ def publish_master(
     client.create_or_replace_inventory_item(sku, master_to_inventory_item(master))
 
     offer_body = master_to_offer(master, config)
+    location_key = client.find_merchant_location_key()
+    if location_key:
+        offer_body["merchantLocationKey"] = location_key
     existing = client.find_offer_id(sku)
     if existing:
         # Re-publishing the same SKU: update in place instead of 409-ing.
