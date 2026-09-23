@@ -15,10 +15,15 @@ production Streamlit actually behaves, and asserts on which one fires.
 import unittest
 from unittest import mock
 
+import bcrypt
+
+import auth
 from auth import (
     AuthResult,
     _admin_credentials_configured,
     _admin_login,
+    _clear_failed_logins,
+    _seconds_until_unlock,
     logout,
     require_auth,
 )
@@ -33,10 +38,9 @@ class _Reran(Exception):
 
 
 def _real_admin_secrets(password: str) -> dict:
-    import hashlib
     return {
         "CRTC_ADMIN_USERNAME": "owner",
-        "CRTC_ADMIN_PASSWORD_HASH": hashlib.sha256(password.encode()).hexdigest(),
+        "CRTC_ADMIN_PASSWORD_HASH": bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
     }
 
 
@@ -67,6 +71,15 @@ class TestAdminCredentialsConfigured(unittest.TestCase):
 
 
 class TestAdminLogin(unittest.TestCase):
+    def setUp(self):
+        # _login_attempts is process-global (by design -- see auth.py), so
+        # tests must not leak lockout state into each other regardless of
+        # execution order.
+        _clear_failed_logins("owner")
+
+    def tearDown(self):
+        _clear_failed_logins("owner")
+
     @mock.patch("auth.st")
     def test_none_when_not_configured(self, mock_st):
         mock_st.secrets.get.side_effect = Exception("No secrets found")
@@ -105,8 +118,39 @@ class TestAdminLogin(unittest.TestCase):
         result = _admin_login("OWNER", "correct horse battery staple")
         self.assertTrue(result.success)
 
+    @mock.patch("auth.st")
+    def test_lockout_after_max_attempts_blocks_even_correct_password(self, mock_st):
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        for _ in range(auth.MAX_LOGIN_ATTEMPTS):
+            result = _admin_login("owner", "wrong password")
+            self.assertFalse(result.success)
+
+        locked_result = _admin_login("owner", "correct horse battery staple")
+        self.assertFalse(locked_result.success)
+        self.assertIn("too many failed attempts", locked_result.error.lower())
+
+    @mock.patch("auth.st")
+    def test_successful_login_clears_prior_failed_attempts(self, mock_st):
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        for _ in range(auth.MAX_LOGIN_ATTEMPTS - 1):
+            _admin_login("owner", "wrong password")
+
+        # One attempt left before lockout -- a correct password here must
+        # succeed and reset the counter rather than getting swallowed.
+        result = _admin_login("owner", "correct horse battery staple")
+        self.assertTrue(result.success)
+        self.assertEqual(_seconds_until_unlock("owner"), 0.0)
+
 
 class TestRequireAuth(unittest.TestCase):
+    def setUp(self):
+        _clear_failed_logins("owner")
+
+    def tearDown(self):
+        _clear_failed_logins("owner")
+
     def _configured_mock(self, mock_st, password="correct horse battery staple"):
         secrets = _real_admin_secrets(password)
         mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)

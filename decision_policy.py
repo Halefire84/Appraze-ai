@@ -458,7 +458,16 @@ def _evaluate_deal(
         else:
             components.append(CostComponent("shipping", round(ship, 2), ship_state_override or COST_KNOWN, "USD"))
     else:
-        components.append(CostComponent("shipping", 0.0, COST_NA if ship is None else COST_KNOWN, "USD"))
+        # Non-auction, shipping not required: still record a *known* shipping
+        # dollar amount when one was actually supplied, rather than always
+        # reporting 0.0 -- otherwise a listing with a real shipping cost has
+        # it silently dropped from all_in_cost just because it isn't
+        # mandatory here (fix: non-auction all-in cost must include known
+        # shipping/fees, not just the item price).
+        components.append(
+            CostComponent("shipping", round(ship, 2) if ship is not None else 0.0,
+                          COST_NA if ship is None else COST_KNOWN, "USD")
+        )
 
     if fees is not None:
         components.append(CostComponent("other_fees", round(fees, 2), COST_KNOWN, "USD"))
@@ -490,7 +499,16 @@ def _evaluate_deal(
             multiplier = 1.0 + max(0.0, premium_pct) / 100.0
             max_bid_or_price = round(max(0.0, target_all_in - fixed) / multiplier, 2)
     else:
-        max_bid_or_price = target_all_in
+        # Non-auction: the item price itself must clear the 70% target only
+        # after known fixed costs (shipping, other fees/tax) are subtracted,
+        # so a BUY verdict reflects all-in cost (item + fees + shipping +
+        # tax) rather than just the asking price. Unknown shipping/fees are
+        # NA-priced at $0 here (require_shipping=False), matching the
+        # pre-existing "unknown non-required cost doesn't block a decision"
+        # behavior -- only costs actually supplied on the listing change the
+        # threshold.
+        fixed = (ship or 0.0) + (fees or 0.0)
+        max_bid_or_price = round(target_all_in - fixed, 2)
 
     # Projected ROI at the *current* price (using known costs only)
     # Use finance.calc_deal with premium; shipping is added into true cost manually when known.

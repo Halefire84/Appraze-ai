@@ -18,8 +18,9 @@ import json
 import urllib.request
 import urllib.error
 from finance import (
-    compute_verdict, deal_roi, profit_calc, inventory_margin,
+    compute_verdict, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
+    dashboard_deal_result,
 )
 from auth import require_auth, logout
 from pos import create_pos_checkout, check_payment_status
@@ -210,13 +211,20 @@ if "editor_key" not in st.session_state:
 
 
 def recalc(df: pd.DataFrame) -> pd.DataFrame:
-    """Add derived profit columns to the deals dataframe."""
+    """Add derived profit columns to the deals dataframe.
+
+    Uses finance.dashboard_deal_result (fee-adjusted, same calc_deal engine
+    the acquisition pipeline runs every candidate through) rather than a
+    separate naive cost/resale subtraction -- that duplication used to let
+    the Dashboard's Verdict drift out of sync with the rest of the app.
+    """
     df = df.copy()
     df["Cost"] = pd.to_numeric(df["Cost"], errors="coerce").fillna(0)
     df["Est. Resale Value"] = pd.to_numeric(df["Est. Resale Value"], errors="coerce").fillna(0)
-    results = df.apply(lambda r: deal_roi(r["Cost"], r["Est. Resale Value"]), axis=1)
-    df["Gross Profit"] = results.apply(lambda t: t[0])
-    df["ROI %"] = results.apply(lambda t: t[1])
+    results = df.apply(lambda r: dashboard_deal_result(r["Cost"], r["Est. Resale Value"]), axis=1)
+    df["Gross Profit"] = results.apply(lambda d: d.gross_profit)
+    df["ROI %"] = results.apply(lambda d: d.roi_pct)
+    df["Verdict"] = results.apply(lambda d: d.verdict)
     return df
 
 
@@ -279,11 +287,31 @@ with st.sidebar:
                     imported["Date Added"] = date.today().isoformat()
                 if "Notes" not in imported.columns:
                     imported["Notes"] = ""
-                st.session_state.deals = pd.concat(
-                    [st.session_state.deals, imported], ignore_index=True
-                )
-                st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
-                st.success(f"Imported {len(imported)} rows.")
+                # Dedup: drop any imported row that already matches an
+                # existing row exactly (also collapses exact dupes within
+                # the file itself). Without this, re-importing the same CSV
+                # -- including Streamlit simply re-running the script while
+                # the uploader still holds this file, which happens on any
+                # unrelated interaction elsewhere in the app -- would append
+                # a second copy of every row each time. Compared as strings
+                # so e.g. "" vs NaN or int-vs-float formatting differences
+                # don't defeat an otherwise-identical match.
+                existing = st.session_state.deals
+                compare_cols = [c for c in imported.columns if c in existing.columns]
+                imported = imported.drop_duplicates(subset=compare_cols, keep="first")
+                existing_keys = set(existing[compare_cols].astype(str).apply(tuple, axis=1))
+                is_dup = imported[compare_cols].astype(str).apply(tuple, axis=1).isin(existing_keys)
+                new_rows = imported.loc[~is_dup]
+                skipped = len(imported) - len(new_rows)
+                if len(new_rows):
+                    st.session_state.deals = pd.concat(
+                        [st.session_state.deals, new_rows], ignore_index=True
+                    )
+                    st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+                if skipped:
+                    st.success(f"Imported {len(new_rows)} row(s); skipped {skipped} duplicate(s) already in the table.")
+                else:
+                    st.success(f"Imported {len(new_rows)} rows.")
             else:
                 st.error(f"CSV must include columns: {', '.join(required)}")
         except Exception as e:
@@ -373,7 +401,7 @@ with tab_dash:
     st.caption("Edit any cell directly. Add rows with the ➕ button in the sidebar, delete by selecting a row and pressing the trash icon.")
 
     edited = st.data_editor(
-        filtered.drop(columns=["Gross Profit", "ROI %"]),
+        filtered.drop(columns=["Gross Profit", "ROI %", "Verdict"]),
         num_rows="dynamic",
         use_container_width=True,
         height=420,
@@ -387,12 +415,31 @@ with tab_dash:
         key=f"editor_{st.session_state.editor_key}",
     )
 
-    # push edits made in the filtered view back into the master dataframe
-    if not edited.equals(filtered.drop(columns=["Gross Profit", "ROI %"])):
-        st.session_state.deals.update(edited)
+    # push edits made in the filtered view back into the master dataframe.
+    # Row identity is tracked by index label (data_editor preserves the
+    # original label for every kept/edited row and only mints fresh labels
+    # for newly added rows), so deletions/additions are found by diffing
+    # index sets rather than by position -- a positional length comparison
+    # (the old `len(edited) > len(filtered)` check) can't detect deletions
+    # at all, which is why deleting a row here never removed it from the
+    # master table.
+    filtered_view = filtered.drop(columns=["Gross Profit", "ROI %", "Verdict"])
+    if not edited.equals(filtered_view):
+        deleted_labels = filtered_view.index.difference(edited.index)
+        if len(deleted_labels):
+            st.session_state.deals = st.session_state.deals.drop(index=deleted_labels)
+        # Only update rows that actually existed in the filtered view. A
+        # newly added row's index label is minted from the filtered view's
+        # own (small) index range, so it can collide with an unrelated
+        # master-table row that was simply filtered out of view -- updating
+        # against the full `edited` frame would silently overwrite that
+        # unrelated row instead of appending a new one.
+        kept_labels = filtered_view.index.intersection(edited.index)
+        st.session_state.deals.update(edited.loc[kept_labels])
         # handle any newly added rows from the data editor
-        if len(edited) > len(filtered):
-            extra_rows = edited.iloc[len(filtered):]
+        new_labels = edited.index.difference(filtered_view.index)
+        if len(new_labels):
+            extra_rows = edited.loc[new_labels]
             st.session_state.deals = pd.concat([st.session_state.deals, extra_rows], ignore_index=True)
         st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
 
@@ -402,7 +449,8 @@ with tab_dash:
     if len(quick):
         quick["30/70 (Cooper River share @70%)"] = quick["Gross Profit"] * 0.70
         quick["50/50 (each share)"] = quick["Gross Profit"] * 0.50
-        quick["Verdict"] = quick["ROI %"].apply(lambda r: compute_verdict(r)[0])
+        # "Verdict" already comes from recalc() above (dashboard_deal_result) --
+        # not recomputed here, so this view can't drift from the Dashboard's own.
         st.dataframe(
             quick[["Item", "Platform", "Cost", "Est. Resale Value", "Gross Profit",
                    "ROI %", "Verdict", "30/70 (Cooper River share @70%)", "50/50 (each share)"]],
@@ -805,66 +853,82 @@ with tab_ai:
         text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
 
         if st.button("Analyze"):
+            MAX_IMAGE_BYTES = 8 * 1024 * 1024
+            oversized = False
             if not photo and not text_desc.strip():
                 st.warning("Add a photo or a description first.")
+            elif photo is not None and photo.size is not None and photo.size > MAX_IMAGE_BYTES:
+                oversized = True
+                st.error(
+                    f"That photo is {photo.size / (1024 * 1024):.1f} MB, over the 8 MB limit. "
+                    "Please upload a smaller image."
+                )
             else:
                 content = []
                 if photo is not None:
                     img_bytes = photo.read()
-                    img_b64 = base64.b64encode(img_bytes).decode()
-                    media_type = "image/png" if photo.type == "image/png" else "image/jpeg"
-                    content.append({
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": media_type, "data": img_b64},
-                    })
-                prompt_text = text_desc.strip() if text_desc.strip() else "Identify and value this item."
-                content.append({"type": "text", "text": prompt_text})
+                    if len(img_bytes) > MAX_IMAGE_BYTES:
+                        oversized = True
+                        st.error(
+                            f"That photo is {len(img_bytes) / (1024 * 1024):.1f} MB, over the 8 MB limit. "
+                            "Please upload a smaller image."
+                        )
+                    else:
+                        img_b64 = base64.b64encode(img_bytes).decode()
+                        media_type = "image/png" if photo.type == "image/png" else "image/jpeg"
+                        content.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": media_type, "data": img_b64},
+                        })
+                if not oversized:
+                    prompt_text = text_desc.strip() if text_desc.strip() else "Identify and value this item."
+                    content.append({"type": "text", "text": prompt_text})
 
-                system_prompt = (
-                    "You identify resale items for an estate-cleanout and flip business, and draft "
-                    "marketplace listing copy for the seller to review and post themselves (you do not "
-                    "post anything yourself). Respond with ONLY valid JSON, no other text, no markdown "
-                    "fences, using exactly these fields: itemName (string), category (one of: Gold/Silver "
-                    "Jewelry, Sterling Flatware, Watches, Furniture, Electronics, Coins/Currency, "
-                    "Collectibles, LEGO, Other), conditionEstimate (one of: New, Like New, Good, Fair, "
-                    "Parts Only), estimatedValueLow (number, USD), estimatedValueHigh (number, USD), "
-                    "confidence (Low, Medium, or High), reasoning (1-2 sentence explanation), "
-                    "suggestedListPrice (number, USD \u2014 a specific competitive asking price, not just "
-                    "the midpoint of the value range), listingDrafts (object with three keys: ebay, "
-                    "facebook, mercari \u2014 each an object with 'title' and 'description'). eBay titles "
-                    "must be SEO-keyword-rich and under 80 characters. Facebook and Mercari titles should "
-                    "be shorter and more conversational, under 60 characters. Each description should be "
-                    "2-4 sentences, honest about condition, and written in the tone typical of that "
-                    "platform (eBay: detailed and structured; Facebook/Mercari: casual and direct)."
-                )
-                try:
-                    body = json.dumps({
-                        "model": "claude-sonnet-5",
-                        "max_tokens": 900,
-                        "system": system_prompt,
-                        "messages": [{"role": "user", "content": content}],
-                    }).encode()
-                    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST")
-                    req.add_header("x-api-key", anthropic_key)
-                    req.add_header("anthropic-version", "2023-06-01")
-                    req.add_header("content-type", "application/json")
-                    with urllib.request.urlopen(req, timeout=30) as resp:
-                        result = json.loads(resp.read().decode())
-                    raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
-                    parsed = json.loads(raw_text)
-                    if not isinstance(parsed, dict):
-                        raise ValueError("Response wasn't a JSON object")
-                    # Store in session state so the result (and its "Add to Inventory"
-                    # button below) survives the rerun triggered by that button click -
-                    # keeping it nested inside this "if st.button(Analyze)" block would
-                    # make the button click silently do nothing.
-                    st.session_state.ai_last_result = parsed
-                except urllib.error.HTTPError as e:
-                    st.error(f"Claude API error: {e.read().decode()[:300]}")
-                except json.JSONDecodeError:
-                    st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
-                except Exception as e:
-                    st.error(f"Something went wrong: {e}")
+                    system_prompt = (
+                        "You identify resale items for an estate-cleanout and flip business, and draft "
+                        "marketplace listing copy for the seller to review and post themselves (you do not "
+                        "post anything yourself). Respond with ONLY valid JSON, no other text, no markdown "
+                        "fences, using exactly these fields: itemName (string), category (one of: Gold/Silver "
+                        "Jewelry, Sterling Flatware, Watches, Furniture, Electronics, Coins/Currency, "
+                        "Collectibles, LEGO, Other), conditionEstimate (one of: New, Like New, Good, Fair, "
+                        "Parts Only), estimatedValueLow (number, USD), estimatedValueHigh (number, USD), "
+                        "confidence (Low, Medium, or High), reasoning (1-2 sentence explanation), "
+                        "suggestedListPrice (number, USD \u2014 a specific competitive asking price, not just "
+                        "the midpoint of the value range), listingDrafts (object with three keys: ebay, "
+                        "facebook, mercari \u2014 each an object with 'title' and 'description'). eBay titles "
+                        "must be SEO-keyword-rich and under 80 characters. Facebook and Mercari titles should "
+                        "be shorter and more conversational, under 60 characters. Each description should be "
+                        "2-4 sentences, honest about condition, and written in the tone typical of that "
+                        "platform (eBay: detailed and structured; Facebook/Mercari: casual and direct)."
+                    )
+                    try:
+                        body = json.dumps({
+                            "model": "claude-sonnet-5",
+                            "max_tokens": 900,
+                            "system": system_prompt,
+                            "messages": [{"role": "user", "content": content}],
+                        }).encode()
+                        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=body, method="POST")
+                        req.add_header("x-api-key", anthropic_key)
+                        req.add_header("anthropic-version", "2023-06-01")
+                        req.add_header("content-type", "application/json")
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            result = json.loads(resp.read().decode())
+                        raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
+                        parsed = json.loads(raw_text)
+                        if not isinstance(parsed, dict):
+                            raise ValueError("Response wasn't a JSON object")
+                        # Store in session state so the result (and its "Add to Inventory"
+                        # button below) survives the rerun triggered by that button click -
+                        # keeping it nested inside this "if st.button(Analyze)" block would
+                        # make the button click silently do nothing.
+                        st.session_state.ai_last_result = parsed
+                    except urllib.error.HTTPError as e:
+                        st.error(f"Claude API error: {e.read().decode()[:300]}")
+                    except json.JSONDecodeError:
+                        st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
+                    except Exception as e:
+                        st.error(f"Something went wrong: {e}")
 
         if st.session_state.get("ai_last_result"):
             parsed = st.session_state.ai_last_result

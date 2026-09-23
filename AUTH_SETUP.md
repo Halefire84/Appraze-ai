@@ -12,16 +12,28 @@ Configure these in the Streamlit deployment's secrets. **Do not put the password
 
 ```toml
 CRTC_ADMIN_USERNAME = "admin"
-CRTC_ADMIN_PASSWORD_HASH = "<SHA-256 hash of your chosen production password>"
+CRTC_ADMIN_PASSWORD_HASH = "<bcrypt hash of your chosen production password>"
 ```
 
-Generate the hash on a trusted device, then paste only the resulting hash into the Streamlit secret. Example with Python/Termux:
+Generate the hash on a trusted device, then paste only the resulting hash into the Streamlit secret. Example:
 
 ```bash
-python -c "import hashlib; print(hashlib.sha256(b'YOUR_NEW_PASSWORD').hexdigest())"
+python -c "import bcrypt; print(bcrypt.hashpw(b'YOUR_NEW_PASSWORD', bcrypt.gensalt()).decode())"
 ```
 
+(`pip install bcrypt` first if it isn't already available — it's in `requirements.txt`.) The result looks like `$2b$12$....` — paste that whole string, including the `$2b$12$` prefix, as `CRTC_ADMIN_PASSWORD_HASH`.
+
 Use a unique production password and do not reuse a password from another service. The development/demo bootstrap password discussed during development is **not a production credential and is intentionally not recorded in this repository**.
+
+### Migrating an existing deployment off SHA-256
+
+Earlier versions of this app stored `CRTC_ADMIN_PASSWORD_HASH` as a raw, unsalted SHA-256 hex digest (`hashlib.sha256(password).hexdigest()`, always 64 hex characters) and compared it directly. That scheme had no per-installation salt and was fast to brute-force offline if the hash ever leaked. `auth.py` now only accepts a **bcrypt** hash (it validates the `$2a$` / `$2b$` / `$2y$` format and rejects anything else, including an old SHA-256 hex string, as "not configured").
+
+To migrate: generate a bcrypt hash of the **same or a new** password with the command above, and replace the `CRTC_ADMIN_PASSWORD_HASH` secret with it. There is no automatic in-place migration (the old hash cannot be converted to bcrypt without the plaintext password), so this is a manual one-time step per deployment. Until it's done, `_admin_credentials_configured()` returns `False` and the app refuses to render a login form at all (fails safe — see `require_auth()`), rather than accepting the old hash format.
+
+### Login rate limiting
+
+Repeated wrong passwords against the Admin account are rate-limited: after 5 consecutive failures for the same username, further attempts are locked out with exponential backoff (30s, 60s, 120s, ... capped at 15 minutes) until a correct password is entered or the backoff expires. A successful login clears the counter. This state is in-memory per running app process — it resets on a redeploy/restart, and does not span multiple app instances if the deployment ever scales beyond one.
 
 ## Demo
 

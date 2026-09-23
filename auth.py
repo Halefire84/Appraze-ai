@@ -11,15 +11,30 @@ Production model:
   touching real account data.
 - Optional tester signup/login remains available for future paid users.
 
-Passwords are SHA-256 hashed client-side before ever leaving the app for
-Apps Script authentication. The production Admin password is compared
-against a SHA-256 hash stored in Streamlit secrets.
+The shared Admin password is verified locally against a bcrypt hash stored
+in Streamlit secrets (CRTC_ADMIN_PASSWORD_HASH) -- see AUTH_SETUP.md for
+the migration off the old unsalted-SHA-256 scheme and how to generate a
+bcrypt hash. Admin login is also rate-limited: repeated wrong passwords for
+the same username trigger an exponential-backoff lockout (see
+_record_failed_login below) so the shared credential can't be brute-forced
+by an unattended script.
+
+The separate tester signup/login path below still hashes passwords with
+SHA-256 client-side before sending them to the Apps Script backend
+(AppsScript_Code.gs) -- that backend is a different system, out of this
+module's control, and already expects that exact wire format. It is not
+the credential this fix addresses; nothing this app stores or compares
+locally still uses unsalted SHA-256.
 """
 
 import hashlib
-import hmac
+import re
+import threading
+import time
 from dataclasses import dataclass
+from typing import Dict
 
+import bcrypt
 import requests
 import streamlit as st
 
@@ -35,7 +50,68 @@ class AuthResult:
 
 
 def _hash_password(password: str) -> str:
+    """SHA-256 wire hash for the Apps Script tester-account backend only --
+    see the module docstring. Never used for the local Admin credential."""
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+_BCRYPT_HASH_RE = re.compile(r"^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$")
+
+
+def _looks_like_bcrypt_hash(value: str) -> bool:
+    return bool(_BCRYPT_HASH_RE.match(value or ""))
+
+
+def _verify_admin_password(password: str, bcrypt_hash: str) -> bool:
+    """Constant-time bcrypt comparison. bcrypt.checkpw raises on a malformed
+    hash (e.g. a leftover SHA-256 hex string from before the migration) --
+    treated as "does not match" rather than a crash."""
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), bcrypt_hash.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Brute-force protection for the shared Admin login.
+#
+# Deliberately process-global (not st.session_state, which is per-browser-
+# session and trivially bypassed by opening a new one) and in-memory (not a
+# new external dependency for a single-shared-credential app). This bounds
+# an unattended password-guessing script to a handful of attempts per
+# backoff window; it does not protect against a distributed attack spread
+# across many app instances, which is out of scope for this single-process
+# deployment model (same limitation as decision_policy.EventLog's in-memory
+# state).
+# ---------------------------------------------------------------------------
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_BASE_SECONDS = 30.0
+LOCKOUT_MAX_SECONDS = 15 * 60.0
+
+_login_attempts_lock = threading.Lock()
+_login_attempts: Dict[str, Dict[str, float]] = {}
+
+
+def _seconds_until_unlock(username: str) -> float:
+    with _login_attempts_lock:
+        state = _login_attempts.get(username)
+        if not state:
+            return 0.0
+        return max(0.0, state["locked_until"] - time.time())
+
+
+def _record_failed_login(username: str) -> None:
+    with _login_attempts_lock:
+        state = _login_attempts.setdefault(username, {"count": 0.0, "locked_until": 0.0})
+        state["count"] += 1
+        if state["count"] >= MAX_LOGIN_ATTEMPTS:
+            backoff = min(LOCKOUT_MAX_SECONDS, LOCKOUT_BASE_SECONDS * (2 ** (state["count"] - MAX_LOGIN_ATTEMPTS)))
+            state["locked_until"] = time.time() + backoff
+
+
+def _clear_failed_logins(username: str) -> None:
+    with _login_attempts_lock:
+        _login_attempts.pop(username, None)
 
 
 def _secret(key: str, default: str = "") -> str:
@@ -75,13 +151,14 @@ def _admin_credentials_configured() -> bool:
       CRTC_ADMIN_USERNAME
       CRTC_ADMIN_PASSWORD_HASH
 
-    CRTC_ADMIN_PASSWORD_HASH must be SHA-256 of the desired password.
-    Keeping the hash in deployment secrets means the password is never
-    committed to GitHub. A setup helper is documented in AUTH_SETUP.md.
+    CRTC_ADMIN_PASSWORD_HASH must be a bcrypt hash of the desired password
+    (e.g. `$2b$12$...`), not a raw SHA-256 hex digest -- see AUTH_SETUP.md
+    for the migration and how to generate one. Keeping the hash in
+    deployment secrets means the password is never committed to GitHub.
     """
     username = _secret("CRTC_ADMIN_USERNAME").strip()
-    password_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
-    return bool(username and len(password_hash) == 64)
+    password_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip()
+    return bool(username and _looks_like_bcrypt_hash(password_hash))
 
 
 def _admin_login(username: str, password: str) -> AuthResult | None:
@@ -94,14 +171,24 @@ def _admin_login(username: str, password: str) -> AuthResult | None:
         return None
 
     configured_username = _secret("CRTC_ADMIN_USERNAME").strip().lower()
-    configured_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
+    configured_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip()
     supplied_username = str(username).strip().lower()
 
     if supplied_username != configured_username:
         return None
-    if not hmac.compare_digest(_hash_password(password), configured_hash):
+
+    locked_for = _seconds_until_unlock(supplied_username)
+    if locked_for > 0:
+        return AuthResult(
+            False,
+            error=f"Too many failed attempts. Try again in {int(locked_for) + 1}s.",
+        )
+
+    if not _verify_admin_password(password, configured_hash):
+        _record_failed_login(supplied_username)
         return AuthResult(False, error="incorrect password")
 
+    _clear_failed_logins(supplied_username)
     return AuthResult(
         True,
         display_name="CRTC Admin",

@@ -16,6 +16,8 @@ from finance import (
     TROY_OZ_PER_GRAM,
     calc_deal,
     calc_melt,
+    compute_verdict,
+    dashboard_deal_result,
     five_tier_verdict,
     format_roi,
     inventory_health,
@@ -98,6 +100,42 @@ class TestCalcDeal(unittest.TestCase):
         result = calc_deal(100, 104)
         self.assertEqual(result.verdict, "PASS")
         self.assertEqual(result.verdict_tier, "pass")
+
+
+class TestDashboardDealResult(unittest.TestCase):
+    """Fix: the Deal Dashboard's verdict used to come from a naive
+    cost/resale subtraction (finance.deal_roi) that ignored platform resale
+    fees entirely, while the Profit Calculator / acquisition pipeline both
+    net those fees out via calc_deal -- so the same numbers could show a
+    BUY on the Dashboard and something less rosy everywhere else.
+    dashboard_deal_result() is what the Dashboard now calls instead; it must
+    agree with calc_deal (premium pinned to 0 since Dashboard "Cost" is
+    already the amount actually paid) rather than with the old naive math.
+    """
+
+    def test_matches_calc_deal_with_premium_pinned_to_zero(self):
+        result = dashboard_deal_result(100, 250, fee_pct=13.0)
+        expected = calc_deal(100, 250, fee_pct=13.0, premium_pct=0)
+        self.assertEqual(result.gross_profit, expected.gross_profit)
+        self.assertEqual(result.roi_pct, expected.roi_pct)
+        self.assertEqual(result.verdict, expected.verdict)
+
+    def test_nets_out_platform_fee_unlike_naive_cost_resale_subtraction(self):
+        # $100 cost, $150 resale: naive (resale - cost) math would call this
+        # a 50% ROI ("BUY" on the old 5-tier scale). With the standard 13%
+        # resale fee netted out first, it should no longer clear that bar.
+        result = dashboard_deal_result(100, 150)
+        self.assertLess(result.roi_pct, 50.0)
+        self.assertNotEqual(result.verdict, "STRONG BUY")
+
+    def test_verdict_agrees_with_compute_verdict_on_its_own_roi(self):
+        result = dashboard_deal_result(100, 250, fee_pct=13.0)
+        self.assertEqual(result.verdict, compute_verdict(result.roi_pct)[0])
+
+    def test_free_find_still_reads_as_strong_buy(self):
+        result = dashboard_deal_result(0, 100)
+        self.assertEqual(result.roi_pct, float("inf"))
+        self.assertEqual(result.verdict, "STRONG BUY")
 
 
 class TestMaxCostForTargetRoi(unittest.TestCase):
