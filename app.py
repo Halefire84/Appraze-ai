@@ -22,7 +22,7 @@ from finance import (
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
 )
 from auth import require_auth, logout
-from pos import create_pos_checkout, check_payment_status
+from pos import create_pos_checkout, check_payment_status, new_invoice_id
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
 from telemetry import log_event, load_recent_events
@@ -772,16 +772,27 @@ with tab_charge:
         sales_log_result = load_table("sales_log", shared=True)
         sales_log = list(sales_log_result.payload) if sales_log_result.success and sales_log_result.payload else []
 
+        # One invoice id per sale, generated once and held across reruns: a
+        # timeout-and-resubmit of the SAME sale reuses it, so Stripe's
+        # Idempotency-Key dedupes the retried POST instead of creating (and
+        # the customer potentially paying) a second Checkout Session. The id
+        # is rotated to a fresh one after every successful charge, so the
+        # next sale never reuses a previous sale's key.
+        if "pos_invoice_id" not in st.session_state:
+            st.session_state.pos_invoice_id = new_invoice_id()
+
         with st.form("charge_form"):
             amt = st.number_input("Amount ($)", min_value=0.50, step=1.0, format="%.2f")
             desc = st.text_input("Description", placeholder="e.g. Estate cleanout \u2014 123 Main St")
             submitted = st.form_submit_button("Create Checkout Link")
 
         if submitted and amt > 0 and desc.strip():
-            result = create_pos_checkout(amt, desc.strip())
+            result = create_pos_checkout(amt, desc.strip(), invoice_id=st.session_state.pos_invoice_id)
             if result.success:
                 st.success("Checkout link created!")
                 st.code(result.checkout_url, language=None)
+                # Rotate to a fresh invoice id for the next sale.
+                st.session_state.pos_invoice_id = new_invoice_id()
                 sales_log.append({
                     "Invoice #": result.invoice_id,
                     "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),

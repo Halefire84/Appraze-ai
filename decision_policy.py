@@ -327,7 +327,9 @@ def evaluate_deal(
         # behavior -- only costs actually supplied on the listing change the
         # threshold.
         fixed = (ship or 0.0) + (fees or 0.0)
-        max_bid_or_price = round(target_all_in - fixed, 2)
+        # Clamped at zero like the auction branch above: a max buy price can
+        # never go negative, even when known costs exceed the target.
+        max_bid_or_price = round(max(0.0, target_all_in - fixed), 2)
 
     # Projected ROI at the *current* price (using known costs only)
     # Use finance.calc_deal with premium; shipping is added into true cost manually when known.
