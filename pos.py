@@ -100,7 +100,16 @@ def create_pos_checkout(amount_dollars: float, description: str, customer_email:
 
         resp = requests.post(
             "https://api.stripe.com/v1/checkout/sessions",
-            headers={"Authorization": f"Bearer {_secret_key()}"},
+            headers={
+                "Authorization": f"Bearer {_secret_key()}",
+                # Keyed on this checkout's own invoice_id (generated once,
+                # above, before this request is made) so that a retried POST
+                # for the SAME sale -- a client-side timeout-and-resubmit, a
+                # transport-level retry, anything replaying this exact call --
+                # returns the original Checkout Session instead of Stripe
+                # creating (and the customer potentially paying) a second one.
+                "Idempotency-Key": f"pos-checkout-{invoice_id}",
+            },
             data=payload,
             timeout=20,
         )

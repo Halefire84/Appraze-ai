@@ -18,7 +18,7 @@ import json
 import urllib.request
 import urllib.error
 from finance import (
-    compute_verdict, deal_roi, profit_calc, inventory_margin,
+    compute_verdict, dashboard_deal_result, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
 )
 from auth import require_auth, logout
@@ -212,13 +212,20 @@ def save_business_profile(profile):
 
 
 def recalc(df: pd.DataFrame) -> pd.DataFrame:
-    """Add derived profit columns to the deals dataframe."""
+    """Add derived profit columns to the deals dataframe.
+
+    Uses finance.dashboard_deal_result (fee-adjusted, same calc_deal engine
+    the acquisition pipeline runs every candidate through) rather than a
+    separate naive cost/resale subtraction -- that duplication used to let
+    the Dashboard's Verdict drift out of sync with the rest of the app.
+    """
     df = df.copy()
     df["Cost"] = pd.to_numeric(df["Cost"], errors="coerce").fillna(0)
     df["Est. Resale Value"] = pd.to_numeric(df["Est. Resale Value"], errors="coerce").fillna(0)
-    results = df.apply(lambda r: deal_roi(r["Cost"], r["Est. Resale Value"]), axis=1)
-    df["Gross Profit"] = results.apply(lambda t: t[0])
-    df["ROI %"] = results.apply(lambda t: t[1])
+    results = df.apply(lambda r: dashboard_deal_result(r["Cost"], r["Est. Resale Value"]), axis=1)
+    df["Gross Profit"] = results.apply(lambda d: d.gross_profit)
+    df["ROI %"] = results.apply(lambda d: d.roi_pct)
+    df["Verdict"] = results.apply(lambda d: d.verdict)
     return df
 
 
@@ -283,11 +290,31 @@ with st.sidebar:
                     imported["Date Added"] = date.today().isoformat()
                 if "Notes" not in imported.columns:
                     imported["Notes"] = ""
-                st.session_state.deals = pd.concat(
-                    [st.session_state.deals, imported], ignore_index=True
-                )
-                st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
-                st.success(f"Imported {len(imported)} rows.")
+                # Dedup: drop any imported row that already matches an
+                # existing row exactly (also collapses exact dupes within
+                # the file itself). Without this, re-importing the same CSV
+                # -- including Streamlit simply re-running the script while
+                # the uploader still holds this file, which happens on any
+                # unrelated interaction elsewhere in the app -- would append
+                # a second copy of every row each time. Compared as strings
+                # so e.g. "" vs NaN or int-vs-float formatting differences
+                # don't defeat an otherwise-identical match.
+                existing = st.session_state.deals
+                compare_cols = [c for c in imported.columns if c in existing.columns]
+                imported = imported.drop_duplicates(subset=compare_cols, keep="first")
+                existing_keys = set(existing[compare_cols].astype(str).apply(tuple, axis=1))
+                is_dup = imported[compare_cols].astype(str).apply(tuple, axis=1).isin(existing_keys)
+                new_rows = imported.loc[~is_dup]
+                skipped = len(imported) - len(new_rows)
+                if len(new_rows):
+                    st.session_state.deals = pd.concat(
+                        [st.session_state.deals, new_rows], ignore_index=True
+                    )
+                    st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+                if skipped:
+                    st.success(f"Imported {len(new_rows)} row(s); skipped {skipped} duplicate(s) already in the table.")
+                else:
+                    st.success(f"Imported {len(new_rows)} rows.")
             else:
                 st.error(f"CSV must include columns: {', '.join(required)}")
         except Exception as e:
@@ -383,7 +410,7 @@ with tab_dash:
     st.caption("Edit any cell directly. Add rows with the ➕ button in the sidebar, delete by selecting a row and pressing the trash icon.")
 
     edited = st.data_editor(
-        filtered.drop(columns=["Gross Profit", "ROI %"]),
+        filtered.drop(columns=["Gross Profit", "ROI %", "Verdict"]),
         num_rows="dynamic",
         use_container_width=True,
         height=420,
@@ -397,12 +424,31 @@ with tab_dash:
         key=f"editor_{st.session_state.editor_key}",
     )
 
-    # push edits made in the filtered view back into the master dataframe
-    if not edited.equals(filtered.drop(columns=["Gross Profit", "ROI %"])):
-        st.session_state.deals.update(edited)
+    # push edits made in the filtered view back into the master dataframe.
+    # Row identity is tracked by index label (data_editor preserves the
+    # original label for every kept/edited row and only mints fresh labels
+    # for newly added rows), so deletions/additions are found by diffing
+    # index sets rather than by position -- a positional length comparison
+    # (the old `len(edited) > len(filtered)` check) can't detect deletions
+    # at all, which is why deleting a row here never removed it from the
+    # master table.
+    filtered_view = filtered.drop(columns=["Gross Profit", "ROI %", "Verdict"])
+    if not edited.equals(filtered_view):
+        deleted_labels = filtered_view.index.difference(edited.index)
+        if len(deleted_labels):
+            st.session_state.deals = st.session_state.deals.drop(index=deleted_labels)
+        # Only update rows that actually existed in the filtered view. A
+        # newly added row's index label is minted from the filtered view's
+        # own (small) index range, so it can collide with an unrelated
+        # master-table row that was simply filtered out of view -- updating
+        # against the full `edited` frame would silently overwrite that
+        # unrelated row instead of appending a new one.
+        kept_labels = filtered_view.index.intersection(edited.index)
+        st.session_state.deals.update(edited.loc[kept_labels])
         # handle any newly added rows from the data editor
-        if len(edited) > len(filtered):
-            extra_rows = edited.iloc[len(filtered):]
+        new_labels = edited.index.difference(filtered_view.index)
+        if len(new_labels):
+            extra_rows = edited.loc[new_labels]
             st.session_state.deals = pd.concat([st.session_state.deals, extra_rows], ignore_index=True)
         st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
 
@@ -412,7 +458,8 @@ with tab_dash:
     if len(quick):
         quick["30/70 (Cooper River share @70%)"] = quick["Gross Profit"] * 0.70
         quick["50/50 (each share)"] = quick["Gross Profit"] * 0.50
-        quick["Verdict"] = quick["ROI %"].apply(lambda r: compute_verdict(r)[0])
+        # "Verdict" already comes from recalc() above (dashboard_deal_result) --
+        # not recomputed here, so this view can't drift from the Dashboard's own.
         st.dataframe(
             quick[["Item", "Platform", "Cost", "Est. Resale Value", "Gross Profit",
                    "ROI %", "Verdict", "30/70 (Cooper River share @70%)", "50/50 (each share)"]],

@@ -55,6 +55,26 @@ class TestCreatePosCheckout(unittest.TestCase):
 
     @mock.patch("pos.requests")
     @mock.patch("pos.st")
+    def test_sends_idempotency_key_derived_from_invoice_id(self, mock_st, mock_requests):
+        """Fix: retried POSTs for the same sale (client timeout-and-resubmit,
+        transport-level retry, etc.) must not create a second Checkout
+        Session -- Stripe only dedupes a retried request when it carries the
+        same Idempotency-Key header as the original."""
+        mock_st.secrets.get.side_effect = lambda k, default=None: {"STRIPE_SECRET_KEY": "sk_test_x"}.get(k, default)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"url": "https://x", "id": "cs_1"}
+        mock_requests.post.return_value = resp
+
+        result = create_pos_checkout(10, "Item A")
+
+        call_kwargs = mock_requests.post.call_args.kwargs
+        idempotency_key = call_kwargs["headers"]["Idempotency-Key"]
+        self.assertTrue(idempotency_key)
+        self.assertIn(result.invoice_id, idempotency_key)
+
+    @mock.patch("pos.requests")
+    @mock.patch("pos.st")
     def test_each_call_gets_a_unique_invoice_id(self, mock_st, mock_requests):
         """Regression guard: two POS sales must never collide onto the same
         invoice_id, the same identity-collision class of bug flagged for
