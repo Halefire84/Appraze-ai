@@ -28,7 +28,7 @@ from finance import (
 )
 from auth import require_auth, logout, mark_paid
 from billing import verify_checkout_session
-from subscription_plans import get_plan
+from subscription_plans import get_plan, PLANS
 from pos import create_pos_checkout, check_payment_status, new_invoice_id
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
@@ -208,6 +208,8 @@ _qp = st.query_params
 if _qp.get("sub_session_id") and _qp.get("sub_plan"):
     _sub_plan_key = _qp["sub_plan"]
     _sub_session_id = _qp["sub_session_id"]
+    if _sub_plan_key not in [p.key for p in PLANS]:
+        st.error("Invalid plan. Restart checkout from the Pricing page."); st.stop()
     _sub_result = verify_checkout_session(_sub_session_id)
     if _sub_result.paid:
         if mark_paid(st.session_state.get("username", ""), session_id=_sub_session_id, plan=_sub_plan_key):
