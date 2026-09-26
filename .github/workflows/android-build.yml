@@ -22,6 +22,15 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default 'tools' package was removed from Google's SDK
+          # repository and makes setup fail; install platform-tools instead.
+          packages: 'platform-tools'
+
+      - name: Install Android 36 SDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
