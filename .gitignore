@@ -10,3 +10,4 @@ ebay_config.json
 /android/build/
 /android/app/build/
 /android/app/google-services.json
+/android/local.properties
