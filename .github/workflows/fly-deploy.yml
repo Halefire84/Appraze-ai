@@ -1,0 +1,78 @@
+name: Deploy backend to Fly.io
+
+# Deploys the Appraze FastAPI backend (Stripe webhooks, Stripe Connect POS,
+# comps collector/poller) to Fly.io as appraze-crtc-api. Secrets come from
+# GitHub repo secrets; nothing sensitive is ever echoed.
+#
+# NOTE: STRIPE_PLATFORM_SECRET_KEY is intentionally not set here yet -- the
+# platform Stripe key lives behind Chris's Stripe dashboard (2FA on a dead
+# phone). The app runs in sandbox mode without it (POS_CONNECT_ALLOW_LIVE
+# is unset) and the key gets added via `fly secrets set` once recoverable.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/fly-deploy]
+    paths:
+      - 'fly.toml'
+      - 'Dockerfile'
+      - 'requirements-fly.txt'
+      - '.github/workflows/fly-deploy.yml'
+      - 'comps*.py'
+      - 'pos_connect.py'
+      - 'stripe_webhook*.py'
+      - 'finance.py'
+      - 'telemetry.py'
+      - 'webhook_store.py'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/fly-deploy
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create Fly app on first deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if flyctl apps list 2>/dev/null | grep -q "appraze-crtc-api"; then
+            echo "app exists, skipping launch"
+          else
+            flyctl launch --copy-config --name appraze-crtc-api --region iad --no-deploy --yes
+          fi
+
+      - name: Set app secrets
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          COMPS_POLLER_ADMIN_TOKEN: ${{ secrets.COMPS_POLLER_ADMIN_TOKEN }}
+        run: |
+          flyctl secrets set \
+            --app appraze-crtc-api \
+            EBAY_CLIENT_ID="$EBAY_CLIENT_ID" \
+            EBAY_CLIENT_SECRET="$EBAY_CLIENT_SECRET" \
+            COMPS_POLLER_ADMIN_TOKEN="$COMPS_POLLER_ADMIN_TOKEN"
+
+      - name: Commit back fly.toml corrections from launch
+        run: |
+          if git diff --quiet -- fly.toml; then
+            echo "fly.toml unchanged"
+          else
+            git config user.name "appraze-deploy-bot"
+            git config user.email "deploy-bot@users.noreply.github.com"
+            git add fly.toml
+            git commit -m "chore(deploy): reconcile fly.toml via fly launch [skip ci]"
+            git push origin HEAD:claude/fly-deploy
+          fi
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --remote-only --app appraze-crtc-api
