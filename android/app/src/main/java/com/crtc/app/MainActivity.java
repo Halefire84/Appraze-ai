@@ -121,6 +121,7 @@ public final class MainActivity extends Activity {
     LinearLayout headerRow;
     EventStore events;
     InventoryStore inventory;
+    SalesLog sales;
     SharedPreferences prefs;
     Usage usage;
     String analysisPhoto;
@@ -141,6 +142,7 @@ public final class MainActivity extends Activity {
         super.onCreate(b);
         events = new EventStore(this);
         inventory = new InventoryStore(this);
+        sales = new SalesLog(this);
         prefs = getPreferences(0);
         usage = new Usage(prefs);
         usage.rollover();
@@ -160,7 +162,9 @@ public final class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         boolean granted = grantResults.length > 0
                 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        PhotoCapture.onPermissionResult(this, requestCode, granted);
+        if (!PhotoCapture.onPermissionResult(this, requestCode, granted)) {
+            TapPay.onPermissionResult(this, requestCode, granted);
+        }
     }
 
     /* ---------- units & drawables ---------- */

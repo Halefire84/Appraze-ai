@@ -78,6 +78,7 @@ class PosScreen {
     }
 
     static void clearConnection(MainActivity a) {
+        TapPay.reset();
         try { secure(a).edit().remove(KEY_TOKEN).remove(KEY_ACCT).apply(); } catch (Exception ignored) { }
     }
 
@@ -307,43 +308,75 @@ class PosScreen {
         final LinearLayout slot = new LinearLayout(a);
         slot.setOrientation(LinearLayout.VERTICAL);
         c.addView(slot);
-        final Button charge = a.primaryButton("Charge");
         final LinearLayout body = a.body;
+        final boolean tapOk = TapPay.deviceSupported(a);
+
+        final Button tap = a.primaryButton("Tap to Pay");
+        tap.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                final Sale sale = readSale(a, amount, desc);
+                if (sale == null) return;
+                tap.setEnabled(false);
+                tap.setText("Hold card near phone...");
+                TapPay.charge(a, sale.cents, sale.description, sale.invoice, new TapPay.Result() {
+                    public void done(boolean paid, String message) {
+                        if (!stillShowing(a, body)) return;
+                        tap.setEnabled(true);
+                        tap.setText("Tap to Pay");
+                        if (paid) {
+                            pendingInvoice = null;
+                            pendingSignature = null;
+                            amount.input.setText("");
+                            desc.input.setText("");
+                            slot.removeAllViews();
+                            slot.addView(paidBanner(a, sale.cents));
+                            Toast.makeText(a, message, Toast.LENGTH_SHORT).show();
+                        } else {
+                            a.infoDialog("Tap to Pay", message);
+                        }
+                        refreshSales(a, body);
+                    }
+                });
+            }
+        });
+        if (tapOk) {
+            c.addView(tap);
+        } else {
+            c.addView(a.caption("Tap to Pay needs Android 11 or newer with NFC. Use a payment link instead."));
+        }
+
+        final Button charge = tapOk ? a.secondaryButton("Send Payment Link") : a.primaryButton("Send Payment Link");
         charge.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                Double amt = a.parseNonNegative(amount);
-                String d = desc.input.getText().toString().trim();
-                if (d.isEmpty()) { a.setFieldError(desc, "Add a description."); return; }
-                if (d.length() > 200) { a.setFieldError(desc, "Keep it under 200 characters."); return; }
-                a.setFieldError(desc, null);
-                if (amt == null) return;
-                final long cents = Math.round(amt * 100);
-                if (cents < 50) { a.setFieldError(amount, "Enter at least $0.50."); return; }
-                final String invoice = invoiceFor(cents, d);
+                final Sale sale = readSale(a, amount, desc);
+                if (sale == null) return;
                 JSONObject req = new JSONObject();
                 try {
-                    req.put("amount_cents", cents);
-                    req.put("description", d);
-                    req.put("invoice_id", invoice);
+                    req.put("amount_cents", sale.cents);
+                    req.put("description", sale.description);
+                    req.put("invoice_id", sale.invoice);
                 } catch (Exception e) {
                     return;
                 }
+                final String label = charge.getText().toString();
                 charge.setEnabled(false);
                 charge.setText("Creating checkout...");
-                a.events.record("pos_charge_started", "amount_cents=" + cents + "|invoice=" + invoice);
+                a.events.record("pos_charge_started", "amount_cents=" + sale.cents + "|invoice=" + sale.invoice);
                 PosApi.call("POST", "/pos/checkout", savedToken(a), req, new PosApi.Callback() {
                     public void done(int code, JSONObject j, String error) {
                         if (!stillShowing(a, body)) return;
                         charge.setEnabled(true);
-                        charge.setText("Charge");
+                        charge.setText(label);
                         if (code == 200) {
                             pendingInvoice = null;
                             pendingSignature = null;
+                            String sessionId = j.optString("session_id");
+                            a.sales.start(SalesLog.METHOD_LINK, sale.cents, sale.description, sale.invoice, sessionId);
                             slot.removeAllViews();
-                            slot.addView(resultCard(a, j.optString("checkout_url"),
-                                    j.optString("session_id"), cents));
-                            a.events.record("pos_link_created", "amount_cents=" + cents + "|invoice=" + invoice);
+                            slot.addView(resultCard(a, j.optString("checkout_url"), sessionId, sale.cents));
+                            a.events.record("pos_link_created", "amount_cents=" + sale.cents + "|invoice=" + sale.invoice);
                             Toast.makeText(a, "Checkout ready", Toast.LENGTH_SHORT).show();
+                            refreshSales(a, body);
                         } else if (code == 401) {
                             clearConnection(a);
                             a.infoDialog("Stripe connection expired", "Connect Stripe again to take payments.");
@@ -357,7 +390,142 @@ class PosScreen {
             }
         });
         c.addView(charge);
-        c.addView(a.caption("The amount and description are sent to the Appraze POS server to create your Stripe checkout page. Card details go only to Stripe."));
+        c.addView(a.caption("The amount and description are sent to the Appraze POS server to create the Stripe payment. Card details go only to Stripe."));
+        salesCard(a);
+    }
+
+    /** One sale's validated inputs. */
+    static final class Sale {
+        long cents;
+        String description;
+        String invoice;
+    }
+
+    static Sale readSale(MainActivity a, MainActivity.Field amount, MainActivity.Field desc) {
+        Double amt = a.parseNonNegative(amount);
+        String d = desc.input.getText().toString().trim();
+        if (d.isEmpty()) { a.setFieldError(desc, "Add a description."); return null; }
+        if (d.length() > 200) { a.setFieldError(desc, "Keep it under 200 characters."); return null; }
+        a.setFieldError(desc, null);
+        if (amt == null) return null;
+        long cents = Math.round(amt * 100);
+        if (cents < 50) { a.setFieldError(amount, "Enter at least $0.50."); return null; }
+        Sale s = new Sale();
+        s.cents = cents;
+        s.description = d;
+        s.invoice = invoiceFor(cents, d);
+        return s;
+    }
+
+    static TextView paidBanner(MainActivity a, long cents) {
+        TextView t = new TextView(a);
+        t.setText("Paid \u2713 " + a.money(cents / 100.0) + " \u2014 " + SalesLog.formatWhen(System.currentTimeMillis()));
+        t.setTextSize(16);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setTextColor(MainActivity.BUY);
+        t.setPadding(a.dp(4), a.dp(12), a.dp(4), 0);
+        return t;
+    }
+
+    /* ---------- Recent Sales (date + time of every sale) ---------- */
+
+    static LinearLayout salesList;
+
+    static void salesCard(MainActivity a) {
+        LinearLayout c = a.card(a.body, false);
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) c.getLayoutParams();
+        lp.topMargin = a.dp(12);
+        c.setLayoutParams(lp);
+        c.addView(a.sectionLabel("Recent Sales"));
+        salesList = new LinearLayout(a);
+        salesList.setOrientation(LinearLayout.VERTICAL);
+        c.addView(salesList);
+        fillSales(a);
+    }
+
+    static void refreshSales(MainActivity a, LinearLayout body) {
+        if (stillShowing(a, body) && salesList != null) fillSales(a);
+    }
+
+    static void fillSales(final MainActivity a) {
+        salesList.removeAllViews();
+        java.util.List<SalesLog.Sale> rows = a.sales.recent(25);
+        if (rows.isEmpty()) {
+            salesList.addView(a.caption("No sales yet. Each sale is logged here with its date and time."));
+            return;
+        }
+        for (final SalesLog.Sale s : rows) {
+            LinearLayout row = new LinearLayout(a);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(a.dp(4), a.dp(10), a.dp(4), a.dp(10));
+            LinearLayout top = new LinearLayout(a);
+            top.setOrientation(LinearLayout.HORIZONTAL);
+            TextView amt = new TextView(a);
+            amt.setText(a.money(s.amountCents / 100.0));
+            amt.setTextSize(16);
+            amt.setTypeface(Typeface.DEFAULT_BOLD);
+            amt.setTextColor(MainActivity.TEXT_PRIMARY);
+            top.addView(amt, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+            TextView st = new TextView(a);
+            st.setText(SalesLog.statusLabel(s.status));
+            st.setTextSize(14);
+            st.setTypeface(Typeface.DEFAULT_BOLD);
+            st.setTextColor(SalesLog.PAID.equals(s.status) ? MainActivity.BUY
+                    : SalesLog.PENDING.equals(s.status) ? MainActivity.REVIEW : MainActivity.PASS);
+            top.addView(st);
+            row.addView(top);
+            TextView when = new TextView(a);
+            when.setText(SalesLog.formatWhen(s.createdMs) + "  \u00B7  " + SalesLog.methodLabel(s.method));
+            when.setTextSize(13);
+            when.setTextColor(MainActivity.TEXT_SECONDARY);
+            row.addView(when);
+            String detail = s.description == null ? "" : s.description;
+            if (s.paidMs > 0) detail += (detail.isEmpty() ? "" : "  \u00B7  ") + "Paid " + SalesLog.formatWhen(s.paidMs);
+            if (!detail.isEmpty()) {
+                TextView dv = new TextView(a);
+                dv.setText(detail);
+                dv.setTextSize(13);
+                dv.setTextColor(MainActivity.TEXT_MUTED);
+                row.addView(dv);
+            }
+            if (SalesLog.PENDING.equals(s.status) && s.stripeId != null) {
+                TextView hint = new TextView(a);
+                hint.setText("Tap to check status");
+                hint.setTextSize(12);
+                hint.setTextColor(MainActivity.GOLD);
+                row.addView(hint);
+                row.setClickable(true);
+                row.setFocusable(true);
+                row.setOnClickListener(new View.OnClickListener() {
+                    public void onClick(View v) { checkSale(a, s); }
+                });
+            }
+            salesList.addView(row);
+        }
+    }
+
+    static void checkSale(final MainActivity a, final SalesLog.Sale s) {
+        final LinearLayout body = a.body;
+        String path = SalesLog.METHOD_TAP.equals(s.method)
+                ? "/pos/terminal/payment_intent/" + Uri.encode(s.stripeId) + "/status"
+                : "/pos/checkout/" + Uri.encode(s.stripeId) + "/status";
+        PosApi.call("GET", path, savedToken(a), null, new PosApi.Callback() {
+            public void done(int code, JSONObject j, String error) {
+                if (code != 200) {
+                    Toast.makeText(a, error, Toast.LENGTH_LONG).show();
+                    return;
+                }
+                String status = j.optString("status");
+                if (j.optBoolean("paid")) {
+                    a.sales.setStatus(s.stripeId, SalesLog.PAID);
+                } else if ("canceled".equals(status) || "expired".equals(status)) {
+                    a.sales.setStatus(s.stripeId, SalesLog.CANCELED);
+                } else {
+                    Toast.makeText(a, "Not paid yet (" + status + ")", Toast.LENGTH_SHORT).show();
+                }
+                refreshSales(a, body);
+            }
+        });
     }
 
     static LinearLayout resultCard(final MainActivity a, final String url, final String sessionId, final long cents) {
@@ -421,7 +589,9 @@ class PosScreen {
                                     paid.setText(error);
                                     paid.setTextColor(MainActivity.PASS);
                                 } else if (j.optBoolean("paid")) {
-                                    paid.setText("Paid ✓");
+                                    a.sales.setStatus(sessionId, SalesLog.PAID);
+                                    refreshSales(a, a.body);
+                                    paid.setText("Paid \u2713 " + SalesLog.formatWhen(System.currentTimeMillis()));
                                     paid.setTextColor(MainActivity.BUY);
                                     a.events.record("pos_payment_confirmed", "amount_cents=" + cents);
                                 } else {
