@@ -89,7 +89,6 @@ jobs:
             --noconfirm `
             --clean `
             --name ApprazeAI `
-            --icon "windows/app.ico" `
             --add-data "app.py;." `
             --collect-all streamlit `
             --collect-all pydeck `
