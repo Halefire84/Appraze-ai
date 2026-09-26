@@ -69,6 +69,16 @@ public final class MainActivity extends Activity {
     Uri pendingPhotoUri;
     ImageView photoThumb;
 
+    void refreshPhotoThumb() {
+        if (photoThumb == null) return;
+        if (analysisPhoto == null) {
+            photoThumb.setVisibility(View.GONE);
+        } else {
+            photoThumb.setImageURI(Uri.parse(analysisPhoto));
+            photoThumb.setVisibility(View.VISIBLE);
+        }
+    }
+
     public void onCreate(Bundle b) {
         super.onCreate(b);
         events = new EventStore(this);
@@ -78,6 +88,20 @@ public final class MainActivity extends Activity {
         usage.rollover();
         prefs = getPreferences(0);
         splash();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        PhotoCapture.onActivityResult(this, requestCode, resultCode, data);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        boolean granted = grantResults.length > 0
+                && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        PhotoCapture.onPermissionResult(this, requestCode, granted);
     }
 
     /* ---------- units & drawables ---------- */
@@ -547,7 +571,7 @@ public final class MainActivity extends Activity {
         LinearLayout n = new LinearLayout(this);
         n.setOrientation(LinearLayout.HORIZONTAL);
         n.setBackgroundColor(GLASS);
-        final String[] names = {"Analyze", "Inventory", "Cross-list", "Plans", "Settings"};
+        final String[] names = {"Analyze", "Inventory", "Cross-list", "Plans", "Settings", "POS"};
         for (int ti = 0; ti < names.length; ti++) {
             final int idx = ti;
             final boolean active = ti == activeTab;
@@ -602,7 +626,8 @@ public final class MainActivity extends Activity {
         else if (idx == 1) inventory();
         else if (idx == 2) cross(null);
         else if (idx == 3) plans();
-        else settings();
+        else if (idx == 4) settings();
+        else PosScreen.show(this);
     }
 
     /* ---------- Analyze ---------- */
@@ -623,9 +648,37 @@ public final class MainActivity extends Activity {
         teach.setTextColor(TEXT_MUTED);
         teach.setPadding(dp(4), dp(12), dp(4), 0);
         c.addView(teach);
+        LinearLayout photoRow = new LinearLayout(this);
+        photoRow.setOrientation(LinearLayout.HORIZONTAL);
+        photoRow.setGravity(Gravity.CENTER_VERTICAL);
+        Button take = secondaryButton("Take Photo");
+        take.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { PhotoCapture.onTakeClicked(MainActivity.this); }
+        });
+        Button upload = secondaryButton("Upload Photo");
+        upload.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { PhotoCapture.onUploadClicked(MainActivity.this); }
+        });
+        photoRow.addView(take, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        photoRow.addView(upload, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        c.addView(photoRow);
+        photoThumb = new ImageView(this);
+        int thumb = dp(96);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(thumb, thumb);
+        tlp.topMargin = dp(8);
+        photoThumb.setLayoutParams(tlp);
+        photoThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        c.addView(photoThumb);
+        refreshPhotoThumb();
         Button b = primaryButton("Get Verdict");
         b.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                if (!usage.tryConsume(Usage.ANALYSES)) {
+                    PlanSettings.upgradeDialog(MainActivity.this, usage, Usage.ANALYSES);
+                    return;
+                }
                 Double co = parseNonNegative(cost);
                 Double re = parseNonNegative(resale);
                 Double fe = parseNonNegative(fee);
@@ -812,6 +865,10 @@ public final class MainActivity extends Activity {
         Button p = primaryButton("Publish to Sandbox");
         p.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                if (!usage.tryConsume(Usage.PUBLISHES)) {
+                    PlanSettings.upgradeDialog(MainActivity.this, usage, Usage.PUBLISHES);
+                    return;
+                }
                 String t = title.input.getText().toString().trim();
                 if (t.isEmpty()) { setFieldError(title, "Give the listing a title."); return; }
                 setFieldError(title, null);
@@ -932,6 +989,7 @@ public final class MainActivity extends Activity {
 
     void settings() {
         base("Settings", null, 4);
+        PlanSettings.addPlanGroup(this);
         settingsGroup("Holy Grail", new String[][]{
                 {"holy_roi", "Minimum ROI %", "40", "%"},
                 {"holy_profit", "Minimum profit $", "15", "$"},
