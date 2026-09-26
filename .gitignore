@@ -18,3 +18,7 @@ ebay_config.json
 *.keystore
 !/android/appraze-debug.keystore
 *.jks
+
+# Local SQLite state for backend services (pos_connect.py, comps_poller.py) --
+# runtime data, never committed.
+*.sqlite3
