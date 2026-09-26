@@ -25,6 +25,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.widget.Button;
@@ -63,11 +64,18 @@ public final class MainActivity extends Activity {
     EventStore events;
     InventoryStore inventory;
     SharedPreferences prefs;
+    Usage usage;
+    String analysisPhoto;
+    Uri pendingPhotoUri;
+    ImageView photoThumb;
 
     public void onCreate(Bundle b) {
         super.onCreate(b);
         events = new EventStore(this);
         inventory = new InventoryStore(this);
+        prefs = getPreferences(0);
+        usage = new Usage(prefs);
+        usage.rollover();
         prefs = getPreferences(0);
         splash();
     }
