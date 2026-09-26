@@ -357,6 +357,7 @@ class PosScreen {
             }
         });
         c.addView(charge);
+        c.addView(a.caption("The amount and description are sent to the Appraze POS server to create your Stripe checkout page. Card details go only to Stripe."));
     }
 
     static LinearLayout resultCard(final MainActivity a, final String url, final String sessionId, final long cents) {
