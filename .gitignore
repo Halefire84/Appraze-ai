@@ -6,3 +6,7 @@ __pycache__/
 .ebay_tokens.json
 ebay_config.json
 .env
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/google-services.json
