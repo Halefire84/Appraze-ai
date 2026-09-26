@@ -1,0 +1,14 @@
+# Runtime dependencies for the Fly.io deployment of stripe_webhook_server.py
+# (comps_collector.py, comps_poller.py, pos_connect.py, the Stripe webhook
+# receiver -- see docs/FLY_DEPLOY.md). Deliberately NOT the same file as
+# requirements-webhook.txt (used for local dev/CI, which also runs tests
+# and therefore needs httpx2, and imports real streamlit elsewhere in this
+# repo): this file omits
+#   - streamlit   (replaced by deploy/streamlit_stub for this deploy only --
+#                  see that file's docstring)
+#   - httpx2      (test-only, not needed to serve requests)
+# to keep the deploy image's memory footprint down for a small machine.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+requests>=2.31
+pandas

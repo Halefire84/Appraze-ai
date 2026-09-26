@@ -1,0 +1,48 @@
+# Fly.io app config for the Appraze FastAPI backend (Stripe webhooks, Stripe
+# Connect POS, comps collector, comps history poller). See
+# docs/FLY_DEPLOY.md for the full deploy runbook and the reasoning behind
+# every non-obvious setting below.
+#
+# This file is committed and reviewable, but the FIRST deploy reconciles it
+# with `fly launch`, which may adjust exact key names/format to match the
+# flyctl version actually used at deploy time -- treat this as the intended
+# configuration, not a guaranteed-byte-exact-schema file (see the doc).
+
+app = "appraze-crtc-api"
+primary_region = "iad"  # Ashburn, VA -- closest Fly region to Charleston, SC
+
+[build]
+
+[env]
+  POS_CONNECT_DB = "/data/pos_connect.sqlite3"
+  COMPS_POLLER_DB = "/data/comps_poller.sqlite3"
+  # Fly's default hostname is deterministic (<app name>.fly.dev), so this
+  # can be set correctly before the first deploy ever runs.
+  POS_PUBLIC_BASE_URL = "https://appraze-crtc-api.fly.dev"
+  # POS_CONNECT_ALLOW_LIVE is intentionally NOT set here -- Stripe stays in
+  # sandbox mode until Chris explicitly turns live mode on. See
+  # docs/POS_STRIPE_CONNECT.md.
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1  # Stripe webhooks need a warm process, not a cold start
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  processes = ["app"]
+
+[mounts]
+  source = "appraze_data"
+  destination = "/data"

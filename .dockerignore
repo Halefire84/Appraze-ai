@@ -1,0 +1,13 @@
+*
+!requirements-fly.txt
+!deploy/streamlit_stub/
+!comps.py
+!comps_adapters.py
+!comps_collector.py
+!comps_poller.py
+!finance.py
+!pos_connect.py
+!stripe_webhook_server.py
+!stripe_webhooks.py
+!telemetry.py
+!webhook_store.py
