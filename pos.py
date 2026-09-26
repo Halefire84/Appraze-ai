@@ -47,7 +47,12 @@ def _secret_key() -> str:
     return key
 
 
-def _new_invoice_id() -> str:
+def new_invoice_id() -> str:
+    """Generate a fresh invoice id for a NEW sale. The POS page calls this
+    once per sale and holds the result (in st.session_state) so that a
+    timeout-and-resubmit of the SAME sale reuses the id -- and therefore
+    the same Stripe Idempotency-Key -- instead of minting a new key that
+    would let Stripe create a second Checkout Session."""
     return f"POS-{date.today().isoformat()}-{_secrets.token_hex(3)}"
 
 
@@ -73,7 +78,7 @@ def create_pos_checkout(amount_dollars: float, description: str, customer_email:
     if amount_dollars <= 0:
         return POSCheckoutResult(False, error="Amount must be greater than $0.")
 
-    invoice_id = invoice_id or _new_invoice_id()
+    invoice_id = invoice_id or new_invoice_id()
     app_url = st.secrets.get("APP_URL", "").rstrip("/")
     # These redirect URLs are mostly a nice-to-have: if APP_URL is set and the
     # SAME device completes payment (e.g. handed to the customer and back),
@@ -100,7 +105,19 @@ def create_pos_checkout(amount_dollars: float, description: str, customer_email:
 
         resp = requests.post(
             "https://api.stripe.com/v1/checkout/sessions",
-            headers={"Authorization": f"Bearer {_secret_key()}"},
+            headers={
+                "Authorization": f"Bearer {_secret_key()}",
+                # Keyed on this sale's invoice_id. The caller (the POS page)
+                # generates the id ONCE per sale and holds it in session
+                # state, passing it back in here on every attempt -- so a
+                # retried POST for the SAME sale (a client-side
+                # timeout-and-resubmit, a transport-level retry, anything
+                # replaying this exact sale) returns the original Checkout
+                # Session instead of Stripe creating (and the customer
+                # potentially paying) a second one. A NEW sale always gets a
+                # fresh id, so distinct sales never collide onto one key.
+                "Idempotency-Key": f"pos-checkout-{invoice_id}",
+            },
             data=payload,
             timeout=20,
         )

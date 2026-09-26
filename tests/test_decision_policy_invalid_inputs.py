@@ -98,5 +98,22 @@ class TestOverflowAndZeroEdgeCases(unittest.TestCase):
         self.assertNotIn(d.decision, {DECISION_BUY, DECISION_STRONG_BUY})
 
 
+class TestNonAuctionMaxPriceNeverNegative(unittest.TestCase):
+    """The non-auction branch must clamp max_bid_or_price at zero like the
+    auction branch does -- a max buy price can never go negative, even when
+    known costs exceed the 70% acquisition target."""
+
+    def test_non_auction_max_price_clamped_at_zero_when_costs_exceed_target(self):
+        # 70% of $50 market value = $35 target, but $50 shipping + $10 fees
+        # = $60 known costs exceed it: unclamped this yields -$25.
+        d = evaluate_deal(
+            price=10.0, market_value=50.0, is_auction=False,
+            shipping=50.0, other_fees=10.0, require_shipping=True,
+        )
+        self.assertIsNotNone(d.max_bid_or_price)
+        self.assertEqual(d.max_bid_or_price, 0.0)
+        self.assertGreaterEqual(d.max_bid_or_price, 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

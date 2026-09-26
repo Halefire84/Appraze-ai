@@ -89,11 +89,22 @@ async def stripe_webhook(request: Request):
         # needs a 2xx to stop retrying, there's nothing to persist.
         return {"ok": True, "handled": False}
 
-    _apply_update(update)
+    reconciled = _apply_update(update)
+    if not reconciled:
+        # The write to sales_log itself failed (Apps Script unreachable,
+        # misconfigured, or erroring) -- returning 2xx here would tell
+        # Stripe "delivered successfully" and it would never retry, so this
+        # invoice's status would simply never reconcile. A 5xx keeps this
+        # event in Stripe's retry queue (exponential backoff for up to 3
+        # days) until the backend is healthy again.
+        return JSONResponse(
+            status_code=502,
+            content={"ok": False, "error": "failed to reconcile sales_log", "invoice_id": update["invoice_id"]},
+        )
     return {"ok": True, "handled": True, "invoice_id": update["invoice_id"], "new_status": update["new_status"]}
 
 
-def _apply_update(update: dict) -> None:
+def _apply_update(update: dict) -> bool:
     """Reconciles one invoice's status into the sales_log table via a
     single atomic Apps Script call (read + mutate + write in one locked
     server-side execution — see AppsScript_Code.gs's
@@ -104,7 +115,13 @@ def _apply_update(update: dict) -> None:
     deliveries): the event id is persisted on the row server-side
     (_last_event_id), so a redelivery of an already-applied event is a
     durable no-op even across process restarts, not just because setting
-    the same status value twice happens to be harmless."""
+    the same status value twice happens to be harmless.
+
+    Returns True when the reconcile attempt itself succeeded -- whether or
+    not it ended up finding/applying a row, both of which are legitimate
+    non-error outcomes (see below). Returns False only when the persistence
+    call itself failed, which the caller turns into a 5xx so Stripe retries
+    the delivery instead of this event being silently dropped."""
     result = update_sales_log_status(update["invoice_id"], update["new_status"], event_id=update.get("event_id", ""))
     if not result.success:
         logger.warning("Could not update sales_log for invoice_id=%s: %s", update["invoice_id"], result.error)
@@ -113,7 +130,7 @@ def _apply_update(update: dict) -> None:
             "sales_log reconciliation failed",
             {"invoice_id": update["invoice_id"], "new_status": update["new_status"], "error": result.error},
         )
-        return
+        return False
     found = bool((result.payload or {}).get("found"))
     applied = bool((result.payload or {}).get("applied"))
     duplicate = bool((result.payload or {}).get("duplicate"))
@@ -129,3 +146,4 @@ def _apply_update(update: dict) -> None:
             "sales_log row for invoice_id=%s not downgraded to %s (a more-final status already applied).",
             update["invoice_id"], update["new_status"],
         )
+    return True
