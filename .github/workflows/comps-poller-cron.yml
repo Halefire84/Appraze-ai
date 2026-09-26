@@ -1,0 +1,42 @@
+# Background comps history poller (comps_poller.py) trigger.
+#
+# This calls the DEPLOYED service's admin API on a schedule -- it does not
+# run the poller inside this workflow, and it never touches Appraze-ai's
+# own CI build/test status. If the deployment's URL/token secrets aren't
+# set, every run is a clean no-op (skipped step, green job) rather than a
+# failure, matching every other optional integration in this app (Stripe,
+# eBay, Anthropic all "not configured -> skip", never a hard CI failure).
+#
+# Cadence matches comps_poller.py's own DEFAULT_POLL_INTERVAL_MINUTES (4h):
+# triggering the endpoint every 4h naturally polls each due watch about
+# once per interval without hammering eBay's Browse API budget.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions),
+# set by Chris, not committed anywhere:
+#   COMPS_POLLER_BASE_URL    e.g. https://your-deployed-host
+#   COMPS_POLLER_ADMIN_TOKEN same value as COMPS_POLLER_ADMIN_TOKEN on the
+#                            deployed service's environment
+
+name: Comps Poller Cron
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger a poll run (skips cleanly if not configured)
+        env:
+          BASE_URL: ${{ secrets.COMPS_POLLER_BASE_URL }}
+          ADMIN_TOKEN: ${{ secrets.COMPS_POLLER_ADMIN_TOKEN }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$ADMIN_TOKEN" ]; then
+            echo "COMPS_POLLER_BASE_URL / COMPS_POLLER_ADMIN_TOKEN not set -- skipping (not an error)."
+            exit 0
+          fi
+          curl -fsS -X POST "$BASE_URL/admin/poller/run" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Length: 0"

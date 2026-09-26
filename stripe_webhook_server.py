@@ -36,6 +36,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from comps_collector import router as comps_collector_router
+from comps_poller import router as comps_poller_router
 from pos_connect import router as pos_connect_router
 from stripe_webhooks import StripeWebhookError, process_webhook_event, verify_stripe_signature
 from webhook_store import update_sales_log_status
@@ -51,6 +52,10 @@ app.include_router(pos_connect_router)
 # Comps collector for the mobile Analyze screen (see comps_collector.py):
 # eBay keys stay on this server; reuses comps.py / comps_adapters.py.
 app.include_router(comps_collector_router)
+# Background comps history poller admin API (see comps_poller.py): watchlist
+# CRUD, run trigger, status, price trend. Admin-token protected, off by
+# default until COMPS_POLLER_ADMIN_TOKEN is set.
+app.include_router(comps_poller_router)
 
 
 @app.get("/")
