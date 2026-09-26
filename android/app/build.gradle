@@ -1,5 +1,24 @@
 plugins { id 'com.android.application' }
 
+// Release (Play Store upload key) signing config, resolved from either:
+//   1. android/keystore.properties (gitignored; local/production machine), or
+//   2. environment variables APPRAZE_RELEASE_STORE_FILE / _STORE_PASSWORD /
+//      _KEY_ALIAS / _KEY_PASSWORD (a CI secrets store).
+// Neither is present in this repo or in CI by default, so a plain checkout
+// still builds a debug-signed "release" build type (see buildTypes below) --
+// this wiring only takes effect once the real keystore is supplied out of
+// band. See docs/RELEASE_SIGNING.md for what generated the keystore and
+// where its passwords live; neither the keystore nor its passwords are ever
+// committed here.
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+def hasKeystoreProps = keystorePropsFile.exists()
+if (hasKeystoreProps) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def envStoreFile = System.getenv('APPRAZE_RELEASE_STORE_FILE')
+def hasReleaseSigning = hasKeystoreProps || envStoreFile
+
 android {
     namespace 'com.crtc.app'
     compileSdk 36
@@ -12,14 +31,38 @@ android {
             keyPassword 'android'
             storeType 'PKCS12'
         }
+        if (hasKeystoreProps) {
+            release {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+                storeType 'PKCS12'
+            }
+        } else if (envStoreFile) {
+            release {
+                storeFile file(envStoreFile)
+                storePassword System.getenv('APPRAZE_RELEASE_STORE_PASSWORD')
+                keyAlias System.getenv('APPRAZE_RELEASE_KEY_ALIAS')
+                keyPassword System.getenv('APPRAZE_RELEASE_KEY_PASSWORD')
+                storeType 'PKCS12'
+            }
+        }
     }
 
     defaultConfig {
         applicationId 'com.crtc.app'
-        minSdk 23
+        minSdk 26
         targetSdk 36
         versionCode 2
         versionName '1.0.0-native'
+        // Appraze POS backend (pos_connect.py). HTTPS only; empty = POS shows
+        // "server not set up". Set with: gradle -PapprazePosApi=https://host
+        buildConfigField 'String', 'POS_API_BASE', "\"${project.findProperty('apprazePosApi') ?: ''}\""
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {
@@ -29,7 +72,11 @@ android {
         release {
             minifyEnabled false
             shrinkResources false
-            signingConfig signingConfigs.debug
+            // Falls back to the debug key when no release keystore is
+            // configured (plain CI checkout), so this never breaks the
+            // build -- it only signs with the real upload key once
+            // keystore.properties or the env vars above are supplied.
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
         }
     }
 
@@ -42,4 +89,8 @@ dependencies {
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'androidx.core:core:1.13.1'
     implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    // Stripe Terminal: Tap to Pay on Android (minSdk 26; Tap to Pay itself needs Android 11+).
+    implementation 'com.stripe:stripeterminal-core:5.8.1'
+    implementation 'com.stripe:stripeterminal-taptopay:5.8.1'
+    testImplementation 'junit:junit:4.13.2'
 }

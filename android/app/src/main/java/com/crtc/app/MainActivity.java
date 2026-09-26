@@ -29,10 +29,12 @@ import android.widget.ImageView;
 import android.view.Window;
 import android.view.WindowInsets;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.util.ArrayList;
@@ -41,20 +43,76 @@ import java.util.Locale;
 /** Native Android entry point. No WebView or Trusted Web Activity is used. */
 public final class MainActivity extends Activity {
 
-    /* ---------- Appraze brand palette ---------- */
-    static final int BG = 0xFF0A0A0D;
-    static final int GLASS = 0xCC16161C;
-    static final int GLASS_BORDER = 0x14FFFFFF;
-    static final int GOLD_BORDER = 0x33D4AF37;
-    static final int GOLD = 0xFFD4AF37;
-    static final int GOLD_LIGHT = 0xFFF0D878;
-    static final int GOLD_DEEP = 0xFF8C6E1F;
-    static final int TEXT_PRIMARY = 0xFFF5F2E8;
-    static final int TEXT_SECONDARY = 0xFFA8A29E;
-    static final int TEXT_MUTED = 0xFF6E6A63;
-    static final int BUY = 0xFF22C55E;
-    static final int PASS = 0xFFEF4444;
-    static final int REVIEW = 0xFFF59E0B;
+    /* ---------- Appraze brand palette ----------
+     * Assigned only by applyTheme() from the active Palette (light default,
+     * dark optional). Screens are rebuilt on every navigation, so a toggle
+     * takes effect on the next render with no stale colors. */
+    static boolean darkTheme;
+    static int BG;
+    static int GLASS;
+    static int GLASS_BORDER;
+    static int GOLD_BORDER;
+    static int GOLD;
+    static int GOLD_LIGHT;
+    static int GOLD_DEEP;
+    static int ON_GOLD;
+    static int TEXT_PRIMARY;
+    static int TEXT_SECONDARY;
+    static int TEXT_MUTED;
+    static int BUY;
+    static int PASS;
+    static int REVIEW;
+
+    static {
+        setPalette(Palette.LIGHT);
+    }
+
+    static void setPalette(Palette p) {
+        darkTheme = p.dark;
+        BG = p.bg;
+        GLASS = p.glass;
+        GLASS_BORDER = p.glassBorder;
+        GOLD_BORDER = p.goldBorder;
+        GOLD = p.gold;
+        GOLD_LIGHT = p.goldLight;
+        GOLD_DEEP = p.goldDeep;
+        ON_GOLD = p.onGold;
+        TEXT_PRIMARY = p.textPrimary;
+        TEXT_SECONDARY = p.textSecondary;
+        TEXT_MUTED = p.textMuted;
+        BUY = p.buy;
+        PASS = p.pass;
+        REVIEW = p.review;
+    }
+
+    /** Loads the saved theme choice (light by default) and styles the system bars to match. */
+    void applyTheme() {
+        setPalette(Palette.forDark(prefs.getBoolean(Palette.PREF_KEY, false)));
+        Window w = getWindow();
+        w.setStatusBarColor(BG);
+        w.setNavigationBarColor(GLASS | 0xFF000000);
+        w.getDecorView().setBackgroundColor(BG);
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.view.WindowInsetsController c = w.getInsetsController();
+            if (c != null) {
+                int light = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                c.setSystemBarsAppearance(darkTheme ? 0 : light, light);
+            }
+        } else {
+            View decor = w.getDecorView();
+            int flags = decor.getSystemUiVisibility();
+            int light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (Build.VERSION.SDK_INT >= 26) light |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            decor.setSystemUiVisibility(darkTheme ? (flags & ~light) : (flags | light));
+        }
+    }
+
+    void setDarkTheme(boolean dark) {
+        prefs.edit().putBoolean(Palette.PREF_KEY, dark).apply();
+        applyTheme();
+        events.record("theme_changed", "theme=" + (dark ? "dark" : "light"));
+    }
 
     static final String APP_VERSION = "1.0.0-native";
     static final String SUPPORT_EMAIL = "chale@cooperrivertrading.com";
@@ -63,6 +121,7 @@ public final class MainActivity extends Activity {
     LinearLayout headerRow;
     EventStore events;
     InventoryStore inventory;
+    SalesLog sales;
     SharedPreferences prefs;
     Usage usage;
     String analysisPhoto;
@@ -83,10 +142,12 @@ public final class MainActivity extends Activity {
         super.onCreate(b);
         events = new EventStore(this);
         inventory = new InventoryStore(this);
+        sales = new SalesLog(this);
         prefs = getPreferences(0);
         usage = new Usage(prefs);
         usage.rollover();
-        prefs = getPreferences(0);
+        PosScreen.purgeLegacyKeys(this);
+        applyTheme();
         splash();
     }
 
@@ -101,7 +162,9 @@ public final class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         boolean granted = grantResults.length > 0
                 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        PhotoCapture.onPermissionResult(this, requestCode, granted);
+        if (!PhotoCapture.onPermissionResult(this, requestCode, granted)) {
+            TapPay.onPermissionResult(this, requestCode, granted);
+        }
     }
 
     /* ---------- units & drawables ---------- */
@@ -268,7 +331,7 @@ public final class MainActivity extends Activity {
         b.setStateListAnimator(null);
     }
 
-    /** Primary: gold fill, 12dp radius, 16sp bold #0A0A0D text, 52dp tall. */
+    /** Primary: gold fill, 12dp radius, 16sp bold on-gold text, 52dp tall. */
     Button primaryButton(String text) {
         Button b = new Button(this);
         styleButton(b);
@@ -276,7 +339,7 @@ public final class MainActivity extends Activity {
         b.setTextSize(16);
         b.setTextColor(new ColorStateList(
                 new int[][]{new int[]{-android.R.attr.state_enabled}, new int[]{}},
-                new int[]{TEXT_MUTED, BG}));
+                new int[]{TEXT_MUTED, ON_GOLD}));
         StateListDrawable s = new StateListDrawable();
         s.addState(new int[]{android.R.attr.state_pressed}, btnBg(GOLD_LIGHT));
         s.addState(new int[]{-android.R.attr.state_enabled}, btnBg(GOLD_DEEP));
@@ -635,15 +698,20 @@ public final class MainActivity extends Activity {
     void analyze() {
         base("Analyze a Deal", null, 0);
         LinearLayout c = card(body, false);
+        final Field[] resaleRef = new Field[1];
+        CompsLookup.addTo(this, c, new CompsLookup.FieldRef() {
+            public Field get() { return resaleRef[0]; }
+        });
         final Field cost = labeled(c, "Purchase / hammer price", "0", decimalInput());
         final Field resale = labeled(c, "Expected resale price", "0", decimalInput());
+        resaleRef[0] = resale;
         final Field fee = labeled(c, "Resale fee %", prefs.getString("def_fee", "13"), decimalInput());
         final Field premium = labeled(c, "Buyer premium %", prefs.getString("def_premium", "18"), decimalInput());
         final LinearLayout slot = new LinearLayout(this);
         slot.setOrientation(LinearLayout.VERTICAL);
         c.addView(slot);
         final TextView teach = new TextView(this);
-        teach.setText("Enter what you'd pay and what it'll sell for. We'll do the math.");
+        teach.setText("Describe the item and tap Find Comps, or enter the resale price yourself. Add what you'd pay and we'll do the math.");
         teach.setTextSize(13);
         teach.setTextColor(TEXT_MUTED);
         teach.setPadding(dp(4), dp(12), dp(4), 0);
@@ -680,6 +748,11 @@ public final class MainActivity extends Activity {
                 Double fe = parseNonNegative(fee);
                 Double pr = parseNonNegative(premium);
                 if (co == null || re == null || fe == null || pr == null) return;
+                if (co == 0 && re == 0) {
+                    setFieldError(cost, "Enter what you'd pay.");
+                    setFieldError(resale, "Enter what it'll sell for.");
+                    return;
+                }
                 if (!usage.tryConsume(Usage.ANALYSES)) {
                     PlanSettings.upgradeDialog(MainActivity.this, usage, Usage.ANALYSES);
                     return;
@@ -688,6 +761,8 @@ public final class MainActivity extends Activity {
                 Deal d = Deal.calc(co, re, fe, pr, h);
                 slot.removeAllViews();
                 slot.addView(verdictBanner(d, h));
+                String from = CompsLookup.provenance(re);
+                if (from != null) slot.addView(caption(from));
                 teach.setVisibility(View.GONE);
                 events.record("deal_analyzed", "cost=" + co + "|resale=" + re + "|verdict=" + d.verdict + "|roi=" + d.roi);
             }
@@ -990,6 +1065,7 @@ public final class MainActivity extends Activity {
     void settings() {
         base("Settings", null, 4);
         PlanSettings.addPlanGroup(this);
+        appearanceGroup();
         settingsGroup("Holy Grail", new String[][]{
                 {"holy_roi", "Minimum ROI %", "40", "%"},
                 {"holy_profit", "Minimum profit $", "15", "$"},
@@ -1035,6 +1111,40 @@ public final class MainActivity extends Activity {
             });
             c.addView(row);
         }
+        return c;
+    }
+
+    LinearLayout appearanceGroup() {
+        LinearLayout c = card(body, false);
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) c.getLayoutParams();
+        lp.topMargin = dp(12);
+        c.setLayoutParams(lp);
+        c.addView(sectionLabel("Appearance"));
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(4), dp(6), dp(4), dp(6));
+        TextView l = new TextView(this);
+        l.setText("Dark mode");
+        l.setTextSize(15);
+        l.setTextColor(TEXT_SECONDARY);
+        row.addView(l, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Switch sw = new Switch(this);
+        sw.setChecked(darkTheme);
+        sw.setContentDescription("Dark mode");
+        int[][] states = {new int[]{android.R.attr.state_checked}, new int[]{}};
+        sw.setThumbTintList(new ColorStateList(states, new int[]{GOLD, darkTheme ? TEXT_MUTED : GLASS}));
+        sw.setTrackTintList(new ColorStateList(states, new int[]{withAlpha(GOLD, 0.5f), withAlpha(TEXT_MUTED, 0.5f)}));
+        sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(CompoundButton b, boolean on) {
+                setDarkTheme(on);
+                settings();
+            }
+        });
+        row.addView(sw);
+        c.addView(row);
+        c.addView(caption("Light is the default. Dark mode is the black-and-gold glass look."));
         return c;
     }
 

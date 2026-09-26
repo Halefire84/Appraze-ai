@@ -1,10 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <application android:allowBackup="false" android:label="Appraze" android:icon="@mipmap/ic_launcher" android:supportsRtl="true" android:theme="@style/Theme.CRTC">
+    <!-- Stripe Terminal Tap to Pay: location is required by Stripe for in-person card payments. -->
+    <!-- The Terminal SDK caps FINE_LOCATION at API 30; Tap to Pay needs it on 31+ too. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:remove="android:maxSdkVersion" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <application android:name=".ApprazeApp" android:allowBackup="false" android:label="Appraze" android:icon="@mipmap/ic_launcher" android:supportsRtl="true" android:theme="@style/Theme.CRTC">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

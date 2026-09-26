@@ -35,6 +35,8 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from comps_collector import router as comps_collector_router
+from pos_connect import router as pos_connect_router
 from stripe_webhooks import StripeWebhookError, process_webhook_event, verify_stripe_signature
 from webhook_store import update_sales_log_status
 from telemetry import log_event_standalone
@@ -43,6 +45,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("stripe_webhook_server")
 
 app = FastAPI(title="Appraze Stripe Webhook Receiver")
+# Mobile POS over Stripe Connect (see pos_connect.py): the platform secret
+# key stays on this server; phones only hold a revocable device token.
+app.include_router(pos_connect_router)
+# Comps collector for the mobile Analyze screen (see comps_collector.py):
+# eBay keys stay on this server; reuses comps.py / comps_adapters.py.
+app.include_router(comps_collector_router)
 
 
 @app.get("/")

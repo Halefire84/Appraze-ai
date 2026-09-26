@@ -1,7 +1,11 @@
 <resources>
-    <style name="Theme.CRTC" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="android:fontFamily">sans</item><item name="android:colorAccent">#D4AF37</item>
-        <item name="android:navigationBarColor">#090B12</item><item name="android:statusBarColor">#090B12</item>
-        <item name="android:windowLightStatusBar">false</item>
+    <!-- Launch window matches the default LIGHT palette (Palette.LIGHT) so a cold
+         start doesn't flash dark. MainActivity.applyTheme() restyles the bars at
+         runtime when the user has chosen dark mode in Settings. -->
+    <style name="Theme.CRTC" parent="Theme.Material3.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item><item name="android:colorAccent">#8C6D1F</item>
+        <item name="android:windowBackground">@color/launch_bg</item>
+        <item name="android:navigationBarColor">@color/launch_bg</item><item name="android:statusBarColor">@color/launch_bg</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

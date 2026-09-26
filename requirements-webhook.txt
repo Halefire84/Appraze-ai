@@ -1,6 +1,9 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 requests>=2.31
+# comps_collector.py reuses comps_adapters.py unchanged, which imports these.
+pandas
+streamlit
 # Test-only: fastapi.testclient (used by tests/test_stripe_webhook_server.py)
 # needs starlette's TestClient, which requires httpx2 to be installed.
 httpx2

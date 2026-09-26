@@ -10,3 +10,11 @@ ebay_config.json
 /android/build/
 /android/app/build/
 /android/app/google-services.json
+/android/local.properties
+
+# Release signing (Play upload key): the real keystore and its passwords
+# must never be committed. See docs/RELEASE_SIGNING.md.
+/android/keystore.properties
+*.keystore
+!/android/appraze-debug.keystore
+*.jks
