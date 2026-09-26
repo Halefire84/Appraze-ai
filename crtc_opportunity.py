@@ -58,7 +58,23 @@ def build_opportunity(candidate: Any, *, market_value: Optional[float] = None,
 
     canonical = None
     if decision is None or max_buy_price is None or not reason:
-        canonical = evaluate_deal(price=price, market_value=value, is_auction=False, require_shipping=False)
+        # Non-auction acquisition cost must be all-in (item + fees + shipping
+        # + tax), not just the asking price. shipping/tax/other_fees are only
+        # ever known when the listing itself carries them (radar candidates
+        # frequently don't yet), so they're passed through rather than
+        # dropped -- previously this call never forwarded them at all, so a
+        # listing with a real, known shipping or tax cost silently had it
+        # excluded from the BUY verdict's all-in cost.
+        shipping = listing.get("shipping")
+        other_fees = listing.get("other_fees")
+        tax = listing.get("tax")
+        fees_total = None
+        if other_fees is not None or tax is not None:
+            fees_total = (other_fees or 0.0) + (tax or 0.0)
+        canonical = evaluate_deal(
+            price=price, market_value=value, is_auction=False,
+            shipping=shipping, other_fees=fees_total, require_shipping=False,
+        )
 
     if max_buy_price is None:
         max_buy_price = canonical.acquisition_target_all_in

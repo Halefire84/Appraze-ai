@@ -225,6 +225,23 @@ def calc_deal(cost, resale_value, fee_pct=DEFAULT_FEE_PCT, premium_pct=DEFAULT_P
     return DealResult(true_cost, net_resale, gross_profit, roi_pct, verdict, tier)
 
 
+def dashboard_deal_result(cost, resale_value, fee_pct=None):
+    """Fee-adjusted gross profit / ROI / verdict for the Deal Dashboard table.
+
+    Delegates to calc_deal (the same math the acquisition pipeline runs
+    every candidate through) instead of the old plain cost/resale
+    subtraction, so the Dashboard's Verdict can no longer drift out of sync
+    with the rest of the app the way it used to (see this module's
+    docstring). premium_pct is pinned to 0 -- never left as calc_deal's
+    default 18% -- because the Dashboard's "Cost" column is already the
+    actual amount paid, buyer's premium included; applying a premium again
+    here would double-count it.
+    """
+    if fee_pct is None:
+        fee_pct = DEFAULT_FEE_PCT
+    return calc_deal(cost, resale_value, fee_pct=fee_pct, premium_pct=0)
+
+
 def max_cost_for_target_roi(resale_value, target_roi_pct=40.0, fee_pct=DEFAULT_FEE_PCT, premium_pct=DEFAULT_PREMIUM_PCT):
     """
     'Floor cost' — the maximum purchase/bid price (BEFORE premium) that still

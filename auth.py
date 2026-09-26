@@ -18,10 +18,59 @@ against a SHA-256 hash stored in Streamlit secrets.
 
 import hashlib
 import hmac
+import time
 from dataclasses import dataclass
+from typing import Dict, List, Optional
 
+import bcrypt
 import requests
 import streamlit as st
+
+# --- Brute-force lockout -----------------------------------------------
+# In-process (module-level) tracking. Streamlit Community Cloud's free tier
+# runs one process per deployed app, so this is shared across every
+# concurrent session hitting this instance -- enough to slow down a
+# credential-stuffing attempt against a 10-user beta without adding a
+# storage dependency. It resets on app restart/redeploy, which is an
+# accepted tradeoff for this stage, not a claim of durable, multi-instance
+# rate limiting.
+_LOGIN_LOCKOUT_MAX_ATTEMPTS = 5
+_LOGIN_LOCKOUT_WINDOW_SECONDS = 15 * 60
+_failed_login_attempts: Dict[str, List[float]] = {}
+
+
+def _lockout_key(username: str) -> str:
+    return str(username).strip().lower()
+
+
+def _is_locked_out(username: str) -> Optional[int]:
+    """Return remaining lockout seconds if this username is locked out, else None."""
+    key = _lockout_key(username)
+    attempts = _failed_login_attempts.get(key)
+    if not attempts:
+        return None
+    now = time.time()
+    recent = [t for t in attempts if now - t < _LOGIN_LOCKOUT_WINDOW_SECONDS]
+    _failed_login_attempts[key] = recent
+    if len(recent) >= _LOGIN_LOCKOUT_MAX_ATTEMPTS:
+        oldest = min(recent)
+        remaining = int(_LOGIN_LOCKOUT_WINDOW_SECONDS - (now - oldest))
+        return max(remaining, 1)
+    return None
+
+
+def _record_failed_attempt(username: str) -> None:
+    key = _lockout_key(username)
+    _failed_login_attempts.setdefault(key, []).append(time.time())
+
+
+def _clear_failed_attempts(username: str) -> None:
+    _failed_login_attempts.pop(_lockout_key(username), None)
+
+
+def _lockout_message(remaining_seconds: int) -> str:
+    minutes = max(1, (remaining_seconds + 59) // 60)
+    return f"Too many failed login attempts. Try again in about {minutes} minute(s)."
 
 
 @dataclass
@@ -68,6 +117,14 @@ def _token() -> str:
     return token
 
 
+def _is_bcrypt_hash(value: str) -> bool:
+    return value.startswith(("$2a$", "$2b$", "$2y$")) and len(value) == 60
+
+
+def _is_legacy_sha256_hash(value: str) -> bool:
+    return len(value) == 64 and all(c in "0123456789abcdefABCDEF" for c in value)
+
+
 def _admin_credentials_configured() -> bool:
     """Return True when the dedicated shared Admin login is configured.
 
@@ -75,13 +132,29 @@ def _admin_credentials_configured() -> bool:
       CRTC_ADMIN_USERNAME
       CRTC_ADMIN_PASSWORD_HASH
 
-    CRTC_ADMIN_PASSWORD_HASH must be SHA-256 of the desired password.
-    Keeping the hash in deployment secrets means the password is never
-    committed to GitHub. A setup helper is documented in AUTH_SETUP.md.
+    CRTC_ADMIN_PASSWORD_HASH accepts either a bcrypt hash ($2a$/$2b$/$2y$,
+    the recommended format -- salted, deliberately slow to brute-force) or
+    a legacy SHA-256 hex digest, detected by format. Legacy support exists
+    so an already-deployed SHA-256 secret keeps working without a forced
+    rotation; AUTH_SETUP.md documents generating a bcrypt hash for new/
+    rotated credentials. Keeping the hash in deployment secrets means the
+    password is never committed to GitHub.
     """
     username = _secret("CRTC_ADMIN_USERNAME").strip()
-    password_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
-    return bool(username and len(password_hash) == 64)
+    password_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip()
+    if not username or not password_hash:
+        return False
+    return _is_bcrypt_hash(password_hash) or _is_legacy_sha256_hash(password_hash)
+
+
+def _verify_admin_password(password: str, stored_hash: str) -> bool:
+    stored_hash = stored_hash.strip()
+    if _is_bcrypt_hash(stored_hash):
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+        except ValueError:
+            return False
+    return hmac.compare_digest(_hash_password(password), stored_hash.lower())
 
 
 def _admin_login(username: str, password: str) -> AuthResult | None:
@@ -94,14 +167,21 @@ def _admin_login(username: str, password: str) -> AuthResult | None:
         return None
 
     configured_username = _secret("CRTC_ADMIN_USERNAME").strip().lower()
-    configured_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip().lower()
+    configured_hash = _secret("CRTC_ADMIN_PASSWORD_HASH").strip()
     supplied_username = str(username).strip().lower()
 
     if supplied_username != configured_username:
         return None
-    if not hmac.compare_digest(_hash_password(password), configured_hash):
+
+    locked_for = _is_locked_out(supplied_username)
+    if locked_for is not None:
+        return AuthResult(False, error=_lockout_message(locked_for))
+
+    if not _verify_admin_password(password, configured_hash):
+        _record_failed_attempt(supplied_username)
         return AuthResult(False, error="incorrect password")
 
+    _clear_failed_attempts(supplied_username)
     return AuthResult(
         True,
         display_name="CRTC Admin",
@@ -142,9 +222,16 @@ def login(username: str, password: str) -> AuthResult:
     # Owner/admin login is intentionally checked first and does not depend on
     # the Google Sheet being reachable. This gives the two owners one simple
     # shared login while keeping the existing tester/paid-user system intact.
+    # _admin_login() applies its own lockout check when the username matches
+    # the configured Admin account; a non-matching username falls through to
+    # the tester path below, which has its own separate lockout tracking.
     admin_result = _admin_login(username, password)
     if admin_result is not None:
         return admin_result
+
+    locked_for = _is_locked_out(username)
+    if locked_for is not None:
+        return AuthResult(False, error=_lockout_message(locked_for))
 
     try:
         resp = requests.post(
@@ -160,7 +247,9 @@ def login(username: str, password: str) -> AuthResult:
         resp.raise_for_status()
         data = resp.json()
         if data.get("success"):
+            _clear_failed_attempts(username)
             return AuthResult(True, data.get("display_name", username), data.get("is_admin", False), data.get("is_paid", False), username=data.get("username", username.lower()))
+        _record_failed_attempt(username)
         return AuthResult(False, error=data.get("error", "login failed"))
     except Exception as e:
         return AuthResult(False, error=f"connection error: {e}")
@@ -181,6 +270,22 @@ def mark_paid(username: str) -> bool:
         return False
 
 
+def _render_brand_header(caption: str) -> None:
+    """Shared login-screen header: the real Appraze logo, not a generic
+    emoji, and "Appraze" as the product name -- never "CRTC", which is the
+    company name only (see CRTC_NAME.md's brand rule). Inlined styling
+    rather than the .appraze-brand CSS class app.py's LIGHT_CSS defines,
+    since this renders on every independently-reachable page (each calls
+    require_auth() directly, per its docstring) and most of them never
+    load app.py's stylesheet."""
+    st.markdown(
+        '<img src="./app/static/appraze-logo.svg" alt="Appraze" '
+        'style="max-width:220px;width:100%;display:block;margin:0 auto 14px;">',
+        unsafe_allow_html=True,
+    )
+    st.caption(caption)
+
+
 def render_login_gate() -> bool:
     """
     Renders a login/signup form. Returns True if the current session is
@@ -190,8 +295,7 @@ def render_login_gate() -> bool:
     if st.session_state.get("authenticated"):
         return True
 
-    st.markdown("## 🪙 CRTC")
-    st.caption("Cooper River Trading Co. — private workspace")
+    _render_brand_header("Cooper River Trading Co. — private workspace")
 
     tab_login, tab_signup = st.tabs(["Log In", "Sign Up"])
 
@@ -289,8 +393,7 @@ def require_auth() -> None:
     if st.session_state.get("authenticated"):
         return
 
-    st.markdown("## 🪙 CRTC")
-    st.caption("Cooper River Trading Co. — sign in to continue")
+    _render_brand_header("Cooper River Trading Co. — sign in to continue")
 
     if not _admin_credentials_configured():
         st.error(

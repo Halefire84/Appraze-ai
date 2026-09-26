@@ -42,6 +42,26 @@ const STORAGE_HEADER = ["owner_key", "table", "payload_json", "updated_at"];
 const PROCESSED_SHEET_NAME = "ProcessedFiles";
 const PROCESSED_HEADER = ["file_id", "file_name", "processed_at"];
 
+// Server-side Appraze AI usage controls. These limits are enforced here,
+// not in Streamlit session state, so browser reruns cannot reset them.
+const AI_USAGE_SHEET_NAME = "AIUsage";
+const AI_USAGE_HEADER = ["username","month_key","day_key","successful_calls","reserved_calls","daily_successful","daily_reserved","input_tokens","output_tokens","estimated_cost_usd","updated_at"];
+const AI_CUSTOMER_MONTHLY_LIMIT = 100;
+const AI_CUSTOMER_DAILY_LIMIT = 10;
+const AI_ADMIN_MONTHLY_LIMIT = 500;
+const AI_ADMIN_DAILY_LIMIT = 25;
+const AI_RESERVATION_TTL_MS = 15 * 60 * 1000;
+
+// Operational event log (errors + financial-decision/payment events), kept
+// as a normal "table" row in the Storage sheet under admin_shared -- no new
+// sheet needed. Capped so the payload_json cell never approaches Google
+// Sheets' ~50,000-character per-cell limit; the log is meant for recent
+// diagnostic visibility, not a permanent audit trail (durable financial
+// records already live in sales_log/AIUsage, which have their own
+// precedence/idempotency rules and are never trimmed).
+const EVENT_LOG_TABLE = "event_log";
+const EVENT_LOG_MAX_ENTRIES = 300;
+
 // Supported file types for invoice/inventory scanning — images and PDFs only
 // (matches what Claude's vision API can read directly).
 const SUPPORTED_MIME_TYPES = [
@@ -72,9 +92,9 @@ function handleRequest(e) {
       case "login":
         return handleLogin_(getUsersSheet_(), params);
       case "save_data":
-        return handleSaveData_(getStorageSheet_(), params);
+        return handleSaveData_(getStorageSheet_(), getUsersSheet_(), params);
       case "load_data":
-        return handleLoadData_(getStorageSheet_(), params);
+        return handleLoadData_(getStorageSheet_(), getUsersSheet_(), params);
       case "update_sales_log_status":
         return handleUpdateSalesLogStatus_(getStorageSheet_(), params);
       case "set_paid":
@@ -83,6 +103,16 @@ function handleRequest(e) {
         return handleScanFolder_(params);
       case "mark_processed":
         return handleMarkProcessed_(getProcessedSheet_(), params);
+      case "reserve_ai_usage":
+        return handleReserveAiUsage_(getUsersSheet_(), getAiUsageSheet_(), params);
+      case "finalize_ai_usage":
+        return handleFinalizeAiUsage_(getAiUsageSheet_(), params);
+      case "release_ai_usage":
+        return handleReleaseAiUsage_(getAiUsageSheet_(), params);
+      case "get_ai_usage":
+        return handleGetAiUsage_(getUsersSheet_(), getAiUsageSheet_(), params);
+      case "log_event":
+        return handleLogEvent_(getStorageSheet_(), params);
       default:
         return jsonResponse({ success: false, error: "unknown action" });
     }
@@ -242,19 +272,23 @@ function handleSetPaid_(sheet, params) {
 // DATA STORAGE (shared admin workspace + per-tester isolated storage)
 // ---------------------------------------------------------------------------
 
-function resolveOwnerKey_(params) {
-  // Admins all share one workspace row; everyone else is isolated by username.
-  const isAdmin = String(params.is_admin || "").toLowerCase() === "true";
-  if (isAdmin) return "admin_shared";
+function resolveOwnerKey_(usersSheet, params) {
+  // Admins all share one workspace row; everyone else is isolated by
+  // username. Admin status is looked up from the Users sheet by username --
+  // it is NEVER taken from a client-supplied is_admin param, since that
+  // would let anyone read/write the shared admin workspace just by sending
+  // is_admin=true.
   const username = String(params.username || "").trim().toLowerCase();
+  const user = username ? findUser_(usersSheet, username) : null;
+  if (user && user.isAdmin) return "admin_shared";
   return "tester_" + username;
 }
 
-function handleSaveData_(sheet, params) {
+function handleSaveData_(sheet, usersSheet, params) {
   // migrateStorageSheetIfNeeded_ (called from getStorageSheet_, before this
   // ever runs) guarantees every row already has a real "table" value, so
   // there's no legacy-row case left to special-case here.
-  const ownerKey = resolveOwnerKey_(params);
+  const ownerKey = resolveOwnerKey_(usersSheet, params);
   const table = String(params.table || "deals");
   const payload = String(params.payload || "{}");
 
@@ -276,8 +310,8 @@ function handleSaveData_(sheet, params) {
   }
 }
 
-function handleLoadData_(sheet, params) {
-  const ownerKey = resolveOwnerKey_(params);
+function handleLoadData_(sheet, usersSheet, params) {
+  const ownerKey = resolveOwnerKey_(usersSheet, params);
   const table = String(params.table || "deals");
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
@@ -320,9 +354,21 @@ function salesLogStatusRank_(status) {
 // locked execution, so two webhook deliveries arriving close together
 // can't race and silently clobber each other's status update the way a
 // separate load-then-save round trip from the caller could.
+//
+// Durable event-id idempotency: when the caller passes event_id, the last
+// Stripe event id that was actually applied to this invoice is persisted
+// in the row itself (_last_event_id -- no new sheet/schema needed, since
+// sales_log rows are already free-form JSON). Stripe guarantees
+// at-least-once delivery, so the same event can arrive more than once,
+// including after this process has restarted or across multiple instances
+// of stripe_webhook_server.py -- an in-memory "seen events" set would not
+// survive either of those, but this row field does. A redelivery of an
+// event_id already recorded on the row is a no-op duplicate, distinct from
+// the ordinary status-precedence downgrade check below.
 function handleUpdateSalesLogStatus_(sheet, params) {
   const invoiceId = String(params.invoice_id || "");
   const newStatus = String(params.new_status || "");
+  const eventId = String(params.event_id || "");
   const force = String(params.force || "") === "true";
   if (!invoiceId || !newStatus) {
     return jsonResponse({ success: false, error: "invoice_id and new_status are required" });
@@ -344,13 +390,21 @@ function handleUpdateSalesLogStatus_(sheet, params) {
         }
         let found = false;
         let applied = false;
+        let duplicate = false;
         let currentStatus = null;
         for (let j = 0; j < rows.length; j++) {
           if (rows[j]["Invoice #"] === invoiceId) {
             found = true;
             currentStatus = rows[j]["Status"];
+            if (eventId && rows[j]["_last_event_id"] === eventId) {
+              // Same Stripe event redelivered -- already applied, skip
+              // entirely so a replay can never produce a duplicate effect.
+              duplicate = true;
+              break;
+            }
             if (force || salesLogStatusRank_(newStatus) >= salesLogStatusRank_(currentStatus)) {
               rows[j]["Status"] = newStatus;
+              if (eventId) rows[j]["_last_event_id"] = eventId;
               applied = true;
             }
             break;
@@ -358,6 +412,9 @@ function handleUpdateSalesLogStatus_(sheet, params) {
         }
         if (!found) {
           return jsonResponse({ success: true, found: false });
+        }
+        if (duplicate) {
+          return jsonResponse({ success: true, found: true, applied: false, duplicate: true, current_status: currentStatus });
         }
         if (!applied) {
           // Found the row but refused to downgrade it -- not an error,
@@ -373,6 +430,183 @@ function handleUpdateSalesLogStatus_(sheet, params) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// Appends one diagnostic entry to the shared event_log table. Best-effort
+// by design from the caller's side (storage.py's log_event() never raises),
+// but this handler itself is atomic (lock + read + append + trim + write)
+// so concurrent loggers (two Streamlit sessions, the webhook service) can
+// never race and silently drop each other's entry the way a naive
+// load-then-save round trip could.
+function handleLogEvent_(sheet, params) {
+  const level = String(params.level || "INFO").toUpperCase().slice(0, 20);
+  const eventType = String(params.event_type || "").slice(0, 60);
+  const source = String(params.source || "").slice(0, 80);
+  const message = String(params.message || "").slice(0, 500);
+  let context = String(params.context || "").slice(0, 1000);
+
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level: level,
+    event_type: eventType,
+    source: source,
+    message: message,
+    context: context,
+  };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const ownerKey = "admin_shared";
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === ownerKey && data[i][1] === EVENT_LOG_TABLE) {
+        let rows;
+        try {
+          rows = JSON.parse(data[i][2] || "[]");
+        } catch (e) {
+          rows = []; // corrupted payload -- start fresh rather than fail every future log call
+        }
+        rows.push(entry);
+        if (rows.length > EVENT_LOG_MAX_ENTRIES) {
+          rows = rows.slice(rows.length - EVENT_LOG_MAX_ENTRIES);
+        }
+        sheet.getRange(i + 1, 3).setValue(JSON.stringify(rows));
+        sheet.getRange(i + 1, 4).setValue(new Date().toISOString());
+        return jsonResponse({ success: true });
+      }
+    }
+    sheet.appendRow([ownerKey, EVENT_LOG_TABLE, JSON.stringify([entry]), new Date().toISOString()]);
+    return jsonResponse({ success: true });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getAiUsageSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(AI_USAGE_SHEET_NAME);
+  if (!sheet) { sheet = ss.insertSheet(AI_USAGE_SHEET_NAME); sheet.appendRow(AI_USAGE_HEADER); }
+  return sheet;
+}
+
+function aiPeriodKeys_() {
+  const now = new Date();
+  return {
+    monthKey: Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM"),
+    dayKey: Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd"),
+    nowMs: now.getTime()
+  };
+}
+
+function findUser_(sheet, username) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toLowerCase() === username) {
+      return { row: i + 1, isAdmin: String(data[i][3]).toUpperCase() === "TRUE", isPaid: String(data[i][4]).toUpperCase() === "TRUE" };
+    }
+  }
+  return null;
+}
+
+function findAiUsageRow_(sheet, username, monthKey) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toLowerCase() === username && String(data[i][1]) === monthKey) return i + 1;
+  }
+  return 0;
+}
+
+function usagePayload_(vals, allowed, error, monthlyLimit, dailyLimit, dayKey) {
+  const dailyKey = vals.length ? String(vals[2]) : dayKey;
+  return {success: allowed, allowed: allowed, error: error || "",
+    monthly_used: vals.length ? Number(vals[3]) || 0 : 0,
+    monthly_reserved: vals.length ? Number(vals[4]) || 0 : 0,
+    monthly_limit: monthlyLimit,
+    daily_used: vals.length && dailyKey === dayKey ? Number(vals[5]) || 0 : 0,
+    daily_reserved: vals.length && dailyKey === dayKey ? Number(vals[6]) || 0 : 0,
+    daily_limit: dailyLimit,
+    monthly_cost_usd: vals.length ? Number((Number(vals[9]) || 0).toFixed(6)) : 0};
+}
+
+function handleReserveAiUsage_(usersSheet, usageSheet, params) {
+  const username = String(params.username || "").trim().toLowerCase();
+  if (!username) return jsonResponse({success:false,error:"account identity is unavailable"});
+  const user = findUser_(usersSheet, username);
+  // Admin status is authoritative from the Users sheet only -- a
+  // client-supplied is_admin param is never trusted for quota decisions.
+  if (!user) return jsonResponse({success:false,error:"account is not recognized"});
+  const isAdmin = user.isAdmin;
+  if (!user.isPaid && !isAdmin) return jsonResponse({success:false,error:"AI features require an active Appraze subscription"});
+  const monthlyLimit = isAdmin ? AI_ADMIN_MONTHLY_LIMIT : AI_CUSTOMER_MONTHLY_LIMIT;
+  const dailyLimit = isAdmin ? AI_ADMIN_DAILY_LIMIT : AI_CUSTOMER_DAILY_LIMIT;
+  const period = aiPeriodKeys_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    let rowNum = findAiUsageRow_(usageSheet, username, period.monthKey);
+    if (!rowNum) {
+      usageSheet.appendRow([username,period.monthKey,period.dayKey,0,0,0,0,0,0,0,new Date().toISOString()]);
+      rowNum = usageSheet.getLastRow();
+    }
+    const row = usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length);
+    const vals = row.getValues()[0];
+    const updatedMs = new Date(String(vals[10] || "")).getTime();
+    if (Number.isFinite(updatedMs) && period.nowMs - updatedMs > AI_RESERVATION_TTL_MS) { vals[4]=0; vals[6]=0; }
+    if (String(vals[2]) !== period.dayKey) { vals[2]=period.dayKey; vals[5]=0; vals[6]=0; }
+    const successful=Number(vals[3])||0, reserved=Number(vals[4])||0;
+    const dailySuccessful=Number(vals[5])||0, dailyReserved=Number(vals[6])||0;
+    if (successful+reserved >= monthlyLimit) { row.setValues([vals]); return jsonResponse(usagePayload_(vals,false,"Monthly AI usage limit reached",monthlyLimit,dailyLimit,period.dayKey)); }
+    if (dailySuccessful+dailyReserved >= dailyLimit) { row.setValues([vals]); return jsonResponse(usagePayload_(vals,false,"Daily AI usage limit reached",monthlyLimit,dailyLimit,period.dayKey)); }
+    vals[4]=reserved+1; vals[6]=dailyReserved+1; vals[10]=new Date().toISOString(); row.setValues([vals]);
+    return jsonResponse(usagePayload_(vals,true,"",monthlyLimit,dailyLimit,period.dayKey));
+  } finally { lock.releaseLock(); }
+}
+
+function handleFinalizeAiUsage_(usageSheet, params) {
+  const username=String(params.username||"").trim().toLowerCase();
+  const inputTokens=Math.max(0,Number(params.input_tokens)||0);
+  const outputTokens=Math.max(0,Number(params.output_tokens)||0);
+  const cost=Math.max(0,Number(params.estimated_cost_usd)||0);
+  if(!username) return jsonResponse({success:false,error:"account identity is unavailable"});
+  const period=aiPeriodKeys_(), lock=LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey);
+    if(!rowNum) return jsonResponse({success:false,error:"usage reservation not found"});
+    const row=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length), vals=row.getValues()[0];
+    vals[4]=Math.max(0,(Number(vals[4])||0)-1);
+    if(String(vals[2])!==period.dayKey){vals[2]=period.dayKey;vals[5]=0;vals[6]=0;}
+    vals[6]=Math.max(0,(Number(vals[6])||0)-1); vals[3]=(Number(vals[3])||0)+1; vals[5]=(Number(vals[5])||0)+1;
+    vals[7]=(Number(vals[7])||0)+inputTokens; vals[8]=(Number(vals[8])||0)+outputTokens; vals[9]=(Number(vals[9])||0)+cost; vals[10]=new Date().toISOString();
+    row.setValues([vals]); return jsonResponse({success:true,monthly_cost_usd:Number(vals[9].toFixed(6))});
+  } finally { lock.releaseLock(); }
+}
+
+function handleReleaseAiUsage_(usageSheet, params) {
+  const username=String(params.username||"").trim().toLowerCase(); if(!username)return jsonResponse({success:false,error:"account identity is unavailable"});
+  const period=aiPeriodKeys_(), lock=LockService.getScriptLock(); lock.waitLock(10000);
+  try {
+    const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey); if(!rowNum)return jsonResponse({success:true});
+    const row=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length), vals=row.getValues()[0];
+    vals[4]=Math.max(0,(Number(vals[4])||0)-1); if(String(vals[2])===period.dayKey)vals[6]=Math.max(0,(Number(vals[6])||0)-1);
+    vals[10]=new Date().toISOString(); row.setValues([vals]); return jsonResponse({success:true});
+  } finally { lock.releaseLock(); }
+}
+
+function handleGetAiUsage_(usersSheet, usageSheet, params) {
+  const username=String(params.username||"").trim().toLowerCase(); if(!username)return jsonResponse({success:false,error:"account identity is unavailable"});
+  const user=findUser_(usersSheet,username);
+  // Admin status is authoritative from the Users sheet only -- a
+  // client-supplied is_admin param is never trusted for quota decisions.
+  if(!user) return jsonResponse({success:false,error:"account is not recognized"});
+  const isAdmin=user.isAdmin;
+  if(!user.isPaid && !isAdmin)return jsonResponse({success:false,error:"active subscription required"});
+  const monthlyLimit=isAdmin?AI_ADMIN_MONTHLY_LIMIT:AI_CUSTOMER_MONTHLY_LIMIT, dailyLimit=isAdmin?AI_ADMIN_DAILY_LIMIT:AI_CUSTOMER_DAILY_LIMIT, period=aiPeriodKeys_();
+  const rowNum=findAiUsageRow_(usageSheet,username,period.monthKey);
+  if(!rowNum)return jsonResponse({success:true,monthly_used:0,monthly_limit:monthlyLimit,daily_used:0,daily_limit:dailyLimit,monthly_cost_usd:0,input_tokens:0,output_tokens:0});
+  const vals=usageSheet.getRange(rowNum,1,1,AI_USAGE_HEADER.length).getValues()[0], dailyUsed=String(vals[2])===period.dayKey?Number(vals[5])||0:0;
+  return jsonResponse({success:true,monthly_used:Number(vals[3])||0,monthly_limit:monthlyLimit,daily_used:dailyUsed,daily_limit:dailyLimit,monthly_cost_usd:Number((Number(vals[9])||0).toFixed(6)),input_tokens:Number(vals[7])||0,output_tokens:Number(vals[8])||0});
 }
 
 function jsonResponse(obj) {

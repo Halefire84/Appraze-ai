@@ -1,4 +1,4 @@
-"""CRTC Flip Ledger — the operating layer after a BUY decision."""
+"""Appraze Flip Ledger — the operating layer after a BUY decision."""
 import pandas as pd
 import streamlit as st
 
@@ -6,10 +6,10 @@ from flip_ledger import build_flip_record, update_flip
 from listing_bridge import build_master_listing
 from storage import load_table, save_table
 
-st.set_page_config(page_title="CRTC — Flip Ledger", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Appraze — Flip Ledger", page_icon="📊", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("📊 CRTC Flip Ledger")
+st.title("📊 Appraze Flip Ledger")
 st.caption("BUY → PURCHASED → LISTED → SOLD → REALIZED PROFIT")
 
 if "crtc_flip_ledger" not in st.session_state:
@@ -121,8 +121,8 @@ if ledger:
                     st.error(str(exc))
 
     st.markdown("### 📋 Ledger export")
-    st.download_button("Export CSV", pd.DataFrame(ledger).to_csv(index=False), "crtc-flip-ledger.csv", "text/csv", use_container_width=True)
+    st.download_button("Export CSV", pd.DataFrame(ledger).to_csv(index=False), "appraze-flip-ledger.csv", "text/csv", use_container_width=True)
 else:
     st.warning("Your flip ledger is empty. Track a BUY above or add a manual flip.")
 
-st.caption("CRTC · One source of truth for the flip lifecycle. Marketplace publishing remains a separate approved-API integration layer.")
+st.caption("Appraze · One source of truth for the flip lifecycle. Marketplace publishing remains a separate approved-API integration layer.")

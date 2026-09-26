@@ -96,7 +96,7 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
             body = resp.json()
             self.assertTrue(body["handled"])
             self.assertEqual(body["new_status"], "Paid (Card)")
-            mock_update.assert_called_once_with("POS-2026-09-07-abc123", "Paid (Card)")
+            mock_update.assert_called_once_with("POS-2026-09-07-abc123", "Paid (Card)", event_id="")
 
     def test_charge_succeeded_with_no_matching_row_does_not_crash(self):
         event = {
@@ -130,17 +130,19 @@ class TestStripeWebhookEndpoint(unittest.TestCase):
             self.assertEqual(first.status_code, 200)
             self.assertEqual(second.status_code, 200)
 
-    def test_persistence_failure_still_acknowledges_stripe(self):
-        # If the Apps Script backend is unreachable, we still return 200 so
-        # Stripe doesn't retry-storm us — the event is logged, not lost
-        # silently, but there's no user-facing retry queue in this design.
+    def test_persistence_failure_returns_5xx_so_stripe_retries(self):
+        # If the Apps Script backend is unreachable, the reconciliation
+        # failed -- a 200 here would tell Stripe the event was delivered
+        # successfully and it would never retry, permanently losing this
+        # invoice's status update. Must come back as a 5xx instead.
         event = {
             "type": "charge.succeeded",
             "data": {"object": {"id": "ch_789", "metadata": {"invoice_id": "POS-1"}, "amount": 100, "created": 0}},
         }
         with mock.patch("stripe_webhook_server.update_sales_log_status", return_value=WebhookStoreResult(False, error="unreachable")):
             resp = self._post(event)
-            self.assertEqual(resp.status_code, 200)
+            self.assertGreaterEqual(resp.status_code, 500)
+            self.assertFalse(resp.json()["ok"])
 
     def test_malformed_json_body_returns_400(self):
         body = b"not json at all"

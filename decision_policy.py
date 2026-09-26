@@ -191,6 +191,24 @@ def evaluate_deal(
     price_f = _safe_float(price)
     value_f = _safe_float(market_value)
 
+    if value_f == 0.0:
+        # Zero resale value is valid input (not negative, not malformed) but
+        # can never justify a BUY -- there is no profit potential to acquire
+        # regardless of price, including the degenerate price=$0 case.
+        return DealDecision(
+            decision=DECISION_REVIEW,
+            reason="Market value is $0; there is no resale value to justify an acquisition.",
+            market_value=0.0,
+            confidence=confidence,
+            acquisition_target_all_in=0.0,
+            max_bid_or_price=None,
+            all_in_cost=None,
+            projected_roi_pct=None,
+            roi_tier="pass",
+            roi_tier_label=DECISION_PASS,
+            costs_complete=False,
+        )
+
     if price_f is None:
         return DealDecision(
             decision=DECISION_REVIEW,
@@ -223,9 +241,24 @@ def evaluate_deal(
     target_all_in = round(value_f * (ACQUISITION_TARGET_PCT / 100.0), 2)
 
     # --- Build cost components with explicit states ---
+    # A negative premium/shipping/fee is not a real-world value -- it would
+    # silently REDUCE all_in cost below price_f, which could manufacture a
+    # false BUY out of malformed input. _safe_float() only screens
+    # None/bool/NaN/Inf, not sign, so negative cost inputs are treated the
+    # same as UNKNOWN here rather than accepted at face value (F-10/F-11
+    # class of finding: a malformed number must never produce BUY).
     premium_pct = _safe_float(buyer_premium_pct)
+    if premium_pct is not None and premium_pct < 0:
+        warnings.append(f"Ignored negative buyer_premium_pct={premium_pct} (treated as unknown).")
+        premium_pct = None
     ship = _safe_float(shipping)
+    if ship is not None and ship < 0:
+        warnings.append(f"Ignored negative shipping={ship} (treated as unknown).")
+        ship = None
     fees = _safe_float(other_fees)
+    if fees is not None and fees < 0:
+        warnings.append(f"Ignored negative other_fees={fees} (treated as unknown).")
+        fees = None
 
     if is_auction:
         if premium_pct is None:
@@ -245,7 +278,16 @@ def evaluate_deal(
         else:
             components.append(CostComponent("shipping", round(ship, 2), COST_KNOWN, "USD"))
     else:
-        components.append(CostComponent("shipping", 0.0, COST_NA if ship is None else COST_KNOWN, "USD"))
+        # Non-auction, shipping not required: still record a *known* shipping
+        # dollar amount when one was actually supplied, rather than always
+        # reporting 0.0 -- otherwise a listing with a real shipping cost has
+        # it silently dropped from all_in_cost just because it isn't
+        # mandatory here (fix: non-auction all-in cost must include known
+        # shipping/fees, not just the item price).
+        components.append(
+            CostComponent("shipping", round(ship, 2) if ship is not None else 0.0,
+                          COST_NA if ship is None else COST_KNOWN, "USD")
+        )
 
     if fees is not None:
         components.append(CostComponent("other_fees", round(fees, 2), COST_KNOWN, "USD"))
@@ -261,7 +303,6 @@ def evaluate_deal(
         if c.state in (COST_KNOWN, COST_NA) and c.unit == "USD" and c.amount is not None:
             known_addons += c.amount
     all_in = round(price_f + known_addons, 2)
-    costs_complete = len(material_unknown) == 0 and not premium_unknown
 
     # Max bid / max price under the 70% acquisition rule
     max_bid_or_price: Optional[float] = None
@@ -277,18 +318,22 @@ def evaluate_deal(
             multiplier = 1.0 + max(0.0, premium_pct) / 100.0
             max_bid_or_price = round(max(0.0, target_all_in - fixed) / multiplier, 2)
     else:
-        max_bid_or_price = target_all_in
+        # Non-auction: the item price itself must clear the 70% target only
+        # after known fixed costs (shipping, other fees/tax) are subtracted,
+        # so a BUY verdict reflects all-in cost (item + fees + shipping +
+        # tax) rather than just the asking price. Unknown shipping/fees are
+        # NA-priced at $0 here (require_shipping=False), matching the
+        # pre-existing "unknown non-required cost doesn't block a decision"
+        # behavior -- only costs actually supplied on the listing change the
+        # threshold.
+        fixed = (ship or 0.0) + (fees or 0.0)
+        # Clamped at zero like the auction branch above: a max buy price can
+        # never go negative, even when known costs exceed the target.
+        max_bid_or_price = round(max(0.0, target_all_in - fixed), 2)
 
     # Projected ROI at the *current* price (using known costs only)
     # Use finance.calc_deal with premium; shipping is added into true cost manually when known.
     effective_premium = premium_pct if (is_auction and premium_pct is not None) else 0.0
-    # calc_deal applies premium to cost; we need shipping in the cost base.
-    cost_for_roi = price_f
-    if ship is not None:
-        # Fold known shipping into an equivalent pre-premium cost so calc_deal stays consistent,
-        # or apply after. Simpler: compute true_cost ourselves.
-        pass
-    true_cost = price_f * (1 + effective_premium / 100.0) + (ship or 0.0) + (fees or 0.0)
     deal = calc_deal(cost=price_f, resale_value=value_f, fee_pct=resale_fee_pct, premium_pct=effective_premium)
     # Adjust ROI if shipping was known (calc_deal does not include shipping)
     if ship is not None or fees is not None:

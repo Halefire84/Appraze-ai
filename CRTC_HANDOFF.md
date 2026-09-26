@@ -149,6 +149,31 @@ unprotected ordering.
 
 See `LAUNCH_BLOCKERS.md` for the hard external gates as a standalone
 checklist.
+**Product:** Appraze  
+**Company:** Cooper River Trading Co. (CRTC)  
+**Last handoff:** 2026-09-21 (Appraze brand lock + beta hardening)
+
+## 2026-09-21 — app.py syntax fix, Apps Script admin-trust fix, Stripe event-idempotency wired
+
+Full detail, evidence table, and current test commands now live in
+`.agent/HANDOFF.md` (current-state snapshot — read that first). Summary:
+fixed 5 collapsed-line syntax errors in `app.py`; fixed a real
+authorization bug in `AppsScript_Code.gs` where admin status (shared
+workspace access + AI quota tier) was derived from client-supplied
+`is_admin` instead of the `Users` sheet — note `CRTC_GAP_CLOSURE_REPORT.md`'s
+claim that this was already fixed refers to an external zip that was
+never actually pushed to this source tree, the bug was live here; cross-
+checked the 8 P0 items from the "Unresolved issues" list below against
+current source — all 8 are implemented and covered by
+`tests/test_p0_regression.py` (F-01…F-13), with one real gap closed this
+session (durable Stripe webhook event-id idempotency, previously built
+in `stripe_webhooks.py` but never called from the live
+`stripe_webhook_server.py` path — now wired via a `_last_event_id` field
+persisted per `sales_log` row, no new sheet schema needed). The referenced
+`crtc-audit/claude-code-implementation-brief-2026-09-20.md` file does not
+exist anywhere in this repository (checked both branches and full git
+history) — see `.agent/HANDOFF.md` for what that means for verification.
+`python3 -m pytest -q` → 371 passed, 0 failed (run in this session).
 
 ## OPEN PRODUCT REQUIREMENTS (owner-requested 2026-09-20, not started — check this before closing out any "done" milestone)
 
@@ -161,23 +186,7 @@ checklist.
    is the natural fit for in-person card POS) and build a real adapter
    behind that interface — don't attempt a generic "any merchant" layer,
    every processor's API shape is genuinely different.
-2. **Bring-your-own Anthropic API key.** Owner wants a business owner to
-   optionally supply their own `ANTHROPIC_API_KEY` for the AI
-   Analyzer/listing-enrichment features instead of relying on the shared
-   platform key. Blocked on architecture today: this is a single shared
-   Streamlit deployment (one global key), not multi-tenant. Two options,
-   different sizes of lift:
-   - Lighter: a per-session override field in the app UI, stored via the
-     existing Apps-Script-backed table (per-login, not truly multi-tenant
-     secrets).
-   - Heavier: real multi-tenant secret storage — a bigger architecture
-     change, see "Multi-tenant data isolation" under known limitations
-     below, which is already an open item for unrelated reasons.
-   Hard constraint either way: every AI feature must keep failing safe
-   with zero API calls when no key is configured (already true for
-   `enrich_listing_with_ai()` and the AI Analyzer — preserve this), and
-   nothing should call the API speculatively when a deterministic path
-   already answers the question.
+2. **Platform-managed Anthropic API key + enforced subscription usage controls.** Appraze uses Cooper River Trading Co.'s server-side `ANTHROPIC_API_KEY`; customers do not supply provider keys. The current beta implementation enforces this through the Apps Script backend: paid customers receive 100 successful AI calls/month and 10/day; owner/admin accounts receive 500/month and 25/day. Calls are atomically reserved before contacting Anthropic, stale reservations expire after 15 minutes, and successful calls record actual Anthropic input/output token usage plus estimated USD cost. The AI Analyzer refuses unpaid accounts, caps descriptions at 2,000 characters and images at 3 MB, and never exposes the provider key or raw provider error body to the browser. Current Sonnet 5 accounting uses Anthropic's published $2/MTok input and $10/MTok output rates. The key remains server-side and AI fails closed when platform configuration is missing. A future enterprise/BYO-key option is explicitly deferred and is not part of the current beta scope.
 
 ## 2026-09-20 (later) — P0 hardening: canonical decision engine, webhook correctness, SKU/category fixes
 
@@ -381,75 +390,6 @@ Every number above is from an actual run in this session, not estimated.
 - `AppsScript_Code.gs`'s `STATUS_RANK` table is a hand-mirrored copy of
   `stripe_webhooks.py`'s — the two must be kept in sync manually if either
   changes (a `.gs` file has no way to import from the Python module).
-
-## 2026-09-20 — fix: wire pos.py/billing.py into the live Charge Customer tab
-Follow-up to the same day's file-inventory pass below, which had flagged
-(not yet fixed) that `app.py`'s "Charge Customer" tab created Stripe
-charges via a raw inline Payment Link call instead of using `pos.py`.
-Investigating further found the real bug was worse than a "wrong Stripe
-primitive" style nit:
-
-- The old flow never set `payment_intent_data[metadata][invoice_id]` on
-  the created object, so a `charge.succeeded` webhook for it would have
-  no `invoice_id` in its metadata for `stripe_webhooks.handle_charge_succeeded()`
-  to read.
-- It only appended to `st.session_state.charge_log_by_ws` — pure
-  in-memory session state, never written to the persistent `sales_log`
-  table `stripe_webhook_server.py`/`webhook_store.py` reconcile against.
-  Refreshing the page or opening the app on another device lost the
-  entire "Recent Charges" list.
-- Net effect: the whole Stripe webhook reconciliation feature (hardened
-  for replay-protection in the 2026-09-18 pass) was completely
-  disconnected from the live POS UI — it had nothing to reconcile
-  against, ever, regardless of webhook correctness.
-
-Fix: `app.py`'s Charge Customer tab now calls `pos.create_pos_checkout()`
-(the module that was already correctly built, already handling a dynamic
-per-sale amount via a Checkout Session, already tagging `invoice_id` in
-metadata) and persists the result as a `sales_log` row via
-`storage.save_table(..., "sales_log", shared=True)`, using the exact
-`"Invoice #"` / `"Status"` field names `AppsScript_Code.gs`'s
-`handleUpdateSalesLogStatus_` and `stripe_webhooks.update_invoice_status()`
-already expect (verified by reading `AppsScript_Code.gs` directly, not
-assumed). "Recent Charges" now reads from the persisted table instead of
-session state, and a manual "Check Payment Status" button
-(`pos.check_payment_status()`) was added for the rows still "Awaiting
-Payment" — this closes the gap between what `pos.py`'s own docstring
-promised ("the POS tab's Check Status button already covers manual
-reconciliation") and what the tab actually had, which was no such
-button at all.
-
-`pos.py` and `billing.py` are no longer marked "NOT CURRENTLY USED" —
-their docstring headers were updated to say what wires into what.
-`mail.py`/`mail_parse.py`/`drive_scan.py`/`crtc.py` remain unused; not
-touched by this fix.
-
-Tests: both modules had **zero** test coverage before this fix, despite
-`pos.py` now being live payment-creation code — added `tests/test_pos.py`
-(9 tests: rejects non-positive amount, missing secret key fails
-gracefully, successful session creation sends the right cents/metadata,
-two sales never collide on the same `invoice_id`, HTTP error / connection
-failure both degrade to a failed result instead of crashing, and
-`check_payment_status()`'s paid/unpaid/error paths) and
-`tests/test_billing.py` (5 tests covering `verify_checkout_session()`'s
-paid/unpaid/missing-customer-details/HTTP-error/connection-error paths).
-
-```
-python3 -m pytest tests/test_pos.py tests/test_billing.py -q  -> 15 passed
-python3 -m pytest tests/ -q                                    -> 315 passed, 0 failed
-                                                                    (300 baseline + 15 new)
-python3 -m py_compile app.py                                   -> exit 0
-```
-
-Also removed a dead `import urllib.parse` from `app.py` left over from
-the old inline Payment Link code (nothing else in `app.py` used it —
-verified by grep before removing).
-
-**Not done / explicitly out of scope for this fix:** `billing.py`'s
-subscriber-paywall flow (`payment_link_url()`) is still not wired into
-any paywall/subscription gate in `app.py` — that's a separate, unrelated
-feature gap from the POS bug just fixed, and nothing asked for it this
-pass.
 
 ## 2026-09-18 production-hardening pass
 Baseline before changes: `python3 -m pytest tests/ -q` -> 251 passed, 0 failed
@@ -805,7 +745,7 @@ Radar should then look for the same anomaly classes across every source: typos, 
 - Avoid duplicating the valuation/verdict engines when existing modules can be reused.
 
 ## Naming direction
-Use **CRTC** as the product-facing name going forward. The GitHub repository name may remain `Appraze-ai` until a deliberate repository rename is made. Do not rename files or break imports merely for branding.
+Use **Appraze** as the product-facing name going forward. **Cooper River Trading Co. (CRTC)** is the company. The GitHub repository name remains `Appraze-ai` for technical continuity. Do not revive superseded product names such as Business OS or LLAVE, and do not rename the product without an explicit deliberate decision.
 
 ## Handoff instruction
 If context/usage runs out, resume from this document. First inspect the current repository state and recent commits, then continue with the numbered "Next implementation target" above. Do not rebuild prior work.

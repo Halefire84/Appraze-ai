@@ -26,6 +26,7 @@ class NormalizedListing:
     seller: str = ""
     location: str = ""
     shipping: Optional[float] = None
+    tax: Optional[float] = None
     buyer_premium: Optional[float] = None
     condition: str = ""
     lot_number: str = ""
@@ -136,6 +137,7 @@ def normalize_listing(record: Mapping[str, Any], *, source: str = "") -> Dict[st
         seller=_text(_first(record, ("seller", "seller_name", "auctioneer"))),
         location=_text(_first(record, ("location", "item_location", "pickup_location"))),
         shipping=_number(_first(record, ("shipping", "shipping_cost", "delivery_cost"), None)),
+        tax=_number(_first(record, ("tax", "sales_tax", "tax_amount", "estimated_tax"), None)),
         buyer_premium=_number(_first(record, ("buyer_premium", "premium", "buyers_premium"), None)),
         condition=_text(_first(record, ("condition", "item_condition"))),
         lot_number=_text(_first(record, ("lot_number", "lot", "lot_id"))),

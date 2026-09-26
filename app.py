@@ -18,98 +18,71 @@ import json
 import urllib.request
 import urllib.error
 from finance import (
-    compute_verdict, deal_roi, profit_calc, inventory_margin,
+    compute_verdict, dashboard_deal_result, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
 )
 from auth import require_auth, logout
-from pos import create_pos_checkout, check_payment_status
+from pos import create_pos_checkout, check_payment_status, new_invoice_id
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
+from telemetry import log_event, load_recent_events
+from commercial_protection import render_proprietary_watermark
+from ai_usage import (
+    MAX_DESCRIPTION_CHARS, MAX_IMAGE_BYTES, reserve_ai_call,
+    finalize_ai_call, release_ai_call, usage_summary,
+)
 
 # --------------------------------------------------------------------------
 # PAGE CONFIG + GLOBAL STYLE
 # --------------------------------------------------------------------------
 st.set_page_config(
     page_title="Appraze",
-    page_icon="🪙",
+    page_icon="static/icon-192.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-DARK_CSS = """
+LIGHT_CSS = """
 <style>
-    /* ---- base ---- */
-    .stApp {
-        background: linear-gradient(180deg, #0b0f14 0%, #10151c 100%);
-        color: #e6e9ef;
-    }
-    section[data-testid="stSidebar"] {
-        background: #0d1117;
-        border-right: 1px solid #1f2733;
-    }
-    h1, h2, h3, h4 { color: #f2f4f8 !important; letter-spacing: -0.02em; }
-
-    /* ---- KPI cards ---- */
+    .appraze-brand img { width: 100%; max-width: 210px; display: block; margin: 0 auto 14px; }
+    .appraze-brand { padding: 6px 0 4px; }
+    .stApp { background: #f7f9fc; color: #172033; }
+    section[data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #d9a321; }
+    h1, h2, h3, h4 { color: #102a43 !important; letter-spacing: -0.02em; }
     .kpi-card {
-        background: linear-gradient(145deg, #141a23, #0f141b);
-        border: 1px solid #232c38;
+        background: #ffffff;
+        border: 1px solid #d8e0ea;
         border-radius: 14px;
         padding: 18px 20px;
-        box-shadow: 0 4px 18px rgba(0,0,0,0.25);
+        box-shadow: 0 4px 18px rgba(31,52,73,0.08);
     }
-    .kpi-label {
-        font-size: 0.78rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #8b96a5;
-        margin-bottom: 6px;
-    }
-    .kpi-value {
-        font-size: 1.6rem;
-        font-weight: 700;
-        color: #f7f9fc;
-    }
-    .kpi-sub { font-size: 0.8rem; color: #67e8a4; margin-top: 2px; }
-    .kpi-sub.neg { color: #f2607a; }
-
-    /* ---- pills / badges ---- */
-    .badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 999px;
-        font-size: 0.72rem;
-        font-weight: 600;
-        letter-spacing: 0.03em;
-    }
-    .badge-strongbuy { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-buy { background: #10331a; color: #4ade80; border: 1px solid #4ade8040;}
-    .badge-ceiling { background: #142a37; color: #38bdf8; border: 1px solid #38bdf840;}
-    .badge-borderline { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-passverdict { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-    .badge-hot { background: #37260f; color: #f5a524; border: 1px solid #f5a52440;}
-    .badge-good { background: #0f2e22; color: #22c98c; border: 1px solid #22c98c40;}
-    .badge-pass { background: #2b1418; color: #f2607a; border: 1px solid #f2607a40;}
-
-    /* buttons */
+    .kpi-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: #5b6b7f; margin-bottom: 6px; }
+    .kpi-value { font-size: 1.6rem; font-weight: 700; color: #102a43; }
+    .kpi-sub { font-size: 0.8rem; color: #16834b; margin-top: 2px; }
+    .kpi-sub.neg { color: #c62845; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; }
+    .badge-strongbuy { background: #e8f7ef; color: #137a45; border: 1px solid #9bd8b5; }
+    .badge-buy { background: #eaf8ee; color: #21843d; border: 1px solid #a9ddb7; }
+    .badge-ceiling { background: #eaf6fb; color: #176b8f; border: 1px solid #a6d9ec; }
+    .badge-borderline { background: #fff6df; color: #996b00; border: 1px solid #e7c66a; }
+    .badge-passverdict { background: #fdebed; color: #b4233c; border: 1px solid #efabb7; }
+    .badge-hot { background: #fff6df; color: #996b00; border: 1px solid #e7c66a; }
+    .badge-good { background: #e8f7ef; color: #137a45; border: 1px solid #9bd8b5; }
+    .badge-pass { background: #fdebed; color: #b4233c; border: 1px solid #efabb7; }
     .stButton>button {
         border-radius: 10px;
-        border: 1px solid #2a3441;
-        background: #1a212b;
-        color: #e6e9ef;
+        border: 1px solid #b8c5d4;
+        background: #ffffff;
+        color: #102a43;
         font-weight: 600;
     }
-    .stButton>button:hover { border-color: #4d7cff; color: #4d7cff; }
-
-    /* dataframe */
-    div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
-
-    /* metric containers spacing */
+    .stButton>button:hover { border-color: #d9a321; color: #102a43; }
+    div[data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; border: 1px solid #d8e0ea; }
     .block-container { padding-top: 1.6rem; }
-
-    hr { border-color: #232c38; }
+    hr { border-color: #d9a321; }
 </style>
 """
-st.markdown(DARK_CSS, unsafe_allow_html=True)
+st.markdown(LIGHT_CSS, unsafe_allow_html=True)
 
 # --------------------------------------------------------------------------
 # PWA HEAD INJECTION
@@ -129,19 +102,19 @@ _PWA_HEAD_INJECTION = """
 (function () {
     try {
         var head = window.parent.document.head;
-        if (head.querySelector('[data-crtc-pwa]')) return;
+        if (head.querySelector('[data-appraze-pwa]')) return;
         var tags = [
             ['link', {rel: 'manifest', href: './app/static/manifest.json'}],
-            ['link', {rel: 'icon', href: './app/static/icon-192.png', sizes: '192x192', type: 'image/png'}],
-            ['link', {rel: 'apple-touch-icon', href: './app/static/icon-192.png'}],
-            ['meta', {name: 'theme-color', content: '#0b0f14'}],
+            ['link', {rel: 'icon', href: './app/static/appraze-logo.svg', sizes: '192x192', type: 'image/svg+xml'}],
+            ['link', {rel: 'apple-touch-icon', href: './app/static/appraze-logo.svg'}],
+            ['meta', {name: 'theme-color', content: '#f7f9fc'}],
             ['meta', {name: 'mobile-web-app-capable', content: 'yes'}],
             ['meta', {name: 'apple-mobile-web-app-capable', content: 'yes'}],
-            ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent'}],
+            ['meta', {name: 'apple-mobile-web-app-status-bar-style', content: 'default'}],
         ];
         tags.forEach(function (t) {
             var el = window.parent.document.createElement(t[0]);
-            el.setAttribute('data-crtc-pwa', '1');
+            el.setAttribute('data-appraze-pwa', '1');
             for (var k in t[1]) el.setAttribute(k, t[1][k]);
             head.appendChild(el);
         });
@@ -239,13 +212,20 @@ def save_business_profile(profile):
 
 
 def recalc(df: pd.DataFrame) -> pd.DataFrame:
-    """Add derived profit columns to the deals dataframe."""
+    """Add derived profit columns to the deals dataframe.
+
+    Uses finance.dashboard_deal_result (fee-adjusted, same calc_deal engine
+    the acquisition pipeline runs every candidate through) rather than a
+    separate naive cost/resale subtraction -- that duplication used to let
+    the Dashboard's Verdict drift out of sync with the rest of the app.
+    """
     df = df.copy()
     df["Cost"] = pd.to_numeric(df["Cost"], errors="coerce").fillna(0)
     df["Est. Resale Value"] = pd.to_numeric(df["Est. Resale Value"], errors="coerce").fillna(0)
-    results = df.apply(lambda r: deal_roi(r["Cost"], r["Est. Resale Value"]), axis=1)
-    df["Gross Profit"] = results.apply(lambda t: t[0])
-    df["ROI %"] = results.apply(lambda t: t[1])
+    results = df.apply(lambda r: dashboard_deal_result(r["Cost"], r["Est. Resale Value"]), axis=1)
+    df["Gross Profit"] = results.apply(lambda d: d.gross_profit)
+    df["ROI %"] = results.apply(lambda d: d.roi_pct)
+    df["Verdict"] = results.apply(lambda d: d.verdict)
     return df
 
 
@@ -253,7 +233,9 @@ def recalc(df: pd.DataFrame) -> pd.DataFrame:
 # SIDEBAR — ADD DEAL / IMPORT / EXPORT
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### 🪙 Appraze")
+    st.markdown('<div class="appraze-brand"><img src="./app/static/appraze-logo.svg" alt="Appraze"></div>', unsafe_allow_html=True)
+    st.markdown("### 🔑 Appraze")
+    st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
     st.caption("Signed in \u00b7 Cooper River Trading Co.")
     if st.button("Sign out", use_container_width=True):
         logout()
@@ -308,11 +290,31 @@ with st.sidebar:
                     imported["Date Added"] = date.today().isoformat()
                 if "Notes" not in imported.columns:
                     imported["Notes"] = ""
-                st.session_state.deals = pd.concat(
-                    [st.session_state.deals, imported], ignore_index=True
-                )
-                st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
-                st.success(f"Imported {len(imported)} rows.")
+                # Dedup: drop any imported row that already matches an
+                # existing row exactly (also collapses exact dupes within
+                # the file itself). Without this, re-importing the same CSV
+                # -- including Streamlit simply re-running the script while
+                # the uploader still holds this file, which happens on any
+                # unrelated interaction elsewhere in the app -- would append
+                # a second copy of every row each time. Compared as strings
+                # so e.g. "" vs NaN or int-vs-float formatting differences
+                # don't defeat an otherwise-identical match.
+                existing = st.session_state.deals
+                compare_cols = [c for c in imported.columns if c in existing.columns]
+                imported = imported.drop_duplicates(subset=compare_cols, keep="first")
+                existing_keys = set(existing[compare_cols].astype(str).apply(tuple, axis=1))
+                is_dup = imported[compare_cols].astype(str).apply(tuple, axis=1).isin(existing_keys)
+                new_rows = imported.loc[~is_dup]
+                skipped = len(imported) - len(new_rows)
+                if len(new_rows):
+                    st.session_state.deals = pd.concat(
+                        [st.session_state.deals, new_rows], ignore_index=True
+                    )
+                    st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
+                if skipped:
+                    st.success(f"Imported {len(new_rows)} row(s); skipped {skipped} duplicate(s) already in the table.")
+                else:
+                    st.success(f"Imported {len(new_rows)} rows.")
             else:
                 st.error(f"CSV must include columns: {', '.join(required)}")
         except Exception as e:
@@ -335,7 +337,8 @@ with st.sidebar:
 # --------------------------------------------------------------------------
 # HEADER + KPI ROW
 # --------------------------------------------------------------------------
-st.markdown("## Appraze")
+st.markdown("## 🔑 Appraze")
+st.caption("Buy. Track. Value. List. Sell. Get Paid. Grow.")
 st.caption(f"Live dashboard — updated {datetime.now().strftime('%b %d, %Y %I:%M %p')}")
 
 df = recalc(st.session_state.deals)
@@ -346,30 +349,36 @@ total_est_profit = df.loc[active_mask, "Gross Profit"].sum()
 sold_profit = df.loc[df["Status"] == "Sold", "Gross Profit"].sum()
 deal_count = int(active_mask.sum())
 
-k1, k2, k3, k4 = st.columns(4)
-with k1:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Active Deals</div>
-        <div class="kpi-value">{deal_count}</div></div>""", unsafe_allow_html=True)
-with k2:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Total Invested</div>
-        <div class="kpi-value">${total_invested:,.2f}</div></div>""", unsafe_allow_html=True)
-with k3:
-    cls = "kpi-sub" if total_est_profit >= 0 else "kpi-sub neg"
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Est. Profit (Active)</div>
-        <div class="kpi-value">${total_est_profit:,.2f}</div>
-        <div class="{cls}">{'↑ projected' if total_est_profit>=0 else '↓ projected'}</div></div>""", unsafe_allow_html=True)
-with k4:
-    st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Realized Profit (Sold)</div>
-        <div class="kpi-value">${sold_profit:,.2f}</div></div>""", unsafe_allow_html=True)
+with st.expander(
+    f"📊 {deal_count} active deal{'s' if deal_count != 1 else ''} · "
+    f"${total_invested:,.0f} invested · ${total_est_profit:,.0f} est. profit · ${sold_profit:,.0f} realized",
+    expanded=False,
+):
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Active Deals</div>
+            <div class="kpi-value">{deal_count}</div></div>""", unsafe_allow_html=True)
+    with k2:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Total Invested</div>
+            <div class="kpi-value">${total_invested:,.2f}</div></div>""", unsafe_allow_html=True)
+    with k3:
+        cls = "kpi-sub" if total_est_profit >= 0 else "kpi-sub neg"
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Est. Profit (Active)</div>
+            <div class="kpi-value">${total_est_profit:,.2f}</div>
+            <div class="{cls}">{'↑ projected' if total_est_profit>=0 else '↓ projected'}</div></div>""", unsafe_allow_html=True)
+    with k4:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-label">Realized Profit (Sold)</div>
+            <div class="kpi-value">${sold_profit:,.2f}</div></div>""", unsafe_allow_html=True)
 
 st.write("")
 
 # --------------------------------------------------------------------------
 # TABS — DASHBOARD / PROFIT CALCULATOR
 # --------------------------------------------------------------------------
-tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai = st.tabs([
+tab_dash, tab_calc, tab_inv, tab_sup, tab_charge, tab_accounts, tab_ai, tab_about = st.tabs([
     "📊  Deal Dashboard", "🧮  Profit Calculator", "📦  Inventory",
     "🤝  Suppliers", "💳  Charge Customer", "🧾  Accounts & Invoices", "🔍  AI Analyzer",
+    "ℹ️  About",
 ])
 
 with tab_dash:
@@ -397,12 +406,11 @@ with tab_dash:
             filtered["Item"].str.lower().str.contains(s, na=False)
             | filtered["Notes"].str.lower().str.contains(s, na=False)
         ]
-
     st.markdown(f"#### Deals ({len(filtered)})")
     st.caption("Edit any cell directly. Add rows with the ➕ button in the sidebar, delete by selecting a row and pressing the trash icon.")
 
     edited = st.data_editor(
-        filtered.drop(columns=["Gross Profit", "ROI %"]),
+        filtered.drop(columns=["Gross Profit", "ROI %", "Verdict"]),
         num_rows="dynamic",
         use_container_width=True,
         height=420,
@@ -416,12 +424,31 @@ with tab_dash:
         key=f"editor_{st.session_state.editor_key}",
     )
 
-    # push edits made in the filtered view back into the master dataframe
-    if not edited.equals(filtered.drop(columns=["Gross Profit", "ROI %"])):
-        st.session_state.deals.update(edited)
+    # push edits made in the filtered view back into the master dataframe.
+    # Row identity is tracked by index label (data_editor preserves the
+    # original label for every kept/edited row and only mints fresh labels
+    # for newly added rows), so deletions/additions are found by diffing
+    # index sets rather than by position -- a positional length comparison
+    # (the old `len(edited) > len(filtered)` check) can't detect deletions
+    # at all, which is why deleting a row here never removed it from the
+    # master table.
+    filtered_view = filtered.drop(columns=["Gross Profit", "ROI %", "Verdict"])
+    if not edited.equals(filtered_view):
+        deleted_labels = filtered_view.index.difference(edited.index)
+        if len(deleted_labels):
+            st.session_state.deals = st.session_state.deals.drop(index=deleted_labels)
+        # Only update rows that actually existed in the filtered view. A
+        # newly added row's index label is minted from the filtered view's
+        # own (small) index range, so it can collide with an unrelated
+        # master-table row that was simply filtered out of view -- updating
+        # against the full `edited` frame would silently overwrite that
+        # unrelated row instead of appending a new one.
+        kept_labels = filtered_view.index.intersection(edited.index)
+        st.session_state.deals.update(edited.loc[kept_labels])
         # handle any newly added rows from the data editor
-        if len(edited) > len(filtered):
-            extra_rows = edited.iloc[len(filtered):]
+        new_labels = edited.index.difference(filtered_view.index)
+        if len(new_labels):
+            extra_rows = edited.loc[new_labels]
             st.session_state.deals = pd.concat([st.session_state.deals, extra_rows], ignore_index=True)
         st.session_state.deals_by_ws[WORKSPACE] = st.session_state.deals
 
@@ -431,7 +458,8 @@ with tab_dash:
     if len(quick):
         quick["30/70 (Cooper River share @70%)"] = quick["Gross Profit"] * 0.70
         quick["50/50 (each share)"] = quick["Gross Profit"] * 0.50
-        quick["Verdict"] = quick["ROI %"].apply(lambda r: compute_verdict(r)[0])
+        # "Verdict" already comes from recalc() above (dashboard_deal_result) --
+        # not recomputed here, so this view can't drift from the Dashboard's own.
         st.dataframe(
             quick[["Item", "Platform", "Cost", "Est. Resale Value", "Gross Profit",
                    "ROI %", "Verdict", "30/70 (Cooper River share @70%)", "50/50 (each share)"]],
@@ -592,14 +620,11 @@ with tab_inv:
         st.session_state.inventory_by_ws[WORKSPACE],
         num_rows="dynamic",
         use_container_width=True,
-        key=f"inv_editor_{WORKSPACE}",
-        column_config={
+        key=f"inv_editor_{WORKSPACE}",        column_config={
             "Cost Basis": st.column_config.NumberColumn(format="$%.2f"),
-            "List Price": st.column_config.NumberColumn(format="$%.2f"),
-        },
+            "List Price": st.column_config.NumberColumn(format="$%.2f"),        },
     )
     st.session_state.inventory_by_ws[WORKSPACE] = edited_inv
-
     if len(edited_inv):
         disp = edited_inv.copy()
         disp["Cost Basis"] = pd.to_numeric(disp["Cost Basis"], errors="coerce").fillna(0)
@@ -747,16 +772,27 @@ with tab_charge:
         sales_log_result = load_table("sales_log", shared=True)
         sales_log = list(sales_log_result.payload) if sales_log_result.success and sales_log_result.payload else []
 
+        # One invoice id per sale, generated once and held across reruns: a
+        # timeout-and-resubmit of the SAME sale reuses it, so Stripe's
+        # Idempotency-Key dedupes the retried POST instead of creating (and
+        # the customer potentially paying) a second Checkout Session. The id
+        # is rotated to a fresh one after every successful charge, so the
+        # next sale never reuses a previous sale's key.
+        if "pos_invoice_id" not in st.session_state:
+            st.session_state.pos_invoice_id = new_invoice_id()
+
         with st.form("charge_form"):
             amt = st.number_input("Amount ($)", min_value=0.50, step=1.0, format="%.2f")
             desc = st.text_input("Description", placeholder="e.g. Estate cleanout \u2014 123 Main St")
             submitted = st.form_submit_button("Create Checkout Link")
 
         if submitted and amt > 0 and desc.strip():
-            result = create_pos_checkout(amt, desc.strip())
+            result = create_pos_checkout(amt, desc.strip(), invoice_id=st.session_state.pos_invoice_id)
             if result.success:
                 st.success("Checkout link created!")
                 st.code(result.checkout_url, language=None)
+                # Rotate to a fresh invoice id for the next sale.
+                st.session_state.pos_invoice_id = new_invoice_id()
                 sales_log.append({
                     "Invoice #": result.invoice_id,
                     "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -808,7 +844,7 @@ with tab_charge:
         else:
             st.info("No charges created yet.")
 
-# ==========================================================================# ===========================================================================
+# ==========================================================================
 # ACCOUNTS / QUOTES / INVOICES
 # ===========================================================================
 with tab_accounts:
@@ -971,7 +1007,7 @@ with tab_accounts:
         else: st.info("No quotes or invoices yet.")
 
 
-# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
+BETA_AI_ACCESS = True  # Free beta accounts may use AI; disable when paid gating begins.\n\n# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
 # ==========================================================================
 with tab_ai:
     st.markdown("#### AI Item Analyzer")
@@ -979,6 +1015,15 @@ with tab_ai:
         "Upload a photo and/or describe an item. Claude identifies it and estimates a value range. "
         "Your own profit math (not the AI) still decides buy/pass \u2014 review everything before saving."
     )
+
+    if st.session_state.get("user_is_paid", False) or BETA_AI_ACCESS:
+        current_usage = usage_summary(st.session_state.get("username", ""), st.session_state.get("user_is_admin", False))
+        if current_usage.get("success"):
+            st.caption(
+                f"AI usage: {current_usage.get('monthly_used', 0)}/{current_usage.get('monthly_limit', 0)} "
+                f"this month · {current_usage.get('daily_used', 0)}/{current_usage.get('daily_limit', 0)} today "
+                f"· estimated platform cost ${float(current_usage.get('monthly_cost_usd', 0) or 0):.4f}"
+            )
 
     anthropic_key = None
     try:
@@ -988,20 +1033,28 @@ with tab_ai:
 
     if not anthropic_key:
         st.warning(
-            "AI Analyzer not configured yet. Add your Anthropic API key (starts with `sk-ant-`) as a "
-            "Secret named `ANTHROPIC_API_KEY` in Streamlit Cloud's app Settings \u2192 Secrets, then reload."
+            "The Appraze AI service is not configured for this deployment. "
+            "AI is temporarily unavailable; your account never supplies or exposes the platform API key."
         )
     else:
         photo = st.file_uploader("Photo (optional)", type=["png", "jpg", "jpeg"])
         text_desc = st.text_area("Description (optional)", placeholder="e.g. Sterling silver flatware set, 12 pieces, monogrammed")
 
         if st.button("Analyze"):
-            if not photo and not text_desc.strip():
+            if not (st.session_state.get("user_is_paid", False) or BETA_AI_ACCESS):
+                st.warning("AI features require an active Appraze subscription.")
+            elif not photo and not text_desc.strip():
                 st.warning("Add a photo or a description first.")
+            elif len(text_desc.strip()) > MAX_DESCRIPTION_CHARS:
+                st.warning(f"Description is limited to {MAX_DESCRIPTION_CHARS:,} characters.")
             else:
                 content = []
+                img_bytes = None
                 if photo is not None:
                     img_bytes = photo.read()
+                    if len(img_bytes) > MAX_IMAGE_BYTES:
+                        st.warning("That image is too large for the Appraze AI analyzer. Use an image under 3 MB.")
+                        st.stop()
                     img_b64 = base64.b64encode(img_bytes).decode()
                     media_type = "image/png" if photo.type == "image/png" else "image/jpeg"
                     content.append({
@@ -1010,6 +1063,11 @@ with tab_ai:
                     })
                 prompt_text = text_desc.strip() if text_desc.strip() else "Identify and value this item."
                 content.append({"type": "text", "text": prompt_text})
+
+                usage_decision = reserve_ai_call(st.session_state.get("username", ""), st.session_state.get("user_is_admin", False))
+                if not usage_decision.allowed:
+                    st.warning(usage_decision.reason)
+                    st.stop()
 
                 system_prompt = (
                     "You identify resale items for an estate-cleanout and flip business, and draft "
@@ -1028,6 +1086,8 @@ with tab_ai:
                     "2-4 sentences, honest about condition, and written in the tone typical of that "
                     "platform (eBay: detailed and structured; Facebook/Mercari: casual and direct)."
                 )
+                provider_response_received = False
+                usage_recorded = False
                 try:
                     body = json.dumps({
                         "model": "claude-sonnet-5",
@@ -1041,6 +1101,14 @@ with tab_ai:
                     req.add_header("content-type", "application/json")
                     with urllib.request.urlopen(req, timeout=30) as resp:
                         result = json.loads(resp.read().decode())
+                    provider_response_received = True
+                    usage = result.get("usage", {}) if isinstance(result, dict) else {}
+                    finalize_ai_call(
+                        st.session_state.get("username", ""),
+                        usage.get("input_tokens", 0),
+                        usage.get("output_tokens", 0),
+                    )
+                    usage_recorded = True
                     raw_text = "".join(b.get("text", "") for b in result.get("content", []) if b.get("type") == "text")
                     parsed = json.loads(raw_text)
                     if not isinstance(parsed, dict):
@@ -1051,11 +1119,15 @@ with tab_ai:
                     # make the button click silently do nothing.
                     st.session_state.ai_last_result = parsed
                 except urllib.error.HTTPError as e:
-                    st.error(f"Claude API error: {e.read().decode()[:300]}")
+                    # Do not surface provider response bodies to customers.
+                    st.error(f"Appraze AI service error (HTTP {e.code}). Please try again later.")
+                    log_event("ERROR", "ai_analyzer", "app.py", "Anthropic HTTPError", {"status": e.code})
                 except json.JSONDecodeError:
                     st.error("The AI's response wasn't valid JSON \u2014 try again, or simplify the description.")
+                    log_event("ERROR", "ai_analyzer", "app.py", "AI response was not valid JSON")
                 except Exception as e:
                     st.error(f"Something went wrong: {e}")
+                    log_event("ERROR", "ai_analyzer", "app.py", "unexpected AI Analyzer failure", {"error": str(e)})
 
         if st.session_state.get("ai_last_result"):
             parsed = st.session_state.ai_last_result
@@ -1116,5 +1188,56 @@ with tab_ai:
                 st.success("Added to Inventory \u2014 go set the real Cost Basis on the Inventory tab.")
                 st.session_state.ai_last_result = None
 
+with tab_about:
+    st.markdown("### Appraze™")
+    st.caption("Complete Resale Business Suite")
+    st.write(
+        "Appraze is deal math, inventory, and listing for resellers — "
+        "built by Cooper River Trading Co."
+    )
+    st.markdown("---")
+    st.markdown("#### In Memory")
+    mem_col1, mem_col2 = st.columns([1, 3])
+    with mem_col1:
+        st.image("static/christopher-hale.png", width=180)
+    with mem_col2:
+        st.markdown(
+            "*In memory of my father, Christopher Hale, who tracked trucks "
+            "in C++ before I ever tracked a deal.*"
+        )
+        st.caption("© 2026 Christopher Hale / Cooper River Trading Co.")
+
+    st.markdown("---")
+    st.markdown("#### For the Future")
+    fut_col1, fut_col2 = st.columns([1, 3])
+    with fut_col1:
+        st.image("static/family.jpg", width=180)
+    with fut_col2:
+        st.markdown(
+            "*Built for my family, and for the next generation of Cooper "
+            "River Trading Co.*"
+        )
+
+    if st.session_state.get("user_is_admin", False):
+        st.markdown("---")
+        st.markdown("#### System Log (admin only)")
+        st.caption(
+            "Recent errors and financial-decision/payment events logged via telemetry.py. "
+            "Best-effort diagnostics, not a system of record -- capped to the most recent 300 entries."
+        )
+        if st.button("Refresh log"):
+            st.session_state.pop("_recent_events_cache", None)
+        if "_recent_events_cache" not in st.session_state:
+            st.session_state["_recent_events_cache"] = load_recent_events(limit=100)
+        events = st.session_state["_recent_events_cache"]
+        if not events:
+            st.info("No logged events yet.")
+        else:
+            events_df = pd.DataFrame(events).reindex(
+                columns=["timestamp", "level", "event_type", "source", "message", "context"]
+            )
+            st.dataframe(events_df, use_container_width=True, height=320)
+
 st.markdown("---")
-st.caption("Appraze · built for Estate Auctions / eBay / HiBid / FB Marketplace / Mercari / Chairish / Etsy sourcing")
+st.caption("Appraze · Buy. Track. Value. List. Sell. Get Paid. Grow. · Built for buying, valuing, managing, and selling physical goods")
+render_proprietary_watermark()

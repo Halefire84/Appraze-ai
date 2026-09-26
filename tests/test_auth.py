@@ -20,6 +20,7 @@ from auth import (
     _admin_credentials_configured,
     _admin_login,
     logout,
+    mark_paid,
     require_auth,
 )
 
@@ -231,6 +232,52 @@ class TestSessionSurvivesRerun(unittest.TestCase):
         mock_st.stop.assert_not_called()
 
 
+class TestMarkPaid(unittest.TestCase):
+    """mark_paid() was defined but never called from anywhere in the live
+    app until pages/8_Pricing.py wired up the actual subscribe/verify flow
+    -- these are its first real behavioral tests (previously only checked
+    for existence via hasattr in test_smoke.py)."""
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_success_returns_true_and_sends_expected_action(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": True}
+        mock_requests.post.return_value = resp
+
+        self.assertTrue(mark_paid("alex"))
+        call_kwargs = mock_requests.post.call_args.kwargs
+        self.assertEqual(call_kwargs["data"]["action"], "set_paid")
+        self.assertEqual(call_kwargs["data"]["username"], "alex")
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_backend_failure_returns_false(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"success": False, "error": "no account with that username"}
+        mock_requests.post.return_value = resp
+
+        self.assertFalse(mark_paid("does-not-exist"))
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_connection_error_returns_false_not_a_crash(self, mock_st, mock_requests):
+        mock_st.secrets.get.side_effect = lambda k, default=None: {
+            "APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token",
+        }.get(k, default)
+        mock_requests.post.side_effect = Exception("connection refused")
+
+        self.assertFalse(mark_paid("alex"))
+
+
 class TestDemoModeIsolation(unittest.TestCase):
     """There is currently no functional demo-mode split in app.py to test --
     WORKSPACE is a single hardcoded "business" constant and every tab reads
@@ -248,6 +295,108 @@ class TestDemoModeIsolation(unittest.TestCase):
         with open("app.py", encoding="utf-8") as f:
             source = f.read()
         self.assertIn('WORKSPACE = "business"', source)
+
+
+def _bcrypt_admin_secrets(password: str) -> dict:
+    import bcrypt as _bcrypt
+    return {
+        "CRTC_ADMIN_USERNAME": "owner",
+        "CRTC_ADMIN_PASSWORD_HASH": _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode(),
+    }
+
+
+class TestBcryptAdminHash(unittest.TestCase):
+    """CRTC_ADMIN_PASSWORD_HASH now accepts a bcrypt hash as well as the
+    legacy SHA-256 hex digest, auto-detected by format. Existing deployments
+    with an already-configured SHA-256 secret must keep working unchanged
+    (TestAdminLogin / TestAdminCredentialsConfigured above already cover
+    that); these tests cover the new bcrypt path specifically."""
+
+    def setUp(self):
+        import auth
+        auth._failed_login_attempts.clear()
+
+    @mock.patch("auth.st")
+    def test_bcrypt_hash_is_recognized_as_configured(self, mock_st):
+        secrets = _bcrypt_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        self.assertTrue(_admin_credentials_configured())
+
+    @mock.patch("auth.st")
+    def test_bcrypt_correct_password_succeeds(self, mock_st):
+        secrets = _bcrypt_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        result = _admin_login("owner", "correct horse battery staple")
+        self.assertTrue(result.success)
+        self.assertTrue(result.is_admin)
+
+    @mock.patch("auth.st")
+    def test_bcrypt_wrong_password_fails(self, mock_st):
+        secrets = _bcrypt_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        result = _admin_login("owner", "wrong password")
+        self.assertFalse(result.success)
+
+
+class TestLoginLockout(unittest.TestCase):
+    """Brute-force protection: after enough failed attempts against one
+    username, further attempts (even with the correct password) are
+    rejected without touching the credential check, until the window
+    expires. State is module-level, so every test clears it first."""
+
+    def setUp(self):
+        import auth
+        auth._failed_login_attempts.clear()
+
+    @mock.patch("auth.st")
+    def test_admin_login_locks_out_after_max_attempts(self, mock_st):
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        for _ in range(5):
+            result = _admin_login("owner", "wrong password")
+            self.assertFalse(result.success)
+        locked_result = _admin_login("owner", "correct horse battery staple")
+        self.assertFalse(locked_result.success)
+        self.assertIn("too many", locked_result.error.lower())
+
+    @mock.patch("auth.st")
+    def test_successful_login_clears_lockout_counter(self, mock_st):
+        import auth
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        for _ in range(3):
+            _admin_login("owner", "wrong password")
+        result = _admin_login("owner", "correct horse battery staple")
+        self.assertTrue(result.success)
+        self.assertEqual(auth._failed_login_attempts.get("owner", []), [])
+
+    @mock.patch("auth.st")
+    def test_lockout_is_scoped_to_one_username(self, mock_st):
+        secrets = _real_admin_secrets("correct horse battery staple")
+        mock_st.secrets.get.side_effect = lambda k, d="": secrets.get(k, d)
+        for _ in range(5):
+            _admin_login("owner", "wrong password")
+        # A different (non-admin) username is unaffected by owner's lockout.
+        self.assertIsNone(_admin_login("someone-else", "whatever"))
+
+    @mock.patch("auth.requests")
+    @mock.patch("auth.st")
+    def test_tester_login_locks_out_after_max_attempts(self, mock_st, mock_requests):
+        # Admin secrets deliberately absent (empty string) so _admin_login()
+        # returns None and falls through to the Apps Script tester path;
+        # APPS_SCRIPT_URL/TOKEN must still resolve for that path to run.
+        script_secrets = {"APPS_SCRIPT_URL": "https://script.google.com/fake", "APPS_SCRIPT_TOKEN": "fake-token"}
+        mock_st.secrets.get.side_effect = lambda k, d="": script_secrets.get(k, d)
+        mock_requests.post.return_value.raise_for_status.return_value = None
+        mock_requests.post.return_value.json.return_value = {"success": False, "error": "incorrect password"}
+        from auth import login
+        for _ in range(5):
+            result = login("tester1", "wrong password")
+            self.assertFalse(result.success)
+        locked_result = login("tester1", "wrong password")
+        self.assertIn("too many", locked_result.error.lower())
+        # The lockout must short-circuit before ever calling Apps Script again.
+        self.assertEqual(mock_requests.post.call_count, 5)
 
 
 if __name__ == "__main__":

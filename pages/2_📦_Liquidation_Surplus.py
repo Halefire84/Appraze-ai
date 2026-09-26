@@ -1,15 +1,15 @@
-"""CRTC Liquidation & Surplus acquisition hunter."""
+"""Appraze Liquidation & Surplus acquisition hunter."""
 import streamlit as st
 
 from acquisition_hunter import PROFILES, estimate_max_bid, score_acquisition
 
-st.set_page_config(page_title="CRTC — Liquidation & Surplus", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Appraze — Liquidation & Surplus", page_icon="📦", layout="wide")
 from auth import require_auth
 require_auth()
 
-st.title("📦 CRTC Liquidation & Surplus")
+st.title("📦 Appraze Liquidation & Surplus")
 st.caption("Government surplus • computers • phones • Amazon/retail returns • pallets • IT liquidation")
-st.info("CRTC evaluates the economics and risk of a lot. It does not assume every pallet is profitable: recovery rate, freight, repairs, locks, missing parts, and buyer costs matter.")
+st.info("Appraze evaluates the economics and risk of a lot. It does not assume every pallet is profitable: recovery rate, freight, repairs, locks, missing parts, and buyer costs matter.")
 
 st.markdown("### 🔎 Hunt the right marketplaces")
 links = {
@@ -35,7 +35,7 @@ with st.container(border=True):
         expected_resale = st.number_input("Expected resale if everything worked", min_value=0.0, value=1000.0, step=100.0)
         recovery_rate = st.slider("Expected usable/recoverable %", 0, 100, 75) / 100
     with c2:
-        buyer_premium = st.number_input("Buyer premium / fees", min_value=0.0, value=0.0, step=10.0)
+        buyer_premium_amount = st.number_input("Buyer premium / fees", min_value=0.0, value=0.0, step=10.0)
         tax = st.number_input("Tax", min_value=0.0, value=0.0, step=10.0)
         freight = st.number_input("Freight / pickup cost", min_value=0.0, value=0.0, step=10.0)
     with c3:
@@ -77,7 +77,7 @@ listing = {
     "current_bid": current_bid,
     "expected_resale": expected_resale,
     "recovery_rate": recovery_rate,
-    "buyer_premium": buyer_premium,
+    "buyer_premium_amount": buyer_premium_amount,
     "tax": tax,
     "freight": freight,
     "repair_cost": repair_cost,
@@ -85,7 +85,7 @@ listing = {
     "other_costs": other_costs,
 }
 
-if st.button("🧮 RUN CRTC ACQUISITION VERDICT", type="primary", use_container_width=True):
+if st.button("🧮 RUN APPRAZE ACQUISITION VERDICT", type="primary", use_container_width=True):
     result = score_acquisition(listing, profile_key)
     economics = result["economics"]
     verdict = result["decision"]
@@ -100,7 +100,7 @@ if st.button("🧮 RUN CRTC ACQUISITION VERDICT", type="primary", use_container_
     m2.metric("All-in fixed costs", f"${economics['fixed_costs']:,.0f}")
     m3.metric("Max total acquisition", f"${economics['max_total_acquisition']:,.0f}")
     m4.metric("Bid headroom", f"${economics['headroom']:,.0f}")
-    st.markdown("**CRTC evidence / risk signals**")
+    st.markdown("**Appraze evidence / risk signals**")
     for signal in result["signals"]:
         st.write(f"• `{signal}`")
 
@@ -108,6 +108,6 @@ st.markdown("### 📋 Modern-computer quick rule")
 st.caption("For the computer preset, 8th-gen Intel or newer is treated as modern when the generation is explicitly known. Unknown CPU generation is not silently treated as modern. Locked devices and unknown condition reduce the score.")
 
 st.markdown("### ⚠️ Amazon liquidation reality")
-st.caption("Amazon Liquidation Auctions on B-Stock includes overstock, customer returns, and warehouse-damaged inventory. Amazon's official storefront says buyers must be approved and submit a valid reseller certificate; shipments and lot quantities can also have operational uncertainties. CRTC therefore treats manifests, shortages, freight, and recovery rate as first-class inputs rather than using retail MSRP as profit.")
+st.caption("Amazon Liquidation Auctions on B-Stock includes overstock, customer returns, and warehouse-damaged inventory. Amazon's official storefront says buyers must be approved and submit a valid reseller certificate; shipments and lot quantities can also have operational uncertainties. Appraze therefore treats manifests, shortages, freight, and recovery rate as first-class inputs rather than using retail MSRP as profit.")
 
-st.caption("CRTC · FIND → IDENTIFY → VALUE → DECIDE → BUY → TRACK → LIST → SELL → MEASURE")
+st.caption("Appraze · FIND → IDENTIFY → VALUE → DECIDE → BUY → TRACK → LIST → SELL → MEASURE")

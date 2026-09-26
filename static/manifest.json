@@ -1,30 +1,15 @@
 {
   "name": "Appraze",
   "short_name": "Appraze",
-  "description": "Cooper River Trading Co. deal, inventory, and point-of-sale dashboard",
+  "description": "Complete Resale Business Suite — deal math, inventory, and listing for resellers",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0b0f14",
-  "theme_color": "#0b0f14",
+  "background_color": "#f7f9fc",
+  "theme_color": "#f7f9fc",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icon-512-maskable.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    {"src":"appraze-logo.svg","sizes":"192x192","type":"image/svg+xml","purpose":"any"},
+    {"src":"appraze-logo.svg","sizes":"512x512","type":"image/svg+xml","purpose":"any"},
+    {"src":"appraze-logo.svg","sizes":"512x512","type":"image/svg+xml","purpose":"maskable"}
   ]
 }

@@ -1,9 +1,37 @@
-# CRTC Naming Standard
+# Appraze — Brand Source of Truth
 
-CRTC = Cooper River Trading Co.
+**Product:** Appraze
 
-Effective immediately, use **CRTC** as the product-facing name for the resale opportunity-intelligence system.
+**Tagline:** Complete Resale Business Suite
 
-The repository remains `Halefire84/Appraze-ai` for continuity. A repository rename is intentionally deferred so existing deployment, links, and integrations are not broken.
+**Descriptor:** deal math, inventory, and listing for resellers
 
-Use CRTC in new UI labels, documentation, roadmap language, and product references unless a legacy Appraze reference is required for compatibility.
+**Company:** Cooper River Trading Co. (CRTC)
+
+**Repository:** `Halefire84/Appraze-ai` remains unchanged for technical continuity.
+
+## Customer-facing rules
+
+- Use **Appraze** as the product name.
+- Use **Complete Resale Business Suite** as the tagline.
+- Use **deal math, inventory, and listing for resellers** as the current descriptor.
+- Do not introduce retired product names or retired tier names into customer-facing UI, marketing, documentation, or tests.
+- Internal technical identifiers may retain historical names only where changing them would create a real compatibility risk; they must not surface in the customer experience.
+
+## Visual direction
+
+The current UI direction is **bright, clean, modern, and commercial**:
+
+- White/light surfaces
+- Navy structural and text accents
+- Gold used as an accent
+- High contrast and clear typography
+- Modern Windows-like polish
+- Clean dashboards and device presentation
+- Avoid a dark-dashboard or prototype appearance
+
+## Product scope
+
+Appraze is a resale business suite centered on deal math, inventory, listing, sales operations, and related business workflows. Keep the current working product stable and release-ready before adding major new capabilities.
+
+This file is the authoritative brand reference for future development sessions.

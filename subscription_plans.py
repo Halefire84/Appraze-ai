@@ -1,4 +1,4 @@
-"""CRTC subscription catalog and feature entitlements.
+"""Appraze subscription catalog and feature entitlements.
 
 Pricing is intentionally data-driven so the product can launch with a simple
 flagship plan and add higher tiers without scattering price logic through the UI.
@@ -25,12 +25,15 @@ class Plan:
     tagline: str = ""
 
 
+# Customer-facing tier names are intentionally simple. Internal keys remain
+# stable so entitlement logic and future Stripe configuration do not have to
+# change when marketing names change.
 PLANS: Tuple[Plan, ...] = (
-    Plan("free", "Free", 0, 5, False, False, False, False, False, False, False, tagline="Try CRTC"),
-    Plan("scout", "Scout", 19, 50, True, True, False, False, False, False, False, tagline="For occasional sourcing"),
-    Plan("hunter", "Hunter", 49, 250, True, True, True, True, True, True, True, tagline="The CRTC flagship"),
-    Plan("operator", "Operator", 99, 1000, True, True, True, True, True, True, True, tagline="For serious resellers"),
-    Plan("pro", "Pro", 199, 5000, True, True, True, True, True, True, True, team_seats=5, tagline="For teams and high volume"),
+    Plan("free", "Free", 0, 5, False, False, False, False, False, False, False, tagline="Try Appraze"),
+    Plan("scout", "Starter", 19, 50, True, True, False, False, False, False, False, tagline="For occasional sourcing"),
+    Plan("hunter", "Pro", 49, 250, True, True, True, True, True, True, True, tagline="For active resellers"),
+    Plan("operator", "Elite", 99, 1000, True, True, True, True, True, True, True, tagline="For serious resale businesses"),
+    Plan("pro", "Business", 199, 5000, True, True, True, True, True, True, True, team_seats=5, tagline="For teams and high volume"),
 )
 
 FEATURE_LABELS: FrozenSet[str] = frozenset({

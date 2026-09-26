@@ -1,4 +1,4 @@
-"""CRTC Auction Hunt — import permitted auction catalogs and verify leads."""
+"""Appraze Auction Hunt — import permitted auction catalogs and verify leads."""
 import json
 
 import pandas as pd
@@ -13,10 +13,10 @@ SOURCES = {
     "HiBid": "hibid",
 }
 
-st.set_page_config(page_title="CRTC — Auction Hunt", page_icon="🏷️", layout="wide")
+st.set_page_config(page_title="Appraze — Auction Hunt", page_icon="🏷️", layout="wide")
 from auth import require_auth
 require_auth()
-st.title("🏷️ CRTC Auction Hunt")
+st.title("🏷️ Appraze Auction Hunt")
 st.caption("Import a permitted auction catalog/export, then verify the strongest leads with market evidence.")
 st.markdown("**SOURCE → NORMALIZE → RADAR → VALUE → ALL-IN COST → DECIDE**")
 
@@ -25,7 +25,7 @@ with st.container(border=True):
     min_score = st.number_input("Minimum Radar score", min_value=0, max_value=95, value=25, step=5)
     uploaded = st.file_uploader("Upload CSV or JSON catalog/export", type=["csv", "json"])
     st.markdown("#### Market evidence for the selected auction leads")
-    st.caption("Enter comparable prices from permitted/manual research. CRTC will not turn asking prices into sold evidence.")
+    st.caption("Enter comparable prices from permitted/manual research. Appraze will not turn asking prices into sold evidence.")
     comp1 = st.number_input("Comparable 1 — sold price", min_value=0.0, value=0.0, step=10.0)
     comp2 = st.number_input("Comparable 2 — sold price", min_value=0.0, value=0.0, step=10.0)
     comp3 = st.number_input("Comparable 3 — sold price", min_value=0.0, value=0.0, step=10.0)
@@ -117,11 +117,11 @@ if opportunities:
                 st.write(f"**Market value:** ${result['market_value']:,.2f} · **70% max buy:** {max_buy_text}")
                 st.write(f"**Confidence:** {result['market_confidence']} · **Evidence:** {meta.get('sold_count', 0)} sold / {meta.get('active_count', 0)} active")
                 if result["decision"] == "BUY":
-                    st.success(f"CRTC: **BUY** — {result['reason']}")
+                    st.success(f"Appraze: **BUY** — {result['reason']}")
                 elif result["decision"] == "REVIEW":
-                    st.warning(f"CRTC: **REVIEW** — {result['reason']}")
+                    st.warning(f"Appraze: **REVIEW** — {result['reason']}")
                 else:
-                    st.info(f"CRTC: **{result['decision']}** — {result['reason']}")
+                    st.info(f"Appraze: **{result['decision']}** — {result['reason']}")
             else:
                 st.warning("REVIEW — no usable market-value evidence yet.")
             url = candidate.listing.get("source_url") or candidate.listing.get("url")
@@ -130,4 +130,4 @@ if opportunities:
             for signal in candidate.signals[:5]:
                 st.caption(f"• {signal['message']}")
 else:
-    st.info("Upload a catalog/export to start hunting. CRTC will not scrape or bypass auction-site controls.")
+    st.info("Upload a catalog/export to start hunting. Appraze will not scrape or bypass auction-site controls.")

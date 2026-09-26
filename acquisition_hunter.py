@@ -66,8 +66,12 @@ def estimate_max_bid(listing: Dict[str, Any], *, target_margin: float = 0.30) ->
     """
     expected_resale = _number(listing.get("expected_resale"))
     recovery_rate = max(0.0, min(1.0, _number(listing.get("recovery_rate"), 0.75)))
+    # buyer_premium_amount is a dollar figure here, unlike decision_policy.py's
+    # unrelated auction pipeline where the bare "buyer_premium" key means
+    # percentage points -- the explicit _amount suffix keeps the two from
+    # ever being confused if a listing dict is ever passed to the wrong one.
     fixed_costs = sum(_number(listing.get(key)) for key in (
-        "buyer_premium", "tax", "freight", "repair_cost", "accessory_cost", "other_costs"
+        "buyer_premium_amount", "tax", "freight", "repair_cost", "accessory_cost", "other_costs"
     ))
     effective_resale = expected_resale * recovery_rate
     max_total_acquisition = max(0.0, effective_resale * (1.0 - target_margin) - fixed_costs)
