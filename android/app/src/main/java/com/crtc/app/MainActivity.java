@@ -144,6 +144,7 @@ public final class MainActivity extends Activity {
         prefs = getPreferences(0);
         usage = new Usage(prefs);
         usage.rollover();
+        PosScreen.purgeLegacyKeys(this);
         applyTheme();
         splash();
     }
