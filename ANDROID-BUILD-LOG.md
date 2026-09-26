@@ -1,5 +1,8 @@
 # Android Build Log
 
+## 2026-09-25 — CI workflow added
+- Created .github/workflows/android-build.yml on branch codex/create-android-app-for-appraze: JDK 17 (Temurin), Android SDK via android-actions/setup-android, Gradle 8.13 via gradle/actions/setup-gradle (no wrapper needed), then `gradle :app:assembleDebug` and `gradle :app:bundleRelease` from android/. Uploads app-debug-apk and app-release-aab artifacts. Runs on every push to this branch (plus workflow_dispatch).
+
 **Architecture decision (2026-09-25):** This build is a native Android application using platform Java Views rather than a Streamlit WebView/TWA or Flutter. Native Android controls give the smallest dependable closed-testing footprint and direct local storage/event capture; the former TWA has been completely removed. Kotlin was preferred, but the environment has no cached Kotlin Gradle plugin and cannot resolve it, so Java was used to keep a genuinely buildable native project rather than shipping an unbuildable Kotlin skeleton.
 
 ## 2026-09-25 — Current checkpoint
