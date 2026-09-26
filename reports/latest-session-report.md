@@ -20,10 +20,19 @@
    Legacy v5 `stripe_pk`/`stripe_sk` are purged from devices on launch. Details and owner setup
    steps: `docs/POS_STRIPE_CONNECT.md`.
 
+5. **Tap to Pay + sales log (follow-up request).** Tap to Pay on Android runs through Stripe
+   Terminal 5.8.1, and all charges happen on the merchant's own account. Every sale is logged
+   on the device with the date and time it started and the date and time it was paid, and the
+   POS tab shows it under Recent Sales. minSdk went from 23 to 26, and the AAB from about
+   5 MB to 36 MB.
+
 ## Tests
 | Command | Result |
 |---|---|
-| `python3 -m pytest -q` | 545 passed, 1 skipped (stripe-mock contract test skips without `STRIPE_MOCK_URL`); baseline was 516 |
+| `python3 -m pytest -q` (after Tap to Pay) | 556 passed, 2 skipped (both stripe-mock contract tests skip without `STRIPE_MOCK_URL`) |
+| `STRIPE_MOCK_URL=… pytest tests/test_pos_connect.py` (after Tap to Pay) | 42 passed |
+| Android build + lint + unit tests (after Tap to Pay) | green; PaletteTest 5 + SalesLogFormatTest 2 passed |
+| `python3 -m pytest -q` (before Tap to Pay) | 545 passed, 1 skipped (stripe-mock contract test skips without `STRIPE_MOCK_URL`); baseline was 516 |
 | `STRIPE_MOCK_URL=http://localhost:12111 pytest tests/test_pos_connect.py` | 30 passed (includes the stripe-mock contract test) |
 | `flake8 . --select=E9,F63,F7,F82` / `compileall` | 0 / ok |
 | `gradle :app:assembleDebug :app:bundleRelease` | green (local Android SDK 36, build-tools 36.0.0) |
@@ -31,6 +40,7 @@
 | `gradle :app:testDebugUnitTest` | 5 passed |
 
 ## Not verified
+- A real NFC tap. That needs an Android 11+ NFC phone running a release build.
 - On-device or emulator UI. There's no KVM here. Both themes were checked by contrast tests and
   code review only; Chris should look at both themes on a phone.
 - A real Stripe test-mode Connect onboarding and payment. That needs Appraze's platform key and

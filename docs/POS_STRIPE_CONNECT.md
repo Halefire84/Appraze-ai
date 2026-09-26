@@ -54,6 +54,46 @@ Design choices:
 - **Legacy cleanup.** On launch the app deletes any `stripe_pk`/`stripe_sk` that a v5 build
   saved.
 
+## Tap to Pay on Android (added 2026-09-26)
+
+The customer taps a contactless card or phone on the merchant's phone. This uses Stripe
+Terminal SDK 5.8.1 (`stripeterminal-core` + `stripeterminal-taptopay`).
+
+```
+Phone                                   POS backend                     Stripe (merchant's account)
+first time: business address ── POST /pos/terminal/location ──► /v1/terminal/locations
+SDK needs a token ───────────── POST /pos/terminal/connection_token ─► /v1/terminal/connection_tokens
+Tap to Pay button ───────────── POST /pos/terminal/payment_intent ──► /v1/payment_intents (card_present)
+SDK: retrieve → collect (NFC tap) → confirm   ──────────────────────► charge
+confirm result ──────────────── GET /pos/terminal/payment_intent/{pi}/status ─► re-read; only then PAID
+```
+
+- **Device requirements:** Android 11 or newer with NFC. Stripe also refuses rooted
+  devices, developer-mode setups and debuggable apps for real taps. Debug builds therefore
+  use Stripe's **simulated reader**, so real taps need a release build.
+- **Location permission:** Stripe requires it for in-person payments, and the app asks the
+  first time Tap to Pay is used.
+- **minSdk:** raised from 23 to 26 because the Terminal SDK requires it. Android 8 and later
+  still install the app; Tap to Pay just doesn't show on Android 8–10.
+- **App size:** the release AAB grew from about 5 MB to about 36 MB because of Stripe's
+  native Tap to Pay libraries.
+- **SDK permissions** merged into the app: NFC, READ_PHONE_STATE, location, and Bluetooth
+  (the Bluetooth ones are for Stripe's hardware readers and aren't used here). All of these
+  must be declared on the Play Data Safety and permissions forms.
+
+## Sales log (date and time)
+
+Every POS sale, whether Tap to Pay or payment link, is logged on the device (`SalesLog`,
+`sales.db`) with:
+- the date and time it was started;
+- the date and time it was confirmed paid (only after the server re-reads it from Stripe);
+- method, amount, description, invoice id and Stripe id.
+
+PAID is final, so a late failure or cancel can't overwrite it. The POS tab's **Recent Sales**
+list shows entries such as "Sat, Sep 26, 2026 · 8:45 AM · Tap to Pay", and tapping a pending
+row re-checks it. Server responses also carry `created_at` (Stripe's timestamp, ISO-8601
+UTC) and `checked_at`. Stripe's Dashboard keeps its own permanent record of each payment.
+
 ## Backend endpoints (`pos_connect.py`, mounted in `stripe_webhook_server.py`)
 
 | Method | Path | Auth | Notes |
@@ -64,6 +104,10 @@ Design choices:
 | POST | `/pos/disconnect` | Bearer | revokes the token (does not touch the merchant's Stripe account) |
 | POST | `/pos/checkout` | Bearer | amount must be an int in cents, $0.50 to `POS_MAX_AMOUNT_CENTS`; description 1–200 chars with control chars stripped; blocked until `charges_enabled` |
 | GET | `/pos/checkout/{cs_…}/status` | Bearer | read only on the caller's own account |
+| GET/POST | `/pos/terminal/location` | Bearer | business address → one Terminal location per account |
+| POST | `/pos/terminal/connection_token` | Bearer | requires location; 30/min per account |
+| POST | `/pos/terminal/payment_intent` | Bearer | card_present, automatic capture; same validation and idempotency as checkout |
+| GET | `/pos/terminal/payment_intent/{pi_…}/status` | Bearer | server-side truth for "paid" |
 | GET | `/pos/connect/return`, `/pos/connect/refresh`, `/pos/checkout/done`, `/pos/checkout/cancelled` | none | static landing pages |
 
 Authed routes are limited to 60/min per token; checkout is limited to 30/min per account.
@@ -87,7 +131,9 @@ HTTPS only. Without the property, the POS tab shows "POS server not set up".
 1. In the Stripe Dashboard, **test mode**, enable Connect and complete the platform profile.
 2. Deploy `stripe_webhook_server.py` (it already hosts the webhook receiver) with the env
    vars above, a test-mode key and a persistent disk.
-3. Build the app with `-PapprazePosApi=https://<host>`. On a device: Connect Stripe, run
+3. Build the app with `-PapprazePosApi=https://<host>`. For Tap to Pay, use a **release**
+   build on an NFC phone running Android 11+ with developer options off, and test with a
+   Stripe test card or a physical test card. On a device: Connect Stripe, run
    test-mode onboarding, then Charge $1.00 and pay with card `4242 4242 4242 4242`.
    Check Payment Status should read Paid.
 4. Only after that proof: set `POS_CONNECT_ALLOW_LIVE=1` with a live key.
@@ -104,7 +150,11 @@ HTTPS only. Without the property, the POS tab shows "POS server not set up".
   `stripe-mock -http-port 12111 & STRIPE_MOCK_URL=http://localhost:12111 pytest tests/test_pos_connect.py`
 - Android: `:app:assembleDebug`, `:app:bundleRelease`, `:app:lintDebug`, `:app:testDebugUnitTest` green.
 
-**Not verified:** a real Stripe test-mode account, a real onboarding, and on-device UI. There was
+Tap to Pay: 12 more backend tests, including the location, connection token and card_present
+PaymentIntent request shapes accepted by stripe-mock. `SalesLogFormatTest` covers the
+date/time formatting.
+
+**Not verified:** a real NFC tap on a phone; a real Stripe test-mode account, a real onboarding, and on-device UI. There was
 no platform key and no emulator (no KVM) in this session.
 
 ## Known limitations / follow-ups
