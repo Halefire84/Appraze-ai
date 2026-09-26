@@ -1,0 +1,122 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+    inputs:
+      streamlit_port:
+        description: "Port for Streamlit server (default: 8501)"
+        required: false
+        default: "8501"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Create Streamlit wrapper entry point
+        shell: pwsh
+        run: |
+          @'
+          import os
+          import sys
+          import multiprocessing
+          import webbrowser
+
+          # Streamlit bootstrap for frozen applications
+          import streamlit.web.bootstrap
+
+          def main():
+              if len(sys.argv) > 1:
+                  script_path = sys.argv[1]
+              else:
+                  script_path = "app.py"
+
+              # Ensure we resolve relative to the bundle directory
+              base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+              script_path = os.path.join(base_dir, script_path)
+
+              # Open browser before starting server (temporary error is fine until server is up)
+              webbrowser.open("http://localhost:8501")
+
+              # Streamlit bootstrap flags
+              flag_options = {
+                  "server.port": 8501,
+                  "server.headless": True,
+                  "global.developmentMode": False,
+              }
+
+              streamlit.web.bootstrap.load_config_options(flag_options=flag_options)
+              streamlit.web.bootstrap.run(
+                  script_path,
+                  is_hello=False,
+                  args=[],
+                  flag_options=flag_options,
+              )
+
+          if __name__ == "__main__":
+              multiprocessing.freeze_support()
+              main()
+          '@ | Out-File -Encoding utf8 run_app.py
+
+      - name: Build EXE with PyInstaller (onedir)
+        shell: pwsh
+        run: |
+          pyinstaller `
+            --onedir `
+            --noconfirm `
+            --clean `
+            --name ApprazeAI `
+            --icon "windows/app.ico" `
+            --add-data "app.py;." `
+            --collect-all streamlit `
+            --collect-all pydeck `
+            --copy-metadata streamlit `
+            --copy-metadata pydeck `
+            --hidden-import streamlit.runtime.scriptrunner.magic_funcs `
+            --hidden-import streamlit.web.bootstrap `
+            --hidden-import streamlit.web.cli `
+            --hidden-import pandas._libs.tslibs `
+            --exclude-module tkinter `
+            --exclude-module test `
+            run_app.py
+
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          $exe = "dist\ApprazeAI\ApprazeAI.exe"
+          if (-not (Test-Path $exe)) {
+            throw "EXE not found at $exe"
+          }
+          Get-Item $exe | Format-List Name, Length, FullName
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApprazeAI-Windows-EXE
+          path: dist/ApprazeAI/
+          retention-days: 30
+          compression-level: 6
+          if-no-files-found: error
