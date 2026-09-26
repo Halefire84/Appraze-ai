@@ -675,15 +675,15 @@ public final class MainActivity extends Activity {
         Button b = primaryButton("Get Verdict");
         b.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                if (!usage.tryConsume(Usage.ANALYSES)) {
-                    PlanSettings.upgradeDialog(MainActivity.this, usage, Usage.ANALYSES);
-                    return;
-                }
                 Double co = parseNonNegative(cost);
                 Double re = parseNonNegative(resale);
                 Double fe = parseNonNegative(fee);
                 Double pr = parseNonNegative(premium);
                 if (co == null || re == null || fe == null || pr == null) return;
+                if (!usage.tryConsume(Usage.ANALYSES)) {
+                    PlanSettings.upgradeDialog(MainActivity.this, usage, Usage.ANALYSES);
+                    return;
+                }
                 double h = prefsDouble("holy_roi", 40);
                 Deal d = Deal.calc(co, re, fe, pr, h);
                 slot.removeAllViews();
@@ -865,15 +865,15 @@ public final class MainActivity extends Activity {
         Button p = primaryButton("Publish to Sandbox");
         p.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                if (!usage.tryConsume(Usage.PUBLISHES)) {
-                    PlanSettings.upgradeDialog(MainActivity.this, usage, Usage.PUBLISHES);
-                    return;
-                }
                 String t = title.input.getText().toString().trim();
                 if (t.isEmpty()) { setFieldError(title, "Give the listing a title."); return; }
                 setFieldError(title, null);
                 Double pr = parseNonNegative(price);
                 if (pr == null) return;
+                if (!usage.tryConsume(Usage.PUBLISHES)) {
+                    PlanSettings.upgradeDialog(MainActivity.this, usage, Usage.PUBLISHES);
+                    return;
+                }
                 slot.removeAllViews();
                 slot.addView(verdictBanner(PASS, "Not listed",
                         "Sandbox publish needs a user token, location, and policies."));
