@@ -3,7 +3,7 @@ name: Android Build
 on:
   push:
     branches:
-      - codex/create-android-app-for-appraze
+      - main
   workflow_dispatch:
 
 jobs:
