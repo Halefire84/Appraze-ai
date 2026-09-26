@@ -12,11 +12,14 @@ import os
 # Environment variable that gates ALL cross-listing behavior. Default OFF.
 CROSSLIST_ENV_VAR = "APPRAZE_CROSSLIST"
 
-# Placeholder eBay API constants for future official-API wiring — TODO only.
+# eBay API constants for official Sell API wiring (sandbox-first).
+# OAuth scopes required for the sandbox end-to-end publish proof:
+# sell.inventory (write), sell.inventory.readonly (read), sell.account (policies).
 EBAY_SANDBOX_BASE_URL = "https://api.sandbox.ebay.com"
 EBAY_PRODUCTION_BASE_URL = "https://api.ebay.com"
 EBAY_API_SCOPES = [
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
+    "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
     "https://api.ebay.com/oauth/api_scope/sell.account",
 ]
 
@@ -45,7 +48,7 @@ MARKETPLACES = {
         "label": "eBay",
         "mode": "official_api",
         "status": "coming_soon",
-        "notes": "Official eBay Sell API (Inventory + Sell APIs). OAuth credentials TODO.",
+        "notes": "Official eBay Sell API (Inventory + Sell APIs). OAuth via ebay_sell.py (sandbox).",
     },
     "etsy": {
         "label": "Etsy",
