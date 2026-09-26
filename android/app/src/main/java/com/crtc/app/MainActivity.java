@@ -698,15 +698,20 @@ public final class MainActivity extends Activity {
     void analyze() {
         base("Analyze a Deal", null, 0);
         LinearLayout c = card(body, false);
+        final Field[] resaleRef = new Field[1];
+        CompsLookup.addTo(this, c, new CompsLookup.FieldRef() {
+            public Field get() { return resaleRef[0]; }
+        });
         final Field cost = labeled(c, "Purchase / hammer price", "0", decimalInput());
         final Field resale = labeled(c, "Expected resale price", "0", decimalInput());
+        resaleRef[0] = resale;
         final Field fee = labeled(c, "Resale fee %", prefs.getString("def_fee", "13"), decimalInput());
         final Field premium = labeled(c, "Buyer premium %", prefs.getString("def_premium", "18"), decimalInput());
         final LinearLayout slot = new LinearLayout(this);
         slot.setOrientation(LinearLayout.VERTICAL);
         c.addView(slot);
         final TextView teach = new TextView(this);
-        teach.setText("Enter what you'd pay and what it'll sell for. We'll do the math.");
+        teach.setText("Describe the item and tap Find Comps, or enter the resale price yourself. Add what you'd pay and we'll do the math.");
         teach.setTextSize(13);
         teach.setTextColor(TEXT_MUTED);
         teach.setPadding(dp(4), dp(12), dp(4), 0);
@@ -756,6 +761,8 @@ public final class MainActivity extends Activity {
                 Deal d = Deal.calc(co, re, fe, pr, h);
                 slot.removeAllViews();
                 slot.addView(verdictBanner(d, h));
+                String from = CompsLookup.provenance(re);
+                if (from != null) slot.addView(caption(from));
                 teach.setVisibility(View.GONE);
                 events.record("deal_analyzed", "cost=" + co + "|resale=" + re + "|verdict=" + d.verdict + "|roi=" + d.roi);
             }
