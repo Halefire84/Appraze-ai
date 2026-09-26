@@ -1,7 +1,255 @@
 # CRTC / Appraze — Agent Handoff
 
-Last updated: 2026-09-22 (beta-launch sprint, `claude/beta-launch-sprint`,
-open as PR #29, not yet merged).
+Last updated: 2026-09-22 (watermark restoration + abuse-lockout session,
+`claude/beta-launch-sprint`, open as PR #30; this update also merges in
+`main`'s own parallel work -- see the merge note right below this line).
+
+## 2026-09-22 (merge): brought `main`'s parallel Starship/eBay-sandbox work into this branch
+
+While driving PR #30 to a mergeable state, found `origin/main` had moved
+independently since this branch's fork point (`ae27b2b`), picking up 8
+commits from a separate session ("Starship," per its own commit messages)
+that this branch had no visibility into: its own independent brute-force
+lockout + bcrypt-admin-hash fix, its own independent negative-cost/
+zero-value-BUY rejection fix, a rebrand-text pass, and the eBay Sell API
+sandbox integration (`ebay_sell.py`, `sandbox_proof.py`,
+`docs/EBAY_SELL_SETUP.md`, `tests/test_ebay_sell.py`) -- all merged into
+`main` directly, bypassing this branch entirely.
+
+This produced real conflicts in `auth.py`, `decision_policy.py`,
+`crtc_holy_grail.py`, and `tests/test_auth.py`, because both sides had
+independently built the *same* fixes (brute-force lockout,
+negative-cost/zero-value-BUY rejection) after diverging from the same
+point. Each conflict was resolved by keeping this branch's version where
+it was a strict superset (this branch's brute-force lockout already covers
+Admin + tester + beta-account login; main's only covered Admin) and by
+manually reconciling anywhere the two implementations differed in a way
+that mattered, rather than blindly taking one side. See the resolution
+notes in the merge commit itself for the file-by-file detail. Full test
+suite + lint re-run after resolution, per this session's standing
+discipline -- see the merge commit message for the actual numbers.
+
+## 2026-09-22 (latest): watermark/memorial restoration + abuse-lockout + branch survey
+
+Four things happened this session, in order:
+
+**1. Full remote branch survey.** Owner asked to make sure nothing valuable
+was sitting unmerged on another branch. `git merge-base origin/main
+origin/<branch>` was run against every non-main remote branch: 14 of 16
+share **zero common ancestor** with current `main` -- they're all dated
+2026-09-08/09, exactly two weeks stale as of this session, and predate the
+current architecture (pre-rebrand, pre-decision-policy-audit,
+pre-Apps-Script-hardening). Merging any of them blind would mean resolving
+conflicts against code that no longer exists rather than gaining anything.
+The one branch with real, current value was `origin/claude/mobile-item-8-uhesj1`,
+which had `LAUNCH_BLOCKERS.md` -- ported in and corrected against this
+branch's actual state (see below). The other 13 stale branches were
+deliberately left untouched rather than force-merged for the sake of
+"using" them.
+
+Two of those 14 -- `origin/codex/saas-foundation-25` and
+`origin/codex/saas-foundation-25-current-main` -- are almost certainly the
+"told ChatGPT to build from the ground up" branch the owner mentioned. It's
+not a small variant: same file layout (`app.py`, `auth.py`, `storage.py`,
+`comps.py`, etc.) but built around a genuinely different architecture --
+multi-tenant "tenant context" isolation enforced at the auth and storage
+boundary (commit messages: "Add tenant context primitives for public SaaS
+foundation," "Wire authentication to server-derived tenant context,"
+"Enforce tenant context at persistent storage boundary"), vs. this repo's
+current two-tier admin-shared/tester-isolated model. Given it shares no
+git ancestor with `main`, is two weeks stale relative to everything built
+since, and represents a different architectural direction rather than a
+drop-in improvement, this was flagged for the owner's decision rather than
+merged or dismissed unilaterally -- a proper look at it (is the tenant-
+isolation model worth adopting, or worth cherry-picking pieces from) is its
+own scoped session, not something to fold into a "commit" instruction.
+
+**2. `LAUNCH_BLOCKERS.md` brought in and corrected.** The ported copy's
+checklist was verified against real code/tests, not trusted at face value --
+several items it listed as open were already done on this branch (webhook
+event-id idempotency, invite-code signup, brute-force lockout, Stripe replay
+lock, Drive folder allowlist, formula-injection defense, timing-safe
+comparisons), so those got checked off, and the test count was corrected to
+497.
+
+**3. Watermark/trademark/memorial system restored.** Earlier the same
+session (before this handoff section was written) had found this exact
+system in `origin/claude/continue-from-yesterday-3zx97l` commit `b26b46b`
+and explicitly chose NOT to port it, calling it "cosmetic only... wasn't
+worth the remaining scope tonight." The owner directly countermanded that
+call ("Don't forget about my watermarks and all that good stuff"), so it
+went back in:
+- `_APPRAZE_BUILD_ATTRIBUTION` constant now lives in `app.py`, `finance.py`,
+  and `storage.py`. `app.py._appraze_watermark_intact()` compares all three
+  at startup; a mismatch shows a non-blocking `st.warning` banner, never a
+  crash, a disabled feature, or a deleted-data path (fails open on any
+  exception).
+- `app.py`'s module docstring carries the Christopher Hale dedication line.
+  The fuller memorial section (photos, "In Memory" + "For the Future") had
+  already existed in `tab_about` since an earlier commit (`49ac254`) and was
+  left untouched.
+- The Deal Dashboard search box now opens an `@st.dialog` tribute when the
+  search text is exactly "christopher hale" -- a quiet Easter egg, not a
+  feature; the normal search still runs underneath it.
+- Scope decision, stated plainly rather than silently made: the ™ symbol
+  was NOT swept across every `pages/*.py` file or added as a per-page
+  dedication comment (the way `b26b46b` had done it across ~30 files). It
+  already appears in `app.py`'s docstring and the sidebar's
+  `### Appraze™` header, which satisfies `APPRAZE_BRAND.md`'s "first/most
+  prominent mention per screen" guidance for what is, in practice, a
+  single-page app (the `pages/*.py` files are secondary Streamlit pages,
+  not separate marketing surfaces). If the owner wants the full per-page
+  sweep restored too, that's a clearly scoped follow-up, not a silent gap.
+
+**4. Escalating abuse-detection lockout built** -- the one genuinely new
+feature this session, not a merge. Owner's own words: "somebody who's like
+excessively running it up... could trigger like a bot... lock them out for
+like five minutes... if they keep repeating it, permanently lock them out or
+require human intervention." Design decision: this needed to be durable
+server-side state (an in-process Streamlit-side counter would reset on
+every rerun/restart, same limitation already documented for the login
+brute-force lockout), so it lives in `AppsScript_Code.gs` next to the
+existing AI-usage quota system, which already has exactly this kind of
+durable per-username Sheet-backed state:
+- New `AbuseLockouts` sheet, one row per username
+  (`ABUSE_LOCKOUT_HEADER`: username / window_start / window_count /
+  lockout_until / strike_count / permanent / updated_at).
+- `checkAndRecordAbuseAttempt_(username)` runs at the top of
+  `handleReserveAiUsage_`, before the quota lookup -- more than
+  `ABUSE_BURST_THRESHOLD` (6) calls to `reserve_ai_usage` within a rolling
+  `ABUSE_BURST_WINDOW_MS` (60s) window trips a `ABUSE_TEMP_LOCKOUT_MS`
+  (5-minute) cooldown. This is about call *rate*, so it fires independent of
+  whether the underlying quota would have allowed or denied the call.
+- After `ABUSE_MAX_STRIKES` (3) separate bursts, the account's `permanent`
+  flag is set instead of another timed cooldown. Permanent lockout is
+  deliberately **not self-clearing** -- a script that trips the temp
+  lockout once will just keep re-tripping it forever if left to expire on
+  its own, so recovery requires a human via the new
+  `admin_clear_abuse_lockout` action, gated on the caller's own
+  `is_admin=TRUE` row in Users (same pattern every other admin-gated
+  action in this file already uses).
+- No Python-side change was needed: `ai_usage.reserve_ai_call()` already
+  turns any `reserve_ai_usage` failure's `error` field into
+  `UsageDecision.reason`, and `app.py`'s AI Analyzer tab already renders
+  that via `st.warning(usage_decision.reason)` -- the lockout message (and
+  the countdown/permanent-lockout wording) flows through the existing
+  failure path with zero UI changes.
+- Verified with a standalone Node.js harness (`AppsScript_Code.gs` has no
+  live test runner in this repo, same limitation as every other `.gs`
+  change tonight): the exact algorithm was ported into pure JS against an
+  in-memory row map with simulated timestamps. 24/24 scenarios passed --
+  human-paced usage never locks, a rapid burst trips the 5-minute cooldown
+  with the right message, an already-locked call shows a countdown,
+  repeated bursts reach permanent lockout with an admin-required message,
+  permanent lockout does not self-clear even after a very long simulated
+  time gap, and `admin_clear_abuse_lockout`'s reset logic fully recovers
+  the account. **Not** verified against a live deployed Apps Script Web
+  App/Sheet -- same open gap as every other `.gs` change this session;
+  needs a real redeploy + smoke test before Stage B.
+
+Full test suite (`python3 -m pytest -q`) was run after every step above:
+497 passed, 0 failed throughout (the abuse-lockout feature touches only
+`AppsScript_Code.gs`, so the Python suite is unaffected by it but was still
+run to confirm no collateral breakage). `flake8 --select=E9,F63,F7,F82 .`
+stayed at 0 findings throughout.
+
+**Still open / explicitly deferred, for the next agent:**
+- Live Apps Script smoke test of everything built tonight (abuse-lockout,
+  the earlier session's replay lock, Drive allowlist, formula-injection
+  defense, timing-safe comparisons) -- all verified by standalone
+  algorithm harness only, never against a real deployed Sheet.
+- `SECURITY_NOTES.md` as a standalone write-up of the 2026-09-22 security
+  audit findings (the audit itself happened; the document has not).
+- Full per-page ™/dedication-header sweep across `pages/*.py`, if the owner
+  wants the scope `b26b46b` originally had rather than the narrower restore
+  done tonight (see point 3 above).
+- The 13 remaining stale/disconnected branches from the survey in point 1
+  were left alone on purpose -- flag to the owner if any of them turn out
+  to contain something worth manually cherry-picking despite the stale
+  base.
+
+## 2026-09-22 (later): merged a second, independently-evolved branch
+
+Mid-security-audit, discovered `origin/claude/continue-from-yesterday-3zx97l`
+-- a separate, already-pushed remote branch with 21 commits of independent
+overnight work (diverged from `main` 2026-09-20, never merged, this session
+had no visibility into it until a security-audit tangent led to finding it).
+It touched **every file** this branch had also touched: `auth.py`,
+`decision_policy.py`, `AppsScript_Code.gs`, all the rebrand pages,
+`requirements.txt`, `.gitignore`, `.streamlit/config.toml`, `AUTH_SETUP.md`.
+User chose to merge the best of both rather than pick a side. What that
+branch had that this one didn't, and vice versa, mattered a lot -- each
+side had real safety-critical work the other lacked:
+
+**Ported in from that branch (their unique value):**
+- Invite-code-gated beta signup (`_beta_signup`/`_beta_login` in auth.py,
+  `CRTC_BETA_INVITE_CODES` secret) -- closes the exact open-signup /
+  unlimited-free-AI-quota abuse vector this session's own security audit
+  found independently, before discovering they'd already solved it.
+- `purchase_tax` as its own tracked cost component in `evaluate_deal()`.
+- `flip_ledger.calculate_flip_profit()`'s fee-basis fix (fee charged on
+  sale price alone, excluding buyer-paid shipping -- wrong per eBay's and
+  Mercari's actual published fee schedules).
+- Per-plan Stripe subscriptions (`subscription_plans.py`'s researched
+  tier restructuring, `billing.plan_payment_link()`, the per-tier Pricing
+  page UI, app.py's subscription-checkout-return handler).
+- Sourced fee-guidance help text on the Profit Calculator/Inventory
+  sliders, a visit counter, a Feedback/bug-report page, a Legal-docs
+  page + 6 real document templates, Android/iOS/Windows app icons at
+  every required size, `ui_theme.py`'s shared CSS (fonts, hidden
+  Streamlit chrome, card/tab styling) + the `.streamlit/config.toml`
+  `toolbarMode="minimal"` it depends on, `APPRAZE_BRAND.md` as the new
+  authoritative brand doc, DEAL-MATH.md/BACKLOG.md/LAUNCH_CHECKLIST.md.
+
+**Kept from this branch instead of taking theirs (regressions their
+branch had relative to work already on `main`/this branch):**
+- Brute-force login lockout -- entirely absent on their side; restored
+  and extended to also cover beta-account login (which their version
+  never had at all).
+- `buyer_premium_amount` (not the old ambiguous `buyer_premium` key) --
+  their pages still had the pre-fix key name.
+- `decision_policy.py`'s negative-cost-input rejection and zero-value-BUY
+  rejection (both absent on their side; their `purchase_tax` addition
+  was ported onto THIS branch's file, not taken wholesale).
+- `stripe_webhook_server.py`'s durable `event_id` webhook-replay
+  idempotency and all `telemetry.log_event_standalone()` calls -- both
+  missing on their side (predates their fork). Their file was not
+  merged in at all; this branch's is strictly more complete.
+- This branch's own tonight-built security fixes, none of which existed
+  on their side: Stripe session-replay lock (`RedeemedStripeSessions`),
+  `timingSafeEqual_` token/admin-code comparison, `ALLOWED_SCAN_FOLDER_NAMES`
+  Drive-folder allowlist, `sanitizeForSheetCell_`/formula-injection
+  defense, the real logo image on the login screen (theirs used generic
+  "## Appraze(tm)" text).
+
+**Combined where both sides had real, non-overlapping value on the exact
+same mechanism (the trickiest part):** `mark_paid()`/`handleSetPaid_` now
+take both `session_id` (this branch's replay lock) and `plan` (their
+multi-tier billing) -- neither branch alone had both. app.py's ported
+subscription-checkout-return handler was NOT copied verbatim: their
+version called `mark_paid(username, plan_key)` positionally, which would
+have silently landed the plan key in the `session_id` parameter slot
+(breaking the replay lock and never recording the plan) given this
+branch's `mark_paid(username, session_id="", plan="")` signature -- fixed
+to pass both as explicit keywords.
+
+**Verification approach**, since `AppsScript_Code.gs` has no test runner
+in this repo: every new/changed `.gs` function's decision logic was
+extracted into a standalone Node script and exercised against realistic
+cases (timing-safe comparison across 10 inputs including a length-
+mismatch edge case that caught a real bug in an earlier draft before it
+was ever committed; the session-redemption lock across 7 scenarios
+including cross-account replay and same-user idempotent re-confirm; the
+plan+session_id combination). Every `.gs` change is still unverified
+against a live deployed Sheet -- needs a real redeploy + smoke test.
+
+**Deliberately not ported**, given remaining scope: trademark/copyright
+header comments and consistent Appraze(tm) mark usage across every page
+(cosmetic only), `reports/` added to `.gitignore` (would conflict with
+this branch's own already-committed, credential-free session report).
+
+Full test suite after every merge step: `python3 -m pytest -q` -> 497
+passed, 0 failed. `flake8 --select=E9,F63,F7,F82`: 0 findings throughout.
 
 ## 2026-09-22 (beta-launch sprint): rebrand, decision-engine hardening, auth hardening
 

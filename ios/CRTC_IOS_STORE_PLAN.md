@@ -1,4 +1,22 @@
-# CRTC iOS Store Launch Plan
+# Appraze iOS Store Launch Plan
+
+## Hard blocker — added 2026-09-21
+
+Unlike Android/Windows, there is **no free/no-Mac path for iOS.** Apple
+requires Xcode running on macOS to build, sign, and submit any iOS app,
+and an active Apple Developer Program membership (currently $99/year —
+confirm current price at
+[developer.apple.com/programs](https://developer.apple.com/programs/))
+to distribute it, even via TestFlight. This is unavoidable.
+
+**Next concrete step, once you have both a Mac and the paid account:**
+[PWABuilder.com](https://www.pwabuilder.com/) can generate a starter
+Capacitor-based iOS project pointed at the production URL, which saves
+writing the Phase 2 Swift/WKWebView shell from scratch — but you still
+need Xcode on a Mac to open it, build it, and run Phases 3-5 below.
+Without a Mac, this phase stays blocked; don't spend budget on the Apple
+Developer Program until a Mac (owned, borrowed, or a cloud Mac CI
+service) is lined up to actually use it.
 
 ## Phase 1 — Apple setup
 - Enroll in Apple Developer Program.

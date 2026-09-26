@@ -19,6 +19,18 @@ import pandas as pd
 import requests
 import streamlit as st
 
+# --------------------------------------------------------------------------
+# BUILD ATTRIBUTION -- provenance only. Never read by any storage/persistence
+# logic in this file; purely for identifying the source of a deployed build.
+# Checked against app.py's copy at startup (see
+# app.py._appraze_watermark_intact()) -- a mismatch shows a playful,
+# non-blocking banner, never a crash or a disabled feature.
+# --------------------------------------------------------------------------
+_APPRAZE_BUILD_ATTRIBUTION = (
+    "Appraze (c) 2026 Christopher Hale / Cooper River Trading Co. "
+    "-- build 65d37b35-6a3b-480b-9d16-8274210530dc"
+)
+
 from auth import _apps_script_url, _token  # reuse the same endpoint config
 
 

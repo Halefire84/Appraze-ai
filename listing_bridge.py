@@ -63,7 +63,18 @@ def _stable_sku(flip: Dict[str, Any]) -> str:
 
 
 def build_master_listing(flip: Dict[str, Any]) -> Dict[str, Any]:
-    """Create a cross-list-ready master listing from a tracked flip."""
+    """Create a cross-list-ready master listing from a tracked flip.
+
+    "image_urls" is the one canonical field name for photo URLs across
+    this app's whole listing pipeline (flip record -> master listing ->
+    marketplace draft): ebay_sell.py's master_to_inventory_item() already
+    reads master["image_urls"] directly, and pages/5_Cross_List.py's
+    production-publish payload construction reads draft["image_urls"] the
+    same way -- previously this field was written here as "photos",
+    which NEITHER of those two ever read, so every eBay listing (sandbox
+    or production) published through this pipeline went out with zero
+    images regardless of what a flip had. Never rename this field again
+    without checking both those call sites."""
     status = str(flip.get("status") or "").upper()
     if status not in {"PURCHASED", "LISTED"}:
         raise ValueError("Only PURCHASED or LISTED flips can enter listing workflow")
@@ -82,7 +93,7 @@ def build_master_listing(flip: Dict[str, Any]) -> Dict[str, Any]:
         "cost": round(float(flip.get("cost_basis") or 0), 2),
         "quantity": int(flip.get("quantity") or 1),
         "condition": str(flip.get("condition") or "Used"),
-        "photos": list(flip.get("photos") or []),
+        "image_urls": list(flip.get("image_urls") or []),
         "source": str(flip.get("source") or ""),
         "source_listing_id": str(flip.get("source_listing_id") or ""),
         "source_url": str(flip.get("source_url") or ""),

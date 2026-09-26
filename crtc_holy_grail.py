@@ -13,6 +13,8 @@ from opportunity_sources import enrich_ebay_opportunities, scan_ebay, source_sca
 from source_registry import default_source_registry
 
 st.set_page_config(page_title="Appraze — Holy Grail Finder", page_icon="🔥", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 st.title("🔥 Appraze Holy Grail Finder")

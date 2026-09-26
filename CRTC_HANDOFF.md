@@ -1,8 +1,6 @@
 # CRTC — Project Handoff Point
 
 **Canonical repository:** Halefire84/Appraze-ai  
-**Product direction:** CRTC (Cooper River Trading Co.)  
-**Last handoff:** 2026-09-20 (Session 8: HANDOFF + launch checklist freeze)
 
 ## Session 8 — HANDOFF + launch checklist freeze (2026-09-20)
 
