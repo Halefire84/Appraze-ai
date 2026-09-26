@@ -582,7 +582,7 @@ public final class MainActivity extends Activity {
         final long start = SystemClock.uptimeMillis();
         h.post(new Runnable() {
             public void run() {
-                int v = (int) Math.min(100, (SystemClock.uptimeMillis() - start) * 100 / 3500);
+                int v = (int) Math.min(100, (SystemClock.uptimeMillis() - start) * 100 / 1500);
                 p.setProgress(v);
                 if (v >= 100) {
                     l.animate().alpha(0f).setDuration(300)
