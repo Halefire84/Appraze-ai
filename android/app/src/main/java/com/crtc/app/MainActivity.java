@@ -648,9 +648,9 @@ public final class MainActivity extends Activity {
                     LinearLayout.LayoutParams.MATCH_PARENT, dp(2)));
             TextView lab = new TextView(this);
             lab.setText(names[ti]);
-            lab.setTextSize(12);
+            lab.setTextSize(11);
             lab.setTextColor(active ? GOLD : TEXT_MUTED);
-            lab.setGravity(Gravity.CENTER);
+            lab.setGravity(Gravity.CENTER); lab.setSingleLine(true);
             lab.setPadding(0, dp(8), 0, dp(8));
             tab.addView(lab, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
