@@ -32,6 +32,14 @@ THE NEW MODEL
   app retry after a timeout returns the SAME session instead of a second one
   (same rule as pos.py on the web).
 
+TAP TO PAY (in person): the same device token also drives Stripe Terminal
+Tap to Pay on Android. The server creates a Terminal location (the
+merchant's business address), connection tokens and card_present
+PaymentIntents — all ON the merchant's connected account — so the phone's
+NFC reader charges the customer's card straight into the merchant's
+balance. Whether a tap payment succeeded is always re-read from Stripe here,
+never taken from the app's word.
+
 NOT the Appraze subscription flow: Appraze's own revenue (Play Billing / web
 Stripe subscription in billing.py) is separate and untouched by this module.
 
@@ -80,6 +88,8 @@ DEFAULT_MAX_AMOUNT_CENTS = 1_000_000
 MAX_DESCRIPTION_LEN = 200
 INVOICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 SESSION_ID_RE = re.compile(r"^cs_[A-Za-z0-9_]{1,250}$")
+PAYMENT_INTENT_ID_RE = re.compile(r"^pi_[A-Za-z0-9_]{1,250}$")
+COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -208,6 +218,12 @@ class TokenStore:
                 " created_at TEXT NOT NULL,"
                 " revoked_at TEXT)"
             )
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS pos_locations ("
+                " account_id TEXT PRIMARY KEY,"
+                " location_id TEXT NOT NULL,"
+                " created_at TEXT NOT NULL)"
+            )
 
     def _conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=10)
@@ -227,6 +243,18 @@ class TokenStore:
             row = c.execute("SELECT account_id FROM pos_devices WHERE token_hash = ? AND revoked_at IS NULL",
                             (hash_token(token),)).fetchone()
         return row[0] if row else None
+
+    def location_for(self, account_id: str) -> Optional[str]:
+        with self._conn() as c:
+            row = c.execute("SELECT location_id FROM pos_locations WHERE account_id = ?",
+                            (account_id,)).fetchone()
+        return row[0] if row else None
+
+    def save_location(self, account_id: str, location_id: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._conn() as c:
+            c.execute("INSERT OR REPLACE INTO pos_locations (account_id, location_id, created_at) VALUES (?, ?, ?)",
+                      (account_id, location_id, now))
 
     def revoke(self, token: str) -> bool:
         now = datetime.now(timezone.utc).isoformat()
@@ -291,6 +319,51 @@ def validate_invoice_id(value: Any) -> str:
     if not isinstance(value, str) or not INVOICE_ID_RE.match(value):
         raise PosConnectError(400, "invoice_id must be 1-64 letters, digits, '-' or '_'.")
     return value
+
+
+def _clean_text(value: Any, field: str, max_len: int, required: bool = True) -> str:
+    if value is None:
+        value = ""
+    if not isinstance(value, str):
+        raise PosConnectError(400, f"{field} must be text.")
+    v = _CONTROL_CHARS_RE.sub(" ", value).strip()
+    if required and not v:
+        raise PosConnectError(400, f"{field} is required.")
+    if len(v) > max_len:
+        raise PosConnectError(400, f"{field} is over {max_len} characters.")
+    return v
+
+
+def validate_location(body: Dict[str, Any]) -> Dict[str, Any]:
+    """A Stripe Terminal location needs a real business address (Stripe uses
+    it for tax and card-network rules)."""
+    country = _clean_text(body.get("country") or "US", "Country", 2).upper()
+    if not COUNTRY_RE.match(country):
+        raise PosConnectError(400, "Country must be a 2-letter code like US.")
+    return {
+        "display_name": _clean_text(body.get("display_name"), "Business name", 100),
+        "address": {
+            "line1": _clean_text(body.get("line1"), "Street address", 200),
+            "city": _clean_text(body.get("city"), "City", 100),
+            "state": _clean_text(body.get("state"), "State", 50, required=(country == "US")),
+            "postal_code": _clean_text(body.get("postal_code"), "ZIP / postal code", 20),
+            "country": country,
+        },
+    }
+
+
+def iso_from_unix(ts: Any) -> Optional[str]:
+    """Stripe 'created' (unix seconds) -> ISO-8601 UTC, for sale logs."""
+    if isinstance(ts, bool) or not isinstance(ts, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 # --------------------------------------------------------------------------
@@ -378,7 +451,8 @@ class PosConnectService:
         logger.info("POS checkout %s created on %s: invoice=%s amount_cents=%s",
                     session["id"], account_id, invoice_id, amount)
         return {"checkout_url": session["url"], "session_id": session["id"],
-                "invoice_id": invoice_id, "amount_cents": amount}
+                "invoice_id": invoice_id, "amount_cents": amount,
+                "created_at": iso_from_unix(session.get("created")) or utc_now_iso()}
 
     def checkout_status(self, account_id: str, session_id: str) -> Dict[str, Any]:
         if not SESSION_ID_RE.match(session_id or ""):
@@ -392,6 +466,80 @@ class PosConnectService:
             "paid": s.get("payment_status") == "paid",
             "amount_total": s.get("amount_total"),
             "invoice_id": (s.get("metadata") or {}).get("invoice_id"),
+            "created_at": iso_from_unix(s.get("created")),
+            "checked_at": utc_now_iso(),
+        }
+
+    # ---- Tap to Pay (Stripe Terminal, card-present, on the merchant's account) ----
+
+    def _require_charges_enabled(self, client: StripeClient, account_id: str) -> None:
+        acct = client.request("GET", f"/v1/accounts/{account_id}")
+        if not acct.get("charges_enabled"):
+            raise PosConnectError(409, "Finish Stripe setup before taking payments.")
+
+    def terminal_location(self, account_id: str) -> Dict[str, Any]:
+        return {"location_id": self.store.location_for(account_id)}
+
+    def create_terminal_location(self, account_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        params = validate_location(body)
+        existing = self.store.location_for(account_id)
+        if existing:
+            return {"location_id": existing, "created": False}
+        loc = self.client().request("POST", "/v1/terminal/locations", params, account=account_id,
+                                    idempotency_key=f"pos-loc-{account_id}")
+        location_id = loc.get("id")
+        if not location_id:
+            raise PosConnectError(502, "Stripe returned no location id.")
+        self.store.save_location(account_id, location_id)
+        logger.info("POS Terminal location %s created on %s", location_id, account_id)
+        return {"location_id": location_id, "created": True}
+
+    def connection_token(self, account_id: str) -> Dict[str, Any]:
+        location_id = self.store.location_for(account_id)
+        if not location_id:
+            raise PosConnectError(409, "Add your business address before using Tap to Pay.")
+        tok = self.client().request("POST", "/v1/terminal/connection_tokens",
+                                    {"location": location_id}, account=account_id)
+        secret = tok.get("secret")
+        if not secret:
+            raise PosConnectError(502, "Stripe returned no connection token.")
+        return {"secret": secret, "location_id": location_id}
+
+    def create_tap_payment(self, account_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        amount = validate_amount_cents(body.get("amount_cents"))
+        desc = validate_description(body.get("description"))
+        invoice_id = validate_invoice_id(body.get("invoice_id"))
+        client = self.client()
+        self._require_charges_enabled(client, account_id)
+        pi = client.request("POST", "/v1/payment_intents", {
+            "amount": amount,
+            "currency": "usd",
+            "payment_method_types": ["card_present"],
+            "capture_method": "automatic",
+            "description": desc,
+            "metadata": {"invoice_id": invoice_id, "source": "appraze_android_tap_to_pay"},
+        }, account=account_id, idempotency_key=f"pos-tap-{account_id}-{invoice_id}")
+        if not pi.get("id") or not pi.get("client_secret"):
+            raise PosConnectError(502, "Stripe returned no payment.")
+        logger.info("POS tap payment %s created on %s: invoice=%s amount_cents=%s",
+                    pi["id"], account_id, invoice_id, amount)
+        return {"payment_intent_id": pi["id"], "client_secret": pi["client_secret"],
+                "invoice_id": invoice_id, "amount_cents": amount,
+                "created_at": iso_from_unix(pi.get("created")) or utc_now_iso()}
+
+    def tap_payment_status(self, account_id: str, payment_intent_id: str) -> Dict[str, Any]:
+        if not PAYMENT_INTENT_ID_RE.match(payment_intent_id or ""):
+            raise PosConnectError(400, "Invalid payment id.")
+        # Server-side truth: the app's own "success" callback is never the record of payment.
+        pi = self.client().request("GET", f"/v1/payment_intents/{payment_intent_id}", account=account_id)
+        return {
+            "payment_intent_id": payment_intent_id,
+            "status": pi.get("status"),
+            "paid": pi.get("status") == "succeeded",
+            "amount_received": pi.get("amount_received"),
+            "invoice_id": (pi.get("metadata") or {}).get("invoice_id"),
+            "created_at": iso_from_unix(pi.get("created")),
+            "checked_at": utc_now_iso(),
         }
 
 
@@ -408,6 +556,7 @@ LIMIT_START_PER_IP = (5, 3600.0)
 LIMIT_START_GLOBAL = (200, 86400.0)
 LIMIT_AUTHED_PER_TOKEN = (60, 60.0)
 LIMIT_CHECKOUT_PER_ACCOUNT = (30, 60.0)
+LIMIT_TERMINAL_TOKEN_PER_ACCOUNT = (30, 60.0)
 
 
 def get_service() -> PosConnectService:
@@ -525,6 +674,57 @@ def checkout_status(session_id: str, request: Request):
     try:
         _, account = _authed_account(request)
         return {"ok": True, **get_service().checkout_status(account, session_id)}
+    except PosConnectError as e:
+        return _err(e)
+
+
+@router.get("/pos/terminal/location")
+def terminal_location(request: Request):
+    try:
+        _, account = _authed_account(request)
+        return {"ok": True, **get_service().terminal_location(account)}
+    except PosConnectError as e:
+        return _err(e)
+
+
+@router.post("/pos/terminal/location")
+async def create_terminal_location(request: Request):
+    try:
+        _, account = _authed_account(request)
+        body = await _json_body(request)
+        result = await run_in_threadpool(get_service().create_terminal_location, account, body)
+        return {"ok": True, **result}
+    except PosConnectError as e:
+        return _err(e)
+
+
+@router.post("/pos/terminal/connection_token")
+def terminal_connection_token(request: Request):
+    try:
+        _, account = _authed_account(request)
+        _limit("terminal_token", account, LIMIT_TERMINAL_TOKEN_PER_ACCOUNT)
+        return {"ok": True, **get_service().connection_token(account)}
+    except PosConnectError as e:
+        return _err(e)
+
+
+@router.post("/pos/terminal/payment_intent")
+async def terminal_payment_intent(request: Request):
+    try:
+        _, account = _authed_account(request)
+        body = await _json_body(request)
+        _limit("checkout", account, LIMIT_CHECKOUT_PER_ACCOUNT)
+        result = await run_in_threadpool(get_service().create_tap_payment, account, body)
+        return {"ok": True, **result}
+    except PosConnectError as e:
+        return _err(e)
+
+
+@router.get("/pos/terminal/payment_intent/{payment_intent_id}/status")
+def terminal_payment_status(payment_intent_id: str, request: Request):
+    try:
+        _, account = _authed_account(request)
+        return {"ok": True, **get_service().tap_payment_status(account, payment_intent_id)}
     except PosConnectError as e:
         return _err(e)
 

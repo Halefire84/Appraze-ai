@@ -54,6 +54,7 @@ class FakeStripe:
         self.calls = []
         self.charges_enabled = charges_enabled
         self.sessions = {}
+        self.intents = {}
         self.fail_path = None  # (path suffix, FakeResponse) to return instead
 
     def _record(self, method, url, data, headers):
@@ -86,6 +87,24 @@ class FakeStripe:
                     return FakeResponse(200, {**s, "status": "complete", "payment_status": "paid",
                                               "amount_total": 1234})
             return FakeResponse(404, {"error": {"message": "No such checkout.session"}})
+        if method == "POST" and path == "/v1/terminal/locations":
+            return FakeResponse(200, {"id": "tml_1", "display_name": data.get("display_name")})
+        if method == "POST" and path == "/v1/terminal/connection_tokens":
+            return FakeResponse(200, {"secret": "pst_test_secret", "location": data.get("location")})
+        if method == "POST" and path == "/v1/payment_intents":
+            key = headers.get("Idempotency-Key")
+            if key not in self.intents:
+                n = len(self.intents) + 1
+                self.intents[key] = {"id": f"pi_test_{n}", "client_secret": f"pi_test_{n}_secret_x",
+                                     "created": 1790000000, "account": headers.get("Stripe-Account"),
+                                     "metadata": {"invoice_id": data.get("metadata[invoice_id]")}}
+            return FakeResponse(200, self.intents[key])
+        if method == "GET" and path.startswith("/v1/payment_intents/"):
+            pid = path.rsplit("/", 1)[1]
+            for pi in self.intents.values():
+                if pi["id"] == pid and pi["account"] == headers.get("Stripe-Account"):
+                    return FakeResponse(200, {**pi, "status": "succeeded", "amount_received": 1234})
+            return FakeResponse(404, {"error": {"message": "No such payment_intent"}})
         return FakeResponse(404, {"error": {"message": "unknown path " + path}})
 
     def post(self, url, data=None, headers=None, timeout=None):
@@ -268,6 +287,105 @@ class TestCheckout(Base):
         self.assertEqual(r.status_code, 502)
 
 
+ADDRESS = {"display_name": "Cooper River Trading", "line1": "1 Main St", "city": "Charleston",
+           "state": "SC", "postal_code": "29401", "country": "US"}
+
+
+class TestTapToPay(Base):
+    def setUp(self):
+        super().setUp()
+        self.token = self.connect()["device_token"]
+
+    def post(self, path, body=None):
+        return self.client.post(path, json=body, headers=self.auth(self.token))
+
+    def add_location(self):
+        r = self.post("/pos/terminal/location", ADDRESS)
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def test_location_created_on_connected_account_once(self):
+        self.assertIsNone(self.client.get("/pos/terminal/location", headers=self.auth(self.token))
+                          .json()["location_id"])
+        first = self.add_location()
+        self.assertEqual(first, {"ok": True, "location_id": "tml_1", "created": True})
+        second = self.add_location()
+        self.assertFalse(second["created"])
+        loc_calls = [c for c in self.fake.calls if c["url"].endswith("/v1/terminal/locations")]
+        self.assertEqual(len(loc_calls), 1)
+        self.assertEqual(loc_calls[0]["headers"]["Stripe-Account"], "acct_new1")
+        self.assertEqual(loc_calls[0]["data"]["address[state]"], "SC")
+
+    def test_location_validation(self):
+        self.assertEqual(self.post("/pos/terminal/location", {**ADDRESS, "line1": ""}).status_code, 400)
+        self.assertEqual(self.post("/pos/terminal/location", {**ADDRESS, "country": "USA"}).status_code, 400)
+        self.assertEqual(self.post("/pos/terminal/location", {**ADDRESS, "state": ""}).status_code, 400)
+        self.assertEqual(self.post("/pos/terminal/location", {**ADDRESS, "city": 5}).status_code, 400)
+        self.assertEqual(self.post("/pos/terminal/location", {**ADDRESS, "display_name": "x" * 101})
+                         .status_code, 400)
+        # Non-US addresses may omit state.
+        self.assertEqual(self.post("/pos/terminal/location", {**ADDRESS, "state": "", "country": "gb"})
+                         .status_code, 200)
+
+    def test_connection_token_requires_location(self):
+        self.assertEqual(self.post("/pos/terminal/connection_token").status_code, 409)
+        self.add_location()
+        r = self.post("/pos/terminal/connection_token")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["secret"], "pst_test_secret")
+        call = [c for c in self.fake.calls if c["url"].endswith("/v1/terminal/connection_tokens")][0]
+        self.assertEqual(call["headers"]["Stripe-Account"], "acct_new1")
+        self.assertEqual(call["data"]["location"], "tml_1")
+
+    def test_connection_token_requires_auth(self):
+        self.assertEqual(self.client.post("/pos/terminal/connection_token").status_code, 401)
+
+    def test_tap_payment_is_card_present_on_merchant_account_with_timestamp(self):
+        r = self.post("/pos/terminal/payment_intent",
+                      {"amount_cents": 1234, "description": "Lamp", "invoice_id": "TAP-1"})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["payment_intent_id"], "pi_test_1")
+        self.assertEqual(body["client_secret"], "pi_test_1_secret_x")
+        self.assertEqual(body["created_at"], "2026-09-21T14:13:20+00:00")
+        call = [c for c in self.fake.calls if c["url"].endswith("/v1/payment_intents")][0]
+        self.assertEqual(call["headers"]["Stripe-Account"], "acct_new1")
+        self.assertEqual(call["headers"]["Idempotency-Key"], "pos-tap-acct_new1-TAP-1")
+        self.assertEqual(call["data"]["payment_method_types[0]"], "card_present")
+        self.assertEqual(call["data"]["amount"], "1234")
+        self.assertEqual(call["data"]["capture_method"], "automatic")
+
+    def test_tap_retry_same_invoice_same_intent(self):
+        a = self.post("/pos/terminal/payment_intent", {"amount_cents": 800, "description": "x", "invoice_id": "T2"})
+        b = self.post("/pos/terminal/payment_intent", {"amount_cents": 800, "description": "x", "invoice_id": "T2"})
+        self.assertEqual(a.json()["payment_intent_id"], b.json()["payment_intent_id"])
+
+    def test_tap_payment_validates_like_checkout(self):
+        for bad in [True, 49, "100", 10_000_001]:
+            r = self.post("/pos/terminal/payment_intent", {"amount_cents": bad, "description": "x"})
+            self.assertEqual(r.status_code, 400, bad)
+        self.assertFalse(any(c["url"].endswith("/v1/payment_intents") for c in self.fake.calls))
+
+    def test_tap_status_is_read_from_stripe_on_own_account(self):
+        created = self.post("/pos/terminal/payment_intent",
+                            {"amount_cents": 1234, "description": "Lamp", "invoice_id": "TAP-3"})
+        pid = created.json()["payment_intent_id"]
+        r = self.client.get(f"/pos/terminal/payment_intent/{pid}/status", headers=self.auth(self.token))
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["paid"])
+        self.assertEqual(r.json()["invoice_id"], "TAP-3")
+        self.assertIn("checked_at", r.json())
+        other = self.store.issue("acct_other")
+        r = self.client.get(f"/pos/terminal/payment_intent/{pid}/status", headers=self.auth(other))
+        self.assertEqual(r.status_code, 404)
+        r = self.client.get("/pos/terminal/payment_intent/cs_nope/status", headers=self.auth(self.token))
+        self.assertEqual(r.status_code, 400)
+
+    def test_checkout_response_has_timestamp(self):
+        r = self.post("/pos/checkout", {"amount_cents": 500, "description": "Lamp", "invoice_id": "L1"})
+        self.assertIn("created_at", r.json())
+
+
 class TestOnboardingIncomplete(Base):
     charges_enabled = False
 
@@ -277,6 +395,12 @@ class TestOnboardingIncomplete(Base):
                              headers=self.auth(tok))
         self.assertEqual(r.status_code, 409)
         self.assertFalse(any(c["url"].endswith("/v1/checkout/sessions") for c in self.fake.calls))
+
+    def test_tap_payment_blocked_until_charges_enabled(self):
+        tok = self.connect()["device_token"]
+        r = self.client.post("/pos/terminal/payment_intent", json={"amount_cents": 500, "description": "Lamp"},
+                             headers=self.auth(tok))
+        self.assertEqual(r.status_code, 409)
 
 
 class TestConfigGuards(Base):
@@ -324,6 +448,12 @@ class TestHelpers(unittest.TestCase):
         now[0] = 10.0
         self.assertTrue(rl.allow("b", "k", 2, 10))
 
+    def test_iso_from_unix(self):
+        self.assertEqual(pos_connect.iso_from_unix(0), "1970-01-01T00:00:00+00:00")
+        self.assertIsNone(pos_connect.iso_from_unix(None))
+        self.assertIsNone(pos_connect.iso_from_unix(True))
+        self.assertIsNone(pos_connect.iso_from_unix(1e20))
+
     def test_error_carries_status(self):
         e = PosConnectError(418, "x")
         self.assertEqual((e.status, e.message), (418, "x"))
@@ -370,3 +500,23 @@ class TestStripeMockContract(unittest.TestCase):
         self.assertTrue(out["checkout_url"].startswith("https://"))
         st = self.service.checkout_status(acct, out["session_id"])
         self.assertIn("payment_status", st)
+
+    def test_tap_to_pay_request_shapes_accepted(self):
+        acct = self.service.start()["account_id"]
+        loc = self.service.create_terminal_location(acct, ADDRESS)
+        self.assertTrue(loc["location_id"].startswith("tml_"))
+        self.assertTrue(self.service.connection_token(acct)["secret"])
+        client = self.service.client()
+        orig = client.request
+
+        def request(method, path, params=None, **kw):
+            if method == "GET" and path.startswith("/v1/accounts/"):
+                return {"id": acct, "charges_enabled": True}
+            return orig(method, path, params, **kw)
+        client.request = request
+        self.service._client_factory = lambda: client
+        pi = self.service.create_tap_payment(acct, {"amount_cents": 1234, "description": "Lamp",
+                                                    "invoice_id": "TAP-M1"})
+        self.assertTrue(pi["payment_intent_id"].startswith("pi_"))
+        self.assertTrue(pi["client_secret"])
+        self.assertIn("status", self.service.tap_payment_status(acct, pi["payment_intent_id"]))
