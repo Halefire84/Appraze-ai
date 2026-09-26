@@ -94,6 +94,20 @@ list shows entries such as "Sat, Sep 26, 2026 · 8:45 AM · Tap to Pay", and tap
 row re-checks it. Server responses also carry `created_at` (Stripe's timestamp, ISO-8601
 UTC) and `checked_at`. Stripe's Dashboard keeps its own permanent record of each payment.
 
+## Comps collector (Analyze screen)
+
+On the Analyze screen, "What is it?" plus **Find Comps** calls `POST /comps/search`
+(`comps_collector.py`, on the same server). The server reuses `comps.py` and
+`comps_adapters.py` unchanged; they're identical to `main`.
+- **Sources:** eBay sold listings (Marketplace Insights) when eBay has approved the app;
+  otherwise eBay active listings (asking prices), which are always rated low confidence.
+- **Keys:** set `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` on the server. Without them, the
+  lookup returns 503 and the app falls back to entering resale manually.
+- **Limits:** 10 lookups per minute and 200 per day per IP, 4,000 per day in total, with a
+  1-hour cache per query.
+- **App behavior:** the app auto-fills Expected resale and shows the evidence with the date
+  and time it was collected. The verdict notes when resale came from comps.
+
 ## Backend endpoints (`pos_connect.py`, mounted in `stripe_webhook_server.py`)
 
 | Method | Path | Auth | Notes |
