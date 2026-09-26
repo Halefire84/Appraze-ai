@@ -4,3 +4,7 @@ android { namespace 'com.crtc.app'; compileSdk 36
  buildTypes { release { minifyEnabled false; shrinkResources false; signingConfig signingConfigs.debug } }
  lint { abortOnError true }
 }
+
+dependencies {
+    implementation 'com.google.android.material:material:1.12.0'
+}
