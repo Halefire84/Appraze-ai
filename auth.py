@@ -18,6 +18,8 @@ against a SHA-256 hash stored in Streamlit secrets.
 
 import hashlib
 import hmac
+import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -25,6 +27,18 @@ from typing import Dict, List, Optional
 import bcrypt
 import requests
 import streamlit as st
+
+_BCRYPT_HASH_RE = re.compile(r"^\$2[aby]\$\d{2}\$.{53}$")
+
+# The table name beta accounts are stored under via the existing Apps
+# Script save_data/load_data backend (see _load_beta_accounts/
+# _save_beta_accounts below) -- same mechanism storage.py already uses
+# for deals/inventory, just a different table name.
+_BETA_ACCOUNTS_TABLE = "beta_accounts"
+
+# Same backend, one shared row tracking total visits -- see
+# _record_visit_once()/get_visit_count() below.
+_VISIT_COUNTER_TABLE = "visit_counter"
 
 # --- Brute-force lockout -----------------------------------------------
 # In-process (module-level) tracking. Streamlit Community Cloud's free tier
@@ -81,6 +95,7 @@ class AuthResult:
     is_paid: bool = False
     username: str = ""
     error: str = ""
+    plan: str = "free"
 
 
 def _hash_password(password: str) -> str:
@@ -118,7 +133,7 @@ def _token() -> str:
 
 
 def _is_bcrypt_hash(value: str) -> bool:
-    return value.startswith(("$2a$", "$2b$", "$2y$")) and len(value) == 60
+    return bool(_BCRYPT_HASH_RE.match(value))
 
 
 def _is_legacy_sha256_hash(value: str) -> bool:
@@ -188,7 +203,165 @@ def _admin_login(username: str, password: str) -> AuthResult | None:
         is_admin=True,
         is_paid=True,
         username=configured_username,
+        plan="admin",
     )
+
+
+def _beta_invite_codes() -> set[str]:
+    """The set of valid, still-distributable beta invite codes, from the
+    CRTC_BETA_INVITE_CODES secret (comma-separated). Empty set means beta
+    signup is off."""
+    raw = _secret("CRTC_BETA_INVITE_CODES")
+    return {c.strip().upper() for c in raw.split(",") if c.strip()}
+
+
+def _beta_enabled() -> bool:
+    return bool(_beta_invite_codes())
+
+
+def _load_beta_accounts() -> list:
+    """Read the shared beta-accounts table via the same Apps Script
+    save_data/load_data backend storage.py uses for business data.
+    Duplicated here (rather than `import storage`) because storage.py
+    imports _apps_script_url/_token FROM this module -- importing storage
+    back into auth.py would be a circular import. Fails safe to an empty
+    list on any error (unreachable backend, bad JSON, etc.) rather than
+    raising, since this is called on every login/signup attempt."""
+    try:
+        resp = requests.post(
+            _apps_script_url(),
+            data={
+                "token": _token(),
+                "action": "load_data",
+                "table": _BETA_ACCOUNTS_TABLE,
+                "username": "",
+                "is_admin": "true",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("success"):
+            return []
+        raw = data.get("payload")
+        return json.loads(raw) if raw else []
+    except Exception:
+        return []
+
+
+def _save_beta_accounts(accounts: list) -> bool:
+    try:
+        resp = requests.post(
+            _apps_script_url(),
+            data={
+                "token": _token(),
+                "action": "save_data",
+                "table": _BETA_ACCOUNTS_TABLE,
+                "payload": json.dumps(accounts),
+                "username": "",
+                "is_admin": "true",
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return bool(resp.json().get("success"))
+    except Exception:
+        return False
+
+
+def _beta_signup(username: str, password: str, display_name: str, code: str) -> AuthResult:
+    """Create a beta account gated by a single-use invite code. Reuses the
+    existing Apps Script storage backend (see _load/_save_beta_accounts)
+    instead of a new local-file store, since that's the one persistence
+    mechanism the rest of the app already depends on to function at all --
+    Admin deals/inventory already require it to be configured and
+    reachable, so leaning on it here adds no new deployment dependency.
+
+    Read-then-write against that shared table, so two people redeeming
+    different codes in the same instant could race and one save could
+    clobber the other -- same last-write-wins tradeoff storage.py already
+    documents as acceptable for a solo/small-team-sized tool, and fine for
+    a ten-person one-day beta. Beta accounts always get is_paid=True /
+    plan="beta" (full free access) and never touch Stripe or mark_paid.
+
+    Also gated by the same brute-force lockout as _admin_login()/
+    _beta_login() -- see require_auth()'s wiring -- so repeated wrong
+    invite-code guesses lock out that username the same way repeated
+    wrong passwords do."""
+    valid_codes = _beta_invite_codes()
+    supplied_code = str(code).strip().upper()
+    if supplied_code not in valid_codes:
+        return AuthResult(False, error="Invalid invite code.")
+
+    supplied_username = str(username).strip().lower()
+    if not supplied_username or not password:
+        return AuthResult(False, error="Username and password are both required.")
+
+    accounts = _load_beta_accounts()
+    for acct in accounts:
+        if str(acct.get("invite_code", "")).upper() == supplied_code:
+            return AuthResult(False, error="That invite code has already been used.")
+        if str(acct.get("username", "")).lower() == supplied_username:
+            return AuthResult(False, error="That username is already taken.")
+
+    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode()
+    accounts.append(
+        {
+            "username": supplied_username,
+            "display_name": display_name or username,
+            "password_hash": password_hash,
+            "invite_code": supplied_code,
+            "created_at": time.time(),
+        }
+    )
+    if not _save_beta_accounts(accounts):
+        return AuthResult(False, error="Could not create your account right now (storage unreachable) -- try again in a moment.")
+
+    return AuthResult(
+        True,
+        display_name=display_name or username,
+        is_admin=False,
+        is_paid=True,
+        username=supplied_username,
+        plan="beta",
+    )
+
+
+def _beta_login(username: str, password: str) -> AuthResult | None:
+    """Returning None means no beta account matched -- caller should treat
+    this the same as _admin_login returning None (fall through / show a
+    generic incorrect-credentials error), not a hard failure."""
+    if not _beta_enabled():
+        return None
+
+    supplied_username = str(username).strip().lower()
+
+    locked_for = _is_locked_out(supplied_username)
+    if locked_for is not None:
+        return AuthResult(False, error=_lockout_message(locked_for))
+
+    accounts = _load_beta_accounts()
+    for acct in accounts:
+        if str(acct.get("username", "")).lower() != supplied_username:
+            continue
+        stored_hash = str(acct.get("password_hash", ""))
+        try:
+            password_ok = bool(stored_hash) and bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+        except ValueError:
+            password_ok = False
+        if not password_ok:
+            _record_failed_attempt(supplied_username)
+            return AuthResult(False, error="incorrect password")
+        _clear_failed_attempts(supplied_username)
+        return AuthResult(
+            True,
+            display_name=acct.get("display_name", username),
+            is_admin=False,
+            is_paid=True,
+            username=supplied_username,
+            plan="beta",
+        )
+    return None
 
 
 def signup(username: str, password: str, display_name: str = "", admin_code: str = "") -> AuthResult:
@@ -255,19 +428,105 @@ def login(username: str, password: str) -> AuthResult:
         return AuthResult(False, error=f"connection error: {e}")
 
 
-def mark_paid(username: str) -> bool:
+def mark_paid(username: str, session_id: str = "", plan: str = "") -> bool:
     """Called once a Stripe Checkout Session is verified as paid — persists it
-    so the person doesn't have to pay again on their next login."""
+    so the person doesn't have to pay again on their next login.
+
+    session_id should always be passed by real callers (the Stripe Checkout
+    Session id that was just verified). AppsScript_Code.gs's handleSetPaid_
+    uses it to reject replaying the same already-redeemed session_id against
+    a second account -- verify_checkout_session() only confirms Stripe's own
+    payment_status and has no idea which app account is asking, and the
+    ?session_id= it's given comes back through the browser's own URL, which
+    is fully editable. Without that check, one real payment's session_id
+    could be pasted into a second account's Pricing page URL and mark that
+    account paid too, off the same payment.
+
+    plan is one of subscription_plans.PLANS' keys (e.g. "starter"); omit
+    it to mark paid without changing which plan is on file."""
     try:
-        resp = requests.post(
-            _apps_script_url(),
-            data={"token": _token(), "action": "set_paid", "username": username},
-            timeout=15,
-        )
+        payload = {"token": _token(), "action": "set_paid", "username": username, "session_id": session_id}
+        if plan:
+            payload["plan"] = plan
+        resp = requests.post(_apps_script_url(), data=payload, timeout=15)
         resp.raise_for_status()
         return bool(resp.json().get("success"))
     except Exception:
         return False
+
+
+def _record_visit_once() -> None:
+    """Increment the shared visit counter exactly once per browser session
+    -- the first time require_auth() runs for that session, whether or not
+    the visitor ever logs in, so it counts real traffic, not just
+    successful logins. Gated by a session_state flag because Streamlit
+    reruns the whole script on every interaction; without the flag every
+    click on the same page would count as a new visit.
+
+    Fails silently on any error (unreachable backend, bad JSON, etc.) --
+    a missed count must never slow down or block the actual login flow,
+    and this is a rough traffic counter, not a billing-grade metric."""
+    if st.session_state.get("visit_counted"):
+        return
+    st.session_state.visit_counted = True
+    try:
+        resp = requests.post(
+            _apps_script_url(),
+            data={
+                "token": _token(),
+                "action": "load_data",
+                "table": _VISIT_COUNTER_TABLE,
+                "username": "",
+                "is_admin": "true",
+            },
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        raw = data.get("payload") if data.get("success") else None
+        records = json.loads(raw) if raw else []
+        current = records[0] if records else {"count": 0}
+        current["count"] = int(current.get("count", 0)) + 1
+        current["last_visit_at"] = time.time()
+        requests.post(
+            _apps_script_url(),
+            data={
+                "token": _token(),
+                "action": "save_data",
+                "table": _VISIT_COUNTER_TABLE,
+                "payload": json.dumps([current]),
+                "username": "",
+                "is_admin": "true",
+            },
+            timeout=8,
+        )
+    except Exception:
+        pass
+
+
+def get_visit_count() -> int:
+    """Best-effort total visit count for display (e.g. an Admin-only stat).
+    Returns 0 on any error -- same fail-quiet reasoning as
+    _record_visit_once() above."""
+    try:
+        resp = requests.post(
+            _apps_script_url(),
+            data={
+                "token": _token(),
+                "action": "load_data",
+                "table": _VISIT_COUNTER_TABLE,
+                "username": "",
+                "is_admin": "true",
+            },
+            timeout=8,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        raw = data.get("payload") if data.get("success") else None
+        records = json.loads(raw) if raw else []
+        return int(records[0].get("count", 0)) if records else 0
+    except Exception:
+        return 0
 
 
 def _render_brand_header(caption: str) -> None:
@@ -314,6 +573,7 @@ def render_login_gate() -> bool:
                         st.session_state.user_display_name = result.display_name
                         st.session_state.user_is_admin = result.is_admin
                         st.session_state.user_is_paid = result.is_paid
+                        st.session_state.user_plan = result.plan
                         st.session_state.username = result.username
                         st.rerun()
                     else:
@@ -346,6 +606,7 @@ def render_login_gate() -> bool:
                         st.session_state.user_display_name = result.display_name
                         st.session_state.user_is_admin = result.is_admin
                         st.session_state.user_is_paid = result.is_paid
+                        st.session_state.user_plan = result.plan
                         st.session_state.username = result.username
                         st.success(f"Welcome, {result.display_name}!")
                         st.rerun()
@@ -359,7 +620,7 @@ def logout() -> None:
     """Clear every session key an authenticated session sets. The one place
     both app.py's sidebar and any future page should call to sign out, so
     logout can never leave a stale key behind for a page that checks it."""
-    for key in ("authenticated", "user_display_name", "user_is_admin", "user_is_paid", "username"):
+    for key in ("authenticated", "user_display_name", "user_is_admin", "user_is_paid", "user_plan", "username"):
         st.session_state.pop(key, None)
 
 
@@ -383,42 +644,100 @@ def require_auth() -> None:
 
     Reuses the existing single shared-Admin credential model (hashed
     CRTC_ADMIN_USERNAME / CRTC_ADMIN_PASSWORD_HASH secrets, see
-    AUTH_SETUP.md) rather than a new auth system, and rather than the
-    Apps-Script tester/signup path below -- this keeps the app the simple
-    single-workspace Admin tool it's meant to be, not a multi-tenant
-    product. If the Admin secrets aren't configured yet, this fails
-    SAFE: no login form is even rendered (nothing to guess against), and
-    there is no default/fallback password that ever grants access.
+    AUTH_SETUP.md) rather than a new auth system. If the Admin secrets
+    aren't configured yet AND no beta invite codes are configured either,
+    this fails SAFE: no login form is even rendered (nothing to guess
+    against), and there is no default/fallback password that ever grants
+    access.
+
+    Beta access: when CRTC_BETA_INVITE_CODES is set (see AUTH_SETUP.md), a
+    second "Beta Sign Up" tab appears, gated by a single-use invite code --
+    see _beta_signup()/_beta_login() above. This is deliberately NOT the
+    same as opening the app's existing Apps-Script tester signup() to the
+    public internet: only someone holding one of a fixed, small set of
+    codes can ever create an account, and unlike an open self-signup, each
+    new account can't be spun up for free to multiply AI-analyzer usage
+    during the beta (see handleReserveAiUsage_'s server-side quota, which
+    still applies per beta account regardless). Beta accounts always get
+    full free access (is_paid=True, plan="beta") and never touch Stripe.
     """
+    _record_visit_once()
+
     if st.session_state.get("authenticated"):
         return
 
     _render_brand_header("Cooper River Trading Co. — sign in to continue")
 
-    if not _admin_credentials_configured():
+    admin_configured = _admin_credentials_configured()
+    beta_configured = _beta_enabled()
+
+    if not admin_configured and not beta_configured:
         st.error(
-            "Admin login is not configured for this deployment. Set "
+            "Login is not configured for this deployment. Set "
             "CRTC_ADMIN_USERNAME and CRTC_ADMIN_PASSWORD_HASH in Streamlit "
             "Secrets before this app can be used — see AUTH_SETUP.md."
         )
         st.stop()
 
-    with st.form("crtc_admin_login_form"):
-        username = st.text_input("Username", key="crtc_login_username")
-        password = st.text_input("Password", type="password", key="crtc_login_password")
-        submitted = st.form_submit_button("Sign in", use_container_width=True)
-        if submitted:
-            if not username or not password:
-                st.warning("Enter both a username and password.")
-            else:
-                result = _admin_login(username, password)
-                if result is not None and result.success:
-                    st.session_state.authenticated = True
-                    st.session_state.user_display_name = result.display_name
-                    st.session_state.user_is_admin = result.is_admin
-                    st.session_state.username = result.username
-                    st.rerun()
+    if beta_configured:
+        tab_login, tab_signup = st.tabs(["Log In", "Beta Sign Up"])
+    else:
+        tab_login, tab_signup = st.container(), None
+
+    with tab_login:
+        with st.form("crtc_admin_login_form"):
+            username = st.text_input("Username", key="crtc_login_username")
+            password = st.text_input("Password", type="password", key="crtc_login_password")
+            submitted = st.form_submit_button("Sign in", use_container_width=True)
+            if submitted:
+                if not username or not password:
+                    st.warning("Enter both a username and password.")
                 else:
-                    st.error("Incorrect username or password.")
+                    result = _admin_login(username, password)
+                    if result is None:
+                        result = _beta_login(username, password)
+                    if result is not None and result.success:
+                        st.session_state.authenticated = True
+                        st.session_state.user_display_name = result.display_name
+                        st.session_state.user_is_admin = result.is_admin
+                        st.session_state.user_is_paid = result.is_paid
+                        st.session_state.user_plan = result.plan
+                        st.session_state.username = result.username
+                        st.rerun()
+                    elif result is not None:
+                        st.error(result.error)
+                    else:
+                        st.error("Incorrect username or password.")
+
+    if tab_signup is not None:
+        with tab_signup:
+            st.caption("Beta access — enter the invite code you were given. No payment required during the beta.")
+            with st.form("crtc_beta_signup_form"):
+                new_display = st.text_input("Your name", key="beta_signup_display")
+                new_u = st.text_input("Choose a username", key="beta_signup_username")
+                new_p = st.text_input("Choose a password", type="password", key="beta_signup_password")
+                new_p2 = st.text_input("Confirm password", type="password", key="beta_signup_password2")
+                code = st.text_input("Invite code", key="beta_signup_code")
+                submitted = st.form_submit_button("Create beta account", use_container_width=True)
+                if submitted:
+                    if not new_u or not new_p or not code:
+                        st.warning("Username, password, and invite code are all required.")
+                    elif new_p != new_p2:
+                        st.warning("Passwords don't match.")
+                    elif len(new_p) < 4:
+                        st.warning("Password should be at least 4 characters.")
+                    else:
+                        result = _beta_signup(new_u, new_p, new_display, code)
+                        if result.success:
+                            st.session_state.authenticated = True
+                            st.session_state.user_display_name = result.display_name
+                            st.session_state.user_is_admin = result.is_admin
+                            st.session_state.user_is_paid = result.is_paid
+                            st.session_state.user_plan = result.plan
+                            st.session_state.username = result.username
+                            st.success(f"Welcome, {result.display_name}! You have full free access during the beta.")
+                            st.rerun()
+                        else:
+                            st.error(result.error)
 
     st.stop()

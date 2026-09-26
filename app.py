@@ -1,5 +1,10 @@
 """
-Appraze
+Appraze™ — Complete Resale Business Suite
+© 2026 Christopher Hale / Cooper River Trading Co.
+
+In memory of my father, Christopher Hale, who tracked trucks in C++
+before I ever tracked a deal.
+
 A single-page Streamlit dashboard for tracking, filtering, and evaluating
 resale/auction deals across Estate Auctions, eBay, HiBid, Facebook Marketplace,
 Mercari, Chairish, and Etsy.
@@ -21,7 +26,9 @@ from finance import (
     compute_verdict, dashboard_deal_result, profit_calc, inventory_margin,
     melt_value, max_bid_after_premium, GOLD_PURITY, SILVER_PURITY,
 )
-from auth import require_auth, logout
+from auth import require_auth, logout, mark_paid
+from billing import verify_checkout_session
+from subscription_plans import get_plan
 from pos import create_pos_checkout, check_payment_status, new_invoice_id
 from sales_documents import calculate_totals, apply_payment, new_account_number, new_document_number
 from storage import load_table, save_table
@@ -129,6 +136,50 @@ _PWA_HEAD_INJECTION = """
 components.html(_PWA_HEAD_INJECTION, height=0, width=0)
 
 # --------------------------------------------------------------------------
+# BUILD ATTRIBUTION -- provenance only. Never read by any app logic below;
+# purely for identifying the source of a deployed build.
+# --------------------------------------------------------------------------
+_APPRAZE_BUILD_ATTRIBUTION = (
+    "Appraze (c) 2026 Christopher Hale / Cooper River Trading Co. "
+    "-- build 65d37b35-6a3b-480b-9d16-8274210530dc"
+)
+
+# --------------------------------------------------------------------------
+# BUILD INTEGRITY CHECK -- playful, never destructive. Confirms the
+# watermark constants above and in finance.py/storage.py are present and
+# unmodified. A "failure" here never crashes, disables a feature, deletes
+# data, or phones home -- worst case is a banner and a bad joke.
+# --------------------------------------------------------------------------
+def _appraze_watermark_intact() -> bool:
+    try:
+        import finance as _finance_mod
+        import storage as _storage_mod
+        return (
+            getattr(_finance_mod, "_APPRAZE_BUILD_ATTRIBUTION", None) == _APPRAZE_BUILD_ATTRIBUTION
+            and getattr(_storage_mod, "_APPRAZE_BUILD_ATTRIBUTION", None) == _APPRAZE_BUILD_ATTRIBUTION
+        )
+    except Exception:
+        # Never let a provenance check break the app.
+        return True
+
+if not _appraze_watermark_intact():
+    st.warning(
+        "This copy of Appraze has been tampered with. The deals it finds "
+        "from here on are cursed. Good luck out there."
+    )
+
+
+@st.dialog("In Memory")
+def _christopher_hale_tribute():
+    """A quiet Easter egg, not a feature -- searching this exact name in the
+    Deal Dashboard shows the dedication instead of matching (or failing to
+    match) it against any real deal data."""
+    st.markdown(
+        "*In memory of my father, Christopher Hale, who tracked trucks in "
+        "C++ before I ever tracked a deal.*"
+    )
+
+# --------------------------------------------------------------------------
 # LOGIN GATE
 # --------------------------------------------------------------------------
 # One shared Admin login, backed by auth.py's existing hashed-credential
@@ -139,6 +190,39 @@ components.html(_PWA_HEAD_INJECTION, height=0, width=0)
 # Admin secrets aren't configured, require_auth() refuses to render a
 # login form at all rather than accepting a guessable placeholder.
 require_auth()
+
+# --------------------------------------------------------------------------
+# SUBSCRIPTION CHECKOUT RETURN -- a plan's Stripe Payment Link (see
+# pages/8_Pricing.py + billing.plan_payment_link) redirects back here with
+# ?sub_plan=<key>&sub_session_id={CHECKOUT_SESSION_ID} after payment. This
+# verifies the session actually paid (never trusts the redirect alone --
+# anyone could hand-craft that URL) before recording the plan. mark_paid()
+# is called with BOTH session_id (this app's Stripe-replay protection --
+# AppsScript_Code.gs's handleSetPaid_ rejects reusing an already-redeemed
+# session_id against a different account) and plan (which tier to record)
+# as explicit keywords -- mark_paid's signature is
+# (username, session_id="", plan=""), so passing the plan key positionally
+# here would silently land in the session_id slot instead.
+# --------------------------------------------------------------------------
+_qp = st.query_params
+if _qp.get("sub_session_id") and _qp.get("sub_plan"):
+    _sub_plan_key = _qp["sub_plan"]
+    _sub_session_id = _qp["sub_session_id"]
+    _sub_result = verify_checkout_session(_sub_session_id)
+    if _sub_result.paid:
+        if mark_paid(st.session_state.get("username", ""), session_id=_sub_session_id, plan=_sub_plan_key):
+            st.session_state.user_is_paid = True
+            st.session_state.user_plan = _sub_plan_key
+            st.success(f"You're now on the {get_plan(_sub_plan_key).name} plan. Welcome aboard!")
+        else:
+            st.warning(
+                "Payment went through, but saving your new plan failed. "
+                "Contact support with this session ID and we'll fix it: "
+                f"{_sub_session_id}"
+            )
+    else:
+        st.warning("We couldn't confirm that payment yet. If you just paid, refresh in a moment.")
+    st.query_params.clear()
 
 WORKSPACE = "business"
 
@@ -402,6 +486,8 @@ with tab_dash:
         filtered = filtered[filtered["Status"].isin(status_filter)]
     if search:
         s = search.lower()
+        if s.strip() == "christopher hale":
+            _christopher_hale_tribute()
         filtered = filtered[
             filtered["Item"].str.lower().str.contains(s, na=False)
             | filtered["Notes"].str.lower().str.contains(s, na=False)
@@ -487,8 +573,29 @@ with tab_calc:
         calc_resale = st.number_input("Estimated resale value ($)", min_value=0.0, step=1.0, format="%.2f", key="calc_resale")
 
     with st.expander("Optional: factor in platform fees / buyer's premium"):
-        fee_pct = st.slider("Fees as % of resale value (marketplace + payment processing)", 0.0, 30.0, 13.0, 0.5)
-        premium_pct = st.slider("Buyer's premium at purchase (e.g. Estate Auctions 18%)", 0.0, 25.0, 18.0, 0.5)
+        fee_pct = st.slider(
+            "Fees as % of resale value (marketplace + payment processing)", 0.0, 30.0, 13.0, 0.5,
+            help=(
+                "Real current fees vary a lot by where you'll actually sell it — "
+                "the 13% default is a rough blend, not any one platform's real "
+                "rate. eBay ≈13.6% + a small per-order fee (higher for clothing/"
+                "media, lower for guitars/athletic shoes), Poshmark 20% (or a "
+                "flat $2.95 under $15), Mercari 10%, Etsy ≈6.5% + 3%+$0.25 "
+                "processing + a $0.20 listing fee, Depop ≈3.3% + $0.45. Move "
+                "this slider to match where you're actually selling — see "
+                "DEAL-MATH.md for sources."
+            ),
+        )
+        premium_pct = st.slider(
+            "Buyer's premium at purchase (e.g. Estate Auctions 18%)", 0.0, 25.0, 18.0, 0.5,
+            help=(
+                "18% matches CTBids' published online estate-auction premium. "
+                "Other houses vary and some fine-art/collectibles auctions use "
+                "a tiered scale (a higher % on the first portion, lower above "
+                "it) rather than one flat rate — check the specific house's "
+                "terms rather than trusting this default for an unfamiliar venue."
+            ),
+        )
 
     true_cost, net_resale, gross_profit, roi = profit_calc(calc_cost, calc_resale, fee_pct, premium_pct)
 
@@ -584,7 +691,15 @@ with tab_inv:
     st.markdown("#### Settings")
     ic1, ic2 = st.columns(2)
     with ic1:
-        inv_fee_pct = st.slider("Estimated Platform Fees %", 0.0, 30.0, 13.0, 0.5, key="inv_fee")
+        inv_fee_pct = st.slider(
+            "Estimated Platform Fees %", 0.0, 30.0, 13.0, 0.5, key="inv_fee",
+            help=(
+                "13% is a rough blend, not any one platform's real rate — "
+                "eBay ≈13.6%, Poshmark 20%, Mercari 10%, Etsy ≈9.5% all-in, "
+                "Depop ≈3.3%+$0.45. Match this to where the item will actually "
+                "sell; see DEAL-MATH.md for sources."
+            ),
+        )
     with ic2:
         margin_threshold = st.slider("Minimum healthy Net Margin %", 0.0, 50.0, 20.0, 1.0, key="inv_margin_thresh")
 
@@ -1007,7 +1122,9 @@ with tab_accounts:
         else: st.info("No quotes or invoices yet.")
 
 
-BETA_AI_ACCESS = True  # Free beta accounts may use AI; disable when paid gating begins.\n\n# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
+BETA_AI_ACCESS = True  # Free beta accounts may use AI; disable when paid gating begins.
+
+# AI ANALYZER TAB (Claude identifies/estimates - your own math still verdicts)
 # ==========================================================================
 with tab_ai:
     st.markdown("#### AI Item Analyzer")

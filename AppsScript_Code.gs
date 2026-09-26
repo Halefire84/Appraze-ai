@@ -34,13 +34,30 @@ const TOKEN = "REPLACE_WITH_YOUR_OWN_LONG_RANDOM_STRING";
 const ADMIN_SETUP_CODE = "REPLACE_WITH_YOUR_OWN_ADMIN_INVITE_CODE";
 
 const USERS_SHEET_NAME = "Users";
-const USERS_HEADER = ["username", "password_hash", "display_name", "is_admin", "is_paid", "created_at"];
+// "plan" was added 2026-09-21 as a trailing 7th column (never inserted
+// mid-schema -- see migrateUsersSheetIfNeeded_) so existing rows' data in
+// columns A-F keep their original meaning. Values are subscription_plans.py's
+// plan keys ("free", "scout", "analyst", "appraiser", "operator", "pro");
+// a row written before this column existed reads back as "" and Python's
+// login()/signup() treat "" the same as "free".
+const USERS_HEADER = ["username", "password_hash", "display_name", "is_admin", "is_paid", "created_at", "plan"];
 
 const STORAGE_SHEET_NAME = "Storage";
 const STORAGE_HEADER = ["owner_key", "table", "payload_json", "updated_at"];
 
 const PROCESSED_SHEET_NAME = "ProcessedFiles";
 const PROCESSED_HEADER = ["file_id", "file_name", "processed_at"];
+
+// Prevents one real Stripe payment from being replayed across multiple
+// accounts. billing.verify_checkout_session() is explicitly "safe to call
+// repeatedly" and only checks Stripe's own payment_status -- it does not
+// know or care which app account is asking, and the ?session_id= it reads
+// comes back from the browser's own URL, which is fully attacker-editable.
+// Without this table, logging into a second account and navigating to
+// .../Pricing?session_id=<a real, already-successful session id> would
+// mark that second account paid too, off the same single payment.
+const REDEEMED_SESSIONS_SHEET_NAME = "RedeemedStripeSessions";
+const REDEEMED_SESSIONS_HEADER = ["session_id", "username", "redeemed_at"];
 
 // Server-side Appraze AI usage controls. These limits are enforced here,
 // not in Streamlit session state, so browser reruns cannot reset them.
@@ -51,6 +68,22 @@ const AI_CUSTOMER_DAILY_LIMIT = 10;
 const AI_ADMIN_MONTHLY_LIMIT = 500;
 const AI_ADMIN_DAILY_LIMIT = 25;
 const AI_RESERVATION_TTL_MS = 15 * 60 * 1000;
+
+// Escalating abuse-detection lockout -- separate from the monthly/daily AI
+// quota above. The quota caps *total* usage; this catches *rate* of usage
+// that looks automated (a human clicking "Analyze" can't realistically fire
+// off a burst of reserve_ai_usage calls inside one minute the way a script
+// hammering the endpoint can). First burst -> a short cooldown. Repeated
+// bursts -> the account is flagged and stays locked until an admin clears
+// it via the admin_clear_abuse_lockout action -- this is deliberately NOT
+// self-clearing, since a script that trips the temp lockout once will just
+// keep tripping it forever on its own if left to expire automatically.
+const ABUSE_LOCKOUT_SHEET_NAME = "AbuseLockouts";
+const ABUSE_LOCKOUT_HEADER = ["username", "window_start", "window_count", "lockout_until", "strike_count", "permanent", "updated_at"];
+const ABUSE_BURST_WINDOW_MS = 60 * 1000;        // count reserve_ai_usage calls within this rolling window
+const ABUSE_BURST_THRESHOLD = 6;                // more than this many calls in one window is bot-like, not human clicking
+const ABUSE_TEMP_LOCKOUT_MS = 5 * 60 * 1000;    // first offense: 5-minute cooldown
+const ABUSE_MAX_STRIKES = 3;                    // this many temp lockouts -> permanent, admin-required
 
 // Operational event log (errors + financial-decision/payment events), kept
 // as a normal "table" row in the Storage sheet under admin_shared -- no new
@@ -69,6 +102,17 @@ const SUPPORTED_MIME_TYPES = [
 ];
 const MAX_FILES_PER_SCAN = 12; // keeps each response small and fast
 
+// handleScanFolder_ below runs under the deploying owner's own Drive
+// access ("Execute as: Me") and returns full file contents (base64) --
+// DriveApp.getFoldersByName() matches ANY folder with that exact name
+// ANYWHERE in that Drive, not just a designated business folder. Without
+// this allowlist, anyone holding the shared TOKEN could pass an arbitrary
+// folder_name and read back the contents of any matching folder in the
+// owner's entire personal/business Drive, not only invoices/inventory.
+// Add a name here only for a folder that is genuinely safe to expose this
+// way.
+const ALLOWED_SCAN_FOLDER_NAMES = ["Invoices", "Inventory"];
+
 function doGet(e) {
   return handleRequest(e);
 }
@@ -79,10 +123,33 @@ function doPost(e) {
   return handleRequest(e);
 }
 
+// Constant-time string comparison -- `!==` short-circuits on the first
+// differing character, which leaks a timing signal an attacker could use
+// to guess TOKEN one character at a time. Apps Script's own network/
+// execution jitter makes this a low-probability attack in practice, but
+// the fix costs nothing and this endpoint is the one thing standing
+// between "anyone with the link" and every account's private data.
+function timingSafeEqual_(a, b) {
+  a = String(a == null ? "" : a);
+  b = String(b == null ? "" : b);
+  // diff starts at 1 (forces a false return) when lengths differ, but the
+  // loop still runs the full maxLen either way -- length itself is a far
+  // smaller signal to leak than which character position first mismatches,
+  // which is what `!==`'s short-circuit exposed.
+  var diff = a.length === b.length ? 0 : 1;
+  var maxLen = Math.max(a.length, b.length);
+  for (var i = 0; i < maxLen; i++) {
+    var ca = i < a.length ? a.charCodeAt(i) : 0;
+    var cb = i < b.length ? b.charCodeAt(i) : 0;
+    diff |= ca ^ cb;
+  }
+  return diff === 0;
+}
+
 function handleRequest(e) {
   try {
     const params = e.parameter;
-    if (params.token !== TOKEN) {
+    if (!timingSafeEqual_(params.token, TOKEN)) {
       return jsonResponse({ success: false, error: "unauthorized" });
     }
 
@@ -98,7 +165,7 @@ function handleRequest(e) {
       case "update_sales_log_status":
         return handleUpdateSalesLogStatus_(getStorageSheet_(), params);
       case "set_paid":
-        return handleSetPaid_(getUsersSheet_(), params);
+        return handleSetPaid_(getUsersSheet_(), getRedeemedSessionsSheet_(), params);
       case "scan_folder":
         return handleScanFolder_(params);
       case "mark_processed":
@@ -111,6 +178,8 @@ function handleRequest(e) {
         return handleReleaseAiUsage_(getAiUsageSheet_(), params);
       case "get_ai_usage":
         return handleGetAiUsage_(getUsersSheet_(), getAiUsageSheet_(), params);
+      case "admin_clear_abuse_lockout":
+        return handleAdminClearAbuseLockout_(getUsersSheet_(), getAbuseLockoutSheet_(), params);
       case "log_event":
         return handleLogEvent_(getStorageSheet_(), params);
       default:
@@ -127,8 +196,39 @@ function getUsersSheet_() {
   if (!sheet) {
     sheet = ss.insertSheet(USERS_SHEET_NAME);
     sheet.appendRow(USERS_HEADER);
+    return sheet;
   }
+  migrateUsersSheetIfNeeded_(sheet);
   return sheet;
+}
+
+// Adds the "plan" column (index 6, i.e. column G) to a Users sheet created
+// before 2026-09-21, which only had the first 6 USERS_HEADER columns.
+// Appended at the END rather than inserted mid-schema, unlike
+// migrateStorageSheetIfNeeded_'s insertColumnAfter -- that keeps every
+// existing row's is_admin/is_paid/created_at sitting in the exact columns
+// they were already written to, so there's no data to backfill: a
+// pre-existing row simply reads back with an empty "plan" cell, and
+// handleLogin_/handleSignup_ already treat "" the same as "free".
+function migrateUsersSheetIfNeeded_(sheet) {
+  if (!isLegacyUsersSchema_(sheet)) return;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    if (!isLegacyUsersSchema_(sheet)) return;
+    const lastCol = sheet.getLastColumn();
+    sheet.getRange(1, lastCol + 1).setValue("plan");
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function isLegacyUsersSchema_(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) return false;
+  const header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  return header.length === 6 && header[0] === "username" && header[5] === "created_at";
 }
 
 function getStorageSheet_() {
@@ -205,6 +305,41 @@ function getProcessedSheet_() {
 // AUTH
 // ---------------------------------------------------------------------------
 
+// Defuses spreadsheet formula/CSV injection: a cell whose text starts with
+// =, +, -, or @ is evaluated as a formula by Google Sheets and by Excel on
+// CSV export/open (a well-known class of attack -- e.g. a display_name of
+// =HYPERLINK("http://evil.example","Click") or =IMPORTXML(...) executing
+// the moment the account owner opens the raw Sheet to manage the app).
+// This only matters for values stored in their OWN cell (a dedicated
+// column); values embedded inside a JSON payload_json blob are safe as-is,
+// since the cell's actual leading character is always { or [, never one of
+// the four formula-trigger characters, regardless of what the JSON
+// contains. Prefixing a single quote is Sheets/Excel's own standard
+// "treat as literal text" escape -- it does not change what's displayed.
+function sanitizeForSheetCell_(value) {
+  const text = String(value == null ? "" : value);
+  if (/^[=+\-@\t\r]/.test(text)) {
+    return "'" + text;
+  }
+  return text;
+}
+
+// Inverse of sanitizeForSheetCell_, for reading a value back out (e.g. on
+// login, after signup already wrote the sanitized form). Only strips a
+// leading apostrophe when it is immediately followed by one of the four
+// formula-trigger characters -- i.e. only a pattern sanitizeForSheetCell_
+// itself could have produced -- so a display name that genuinely starts
+// with an apostrophe (e.g. "'Ohana Estate Sales") is left untouched.
+// Whether Apps Script's setValue()/appendRow() actually replicates
+// Sheets' manual-entry "leading apostrophe = force text, strip on read"
+// convention isn't verifiable without a live Sheet from this session, so
+// this strips defensively either way -- a harmless no-op if the platform
+// already stripped it, a real fix if it didn't.
+function unsanitizeFromSheetCell_(value) {
+  const text = String(value == null ? "" : value);
+  return text.replace(/^'(?=[=+\-@\t\r])/, "");
+}
+
 function handleSignup_(sheet, params) {
   const username = String(params.username || "").trim().toLowerCase();
   const passwordHash = String(params.password_hash || "");
@@ -225,10 +360,13 @@ function handleSignup_(sheet, params) {
     }
   }
 
-  const isAdmin = !!ADMIN_SETUP_CODE && adminCode === ADMIN_SETUP_CODE;
+  const isAdmin = !!ADMIN_SETUP_CODE && timingSafeEqual_(adminCode, ADMIN_SETUP_CODE);
 
-  sheet.appendRow([username, passwordHash, displayName, isAdmin ? "TRUE" : "FALSE", "FALSE", new Date().toISOString()]);
-  return jsonResponse({ success: true, display_name: displayName, is_admin: isAdmin, is_paid: false, username: username });
+  // Sanitize only the copy written to the Sheet cell -- the response below
+  // returns the original displayName unchanged, so the app UI shows
+  // exactly what the person typed, not a leading apostrophe.
+  sheet.appendRow([username, passwordHash, sanitizeForSheetCell_(displayName), isAdmin ? "TRUE" : "FALSE", "FALSE", new Date().toISOString(), "free"]);
+  return jsonResponse({ success: true, display_name: displayName, is_admin: isAdmin, is_paid: false, username: username, plan: "free" });
 }
 
 function handleLogin_(sheet, params) {
@@ -241,10 +379,11 @@ function handleLogin_(sheet, params) {
       if (String(data[i][1]) === passwordHash) {
         return jsonResponse({
           success: true,
-          display_name: data[i][2],
+          display_name: unsanitizeFromSheetCell_(data[i][2]),
           is_admin: String(data[i][3]).toUpperCase() === "TRUE",
           is_paid: String(data[i][4]).toUpperCase() === "TRUE",
           username: username,
+          plan: String(data[i][6] || "free"),
         });
       }
       return jsonResponse({ success: false, error: "incorrect password" });
@@ -253,19 +392,66 @@ function handleLogin_(sheet, params) {
   return jsonResponse({ success: false, error: "no account with that username" });
 }
 
-function handleSetPaid_(sheet, params) {
-  const username = String(params.username || "").trim().toLowerCase();
-  if (!username) {
-    return jsonResponse({ success: false, error: "username required" });
+function getRedeemedSessionsSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(REDEEMED_SESSIONS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(REDEEMED_SESSIONS_SHEET_NAME);
+    sheet.appendRow(REDEEMED_SESSIONS_HEADER);
   }
+  return sheet;
+}
+
+function setPaidForUser_(sheet, username, plan) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).toLowerCase() === username) {
       sheet.getRange(i + 1, 5).setValue("TRUE"); // is_paid column
+      if (plan) {
+        sheet.getRange(i + 1, 7).setValue(plan); // plan column
+      }
       return jsonResponse({ success: true });
     }
   }
   return jsonResponse({ success: false, error: "no account with that username" });
+}
+
+function handleSetPaid_(sheet, redeemedSheet, params) {
+  const username = String(params.username || "").trim().toLowerCase();
+  const sessionId = String(params.session_id || "").trim();
+  const plan = String(params.plan || "");
+  if (!username) {
+    return jsonResponse({ success: false, error: "username required" });
+  }
+  if (!sessionId) {
+    // No Stripe session to guard against replay of (e.g. a future
+    // hand-triggered admin action) -- every real call from
+    // pages/8_Pricing.py always supplies one.
+    return setPaidForUser_(sheet, username, plan);
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const redeemedData = redeemedSheet.getDataRange().getValues();
+    for (let i = 1; i < redeemedData.length; i++) {
+      if (String(redeemedData[i][0]) === sessionId) {
+        const redeemedBy = String(redeemedData[i][1]).toLowerCase();
+        if (redeemedBy === username) {
+          // Same user re-confirming the same payment (e.g. a page
+          // refresh) -- harmless, idempotent.
+          return jsonResponse({ success: true });
+        }
+        // Same session_id, different account -- exactly the replay this
+        // table exists to stop. Never mark a second account paid off it.
+        return jsonResponse({ success: false, error: "This payment has already been applied to an account." });
+      }
+    }
+    redeemedSheet.appendRow([sessionId, username, new Date().toISOString()]);
+    return setPaidForUser_(sheet, username, plan);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -532,6 +718,13 @@ function usagePayload_(vals, allowed, error, monthlyLimit, dailyLimit, dayKey) {
 function handleReserveAiUsage_(usersSheet, usageSheet, params) {
   const username = String(params.username || "").trim().toLowerCase();
   if (!username) return jsonResponse({success:false,error:"account identity is unavailable"});
+  // Abuse-rate check runs before the quota lookup so a bot hammering this
+  // endpoint gets locked out even once/if it exhausts (or never has) a
+  // legitimate quota -- the lockout is about call *rate*, not call *count*.
+  const abuseCheck = checkAndRecordAbuseAttempt_(username);
+  if (abuseCheck.locked) {
+    return jsonResponse({success:false, allowed:false, error:abuseCheck.reason, locked_out:true, permanent:!!abuseCheck.permanent});
+  }
   const user = findUser_(usersSheet, username);
   // Admin status is authoritative from the Users sheet only -- a
   // client-supplied is_admin param is never trusted for quota decisions.
@@ -609,6 +802,126 @@ function handleGetAiUsage_(usersSheet, usageSheet, params) {
   return jsonResponse({success:true,monthly_used:Number(vals[3])||0,monthly_limit:monthlyLimit,daily_used:dailyUsed,daily_limit:dailyLimit,monthly_cost_usd:Number((Number(vals[9])||0).toFixed(6)),input_tokens:Number(vals[7])||0,output_tokens:Number(vals[8])||0});
 }
 
+function getAbuseLockoutSheet_() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(ABUSE_LOCKOUT_SHEET_NAME);
+  if (!sheet) { sheet = ss.insertSheet(ABUSE_LOCKOUT_SHEET_NAME); sheet.appendRow(ABUSE_LOCKOUT_HEADER); }
+  return sheet;
+}
+
+function findAbuseRow_(sheet, username) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim().toLowerCase() === username) return i + 1;
+  }
+  return 0;
+}
+
+// Rolling-window burst detector with escalating consequences. Uses its own
+// LockService acquisition (released before returning) rather than sharing
+// the caller's lock, so this stays a self-contained, independently callable
+// unit -- callers never need to know or coordinate locking with it.
+function checkAndRecordAbuseAttempt_(username) {
+  const sheet = getAbuseLockoutSheet_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const nowMs = Date.now();
+    let rowNum = findAbuseRow_(sheet, username);
+    if (!rowNum) {
+      sheet.appendRow([username, new Date(nowMs).toISOString(), 1, "", 0, "FALSE", new Date(nowMs).toISOString()]);
+      return { locked: false };
+    }
+    const row = sheet.getRange(rowNum, 1, 1, ABUSE_LOCKOUT_HEADER.length);
+    const vals = row.getValues()[0];
+
+    if (String(vals[5]).toUpperCase() === "TRUE") {
+      return {
+        locked: true,
+        permanent: true,
+        reason: "This account has been locked for repeated bot-like AI usage and needs an admin to clear it before AI features work again.",
+      };
+    }
+
+    const lockoutUntilMs = vals[3] ? new Date(String(vals[3])).getTime() : NaN;
+    if (Number.isFinite(lockoutUntilMs) && nowMs < lockoutUntilMs) {
+      const remainingSec = Math.ceil((lockoutUntilMs - nowMs) / 1000);
+      return {
+        locked: true,
+        permanent: false,
+        reason: "Too many AI requests too fast -- locked out for " + remainingSec + " more second(s).",
+      };
+    }
+
+    const windowStartMs = new Date(String(vals[1] || "")).getTime();
+    let windowCount = Number(vals[2]) || 0;
+    if (!Number.isFinite(windowStartMs) || nowMs - windowStartMs > ABUSE_BURST_WINDOW_MS) {
+      vals[1] = new Date(nowMs).toISOString();
+      windowCount = 1;
+    } else {
+      windowCount += 1;
+    }
+    vals[2] = windowCount;
+    vals[6] = new Date(nowMs).toISOString();
+
+    if (windowCount > ABUSE_BURST_THRESHOLD) {
+      const strikeCount = (Number(vals[4]) || 0) + 1;
+      vals[4] = strikeCount;
+      vals[1] = new Date(nowMs).toISOString();
+      vals[2] = 0;
+      if (strikeCount >= ABUSE_MAX_STRIKES) {
+        vals[5] = "TRUE";
+        vals[3] = "";
+        row.setValues([vals]);
+        return {
+          locked: true,
+          permanent: true,
+          reason: "This account has been locked for repeated bot-like AI usage and needs an admin to clear it before AI features work again.",
+        };
+      }
+      vals[3] = new Date(nowMs + ABUSE_TEMP_LOCKOUT_MS).toISOString();
+      row.setValues([vals]);
+      return { locked: true, permanent: false, reason: "Too many AI requests too fast -- locked out for 5 minutes." };
+    }
+
+    row.setValues([vals]);
+    return { locked: false };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Admin-only escape hatch -- the permanent lockout above is intentionally
+// not self-clearing, so this is the only way an account recovers from one.
+// admin_username must itself resolve to an is_admin=TRUE row in the Users
+// sheet; a non-admin (or forged) caller gets refused, same pattern as every
+// other admin-gated action in this file.
+function handleAdminClearAbuseLockout_(usersSheet, abuseSheet, params) {
+  const adminUsername = String(params.admin_username || "").trim().toLowerCase();
+  const targetUsername = String(params.target_username || "").trim().toLowerCase();
+  if (!targetUsername) return jsonResponse({success:false, error:"target_username is required"});
+  const admin = findUser_(usersSheet, adminUsername);
+  if (!admin || !admin.isAdmin) return jsonResponse({success:false, error:"admin privileges required"});
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const rowNum = findAbuseRow_(abuseSheet, targetUsername);
+    if (!rowNum) return jsonResponse({success:true});
+    const row = abuseSheet.getRange(rowNum, 1, 1, ABUSE_LOCKOUT_HEADER.length);
+    const vals = row.getValues()[0];
+    vals[1] = new Date().toISOString();
+    vals[2] = 0;
+    vals[3] = "";
+    vals[4] = 0;
+    vals[5] = "FALSE";
+    vals[6] = new Date().toISOString();
+    row.setValues([vals]);
+    return jsonResponse({success:true});
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function jsonResponse(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -632,6 +945,12 @@ function handleScanFolder_(params) {
   const folderName = String(params.folder_name || "").trim();
   if (!folderName) {
     return jsonResponse({ success: false, error: "folder_name is required" });
+  }
+  if (ALLOWED_SCAN_FOLDER_NAMES.indexOf(folderName) === -1) {
+    return jsonResponse({
+      success: false,
+      error: "folder_name is not on the allowed list. Add it to ALLOWED_SCAN_FOLDER_NAMES in Code.gs if this folder is meant to be scanned.",
+    });
   }
 
   const folders = DriveApp.getFoldersByName(folderName);
@@ -680,7 +999,7 @@ function handleMarkProcessed_(sheet, params) {
   const names = fileNamesRaw.split(",");
   const now = new Date().toISOString();
   for (let i = 0; i < ids.length; i++) {
-    sheet.appendRow([ids[i], names[i] || "", now]);
+    sheet.appendRow([ids[i], sanitizeForSheetCell_(names[i] || ""), now]);
   }
   return jsonResponse({ success: true, count: ids.length });
 }

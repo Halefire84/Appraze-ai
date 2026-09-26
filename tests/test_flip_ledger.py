@@ -2,12 +2,15 @@ from flip_ledger import build_flip_record, calculate_flip_profit, update_flip
 
 
 def test_profit_accounts_for_fee_and_shipping():
+    # fee is charged on (sale price + buyer-paid shipping), matching eBay's
+    # and Mercari's published fee basis -- see calculate_flip_profit's
+    # docstring. fee = (250 + 10) * 0.13 = 33.8, not 250 * 0.13 = 32.5.
     result = calculate_flip_profit(100, 250, fee_pct=13, shipping_out=15, shipping_charged=10)
-    assert result["platform_fee"] == 32.5
-    assert result["net_proceeds"] == 212.5
-    assert result["profit"] == 112.5
-    assert result["margin_pct"] == 45.0
-    assert result["roi_pct"] == 112.5
+    assert result["platform_fee"] == 33.8
+    assert result["net_proceeds"] == 211.2
+    assert result["profit"] == 111.2
+    assert result["margin_pct"] == 44.48
+    assert result["roi_pct"] == 111.2
 
 
 def test_free_find_has_infinite_roi_when_profitable():
@@ -27,6 +30,21 @@ def test_intake_becomes_canonical_flip():
     assert record["status"] == "PURCHASED"
     assert record["cost_basis"] == 75.0
     assert record["list_price"] == 0.0
+    assert record["image_urls"] == []
+
+
+def test_intake_carries_image_urls_through():
+    record = build_flip_record({"item_name": "Camera", "cost_basis": 75, "image_urls": ["https://example.com/a.jpg"]})
+    assert record["image_urls"] == ["https://example.com/a.jpg"]
+
+
+def test_image_urls_can_be_updated_after_intake():
+    # The Flip Ledger UI edits image_urls on an existing tracked flip
+    # (a seller often doesn't have photo URLs ready at intake time) --
+    # update_flip must accept it like any other field.
+    record = build_flip_record({"item_name": "Camera", "cost_basis": 75})
+    updated = update_flip(record, image_urls=["https://example.com/b.jpg"])
+    assert updated["image_urls"] == ["https://example.com/b.jpg"]
 
 
 def test_sold_update_calculates_realized_profit():

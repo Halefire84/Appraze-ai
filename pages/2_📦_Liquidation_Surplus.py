@@ -4,6 +4,8 @@ import streamlit as st
 from acquisition_hunter import PROFILES, estimate_max_bid, score_acquisition
 
 st.set_page_config(page_title="Appraze — Liquidation & Surplus", page_icon="📦", layout="wide")
+from ui_theme import inject_theme
+inject_theme()
 from auth import require_auth
 require_auth()
 

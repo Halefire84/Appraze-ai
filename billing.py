@@ -52,6 +52,20 @@ def payment_link_url() -> str:
     return st.secrets.get("STRIPE_PAYMENT_LINK_URL", "")
 
 
+def plan_payment_link(plan_key: str) -> str:
+    """Per-plan Stripe Payment Link, e.g. STRIPE_PAYMENT_LINK_STARTER for
+    the "starter" plan. Each Payment Link is created by hand in the Stripe
+    Dashboard (test mode for beta, live mode when selling for real) with
+    its own price and its own "after payment" redirect set to
+    f"{APP_URL}/?sub_plan={plan_key}&sub_session_id={{CHECKOUT_SESSION_ID}}"
+    -- see DEPLOY.md. Returns "" (falsy) when that plan's link isn't
+    configured yet. NOT currently called from pages/8_Pricing.py -- as of
+    2026-09-22 payments are manual (Cash App + emailed receipt) while this
+    function stays available for whenever automated billing is turned
+    back on."""
+    return st.secrets.get(f"STRIPE_PAYMENT_LINK_{plan_key.upper()}", "")
+
+
 def verify_checkout_session(session_id: str) -> BillingResult:
     """
     Read-only lookup — confirms whether a given Checkout Session (created by
